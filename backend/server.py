@@ -375,17 +375,55 @@ async def enrich_series(doc, deep: bool = True):
     return doc
 
 # ----------- Edit Log Helper -----------
-async def log_edit(user: dict, entity_type: str, entity_id: str, action: str, entity_title: str = "", summary: str = ""):
-    """Record an edit event."""
+def _summarize_value(v):
+    if v is None:
+        return "—"
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, list):
+        if not v:
+            return "empty"
+        if isinstance(v[0], dict):
+            return f"{len(v)} item{'s' if len(v)!=1 else ''}"
+        return ", ".join(str(x) for x in v[:5]) + ("…" if len(v) > 5 else "")
+    if isinstance(v, str):
+        if len(v) > 80:
+            return v[:80] + "…"
+        return v or "—"
+    return str(v)
+
+def _values_equal(a, b):
+    if a is None and b == "": return True
+    if b is None and a == "": return True
+    return a == b
+
+def compute_field_changes(old: dict, new: dict) -> list:
+    """Return list of {field, before, after} for fields that actually differ."""
+    changes = []
+    for k, new_val in new.items():
+        old_val = old.get(k) if old else None
+        if _values_equal(old_val, new_val):
+            continue
+        changes.append({
+            "field": k,
+            "before": _summarize_value(old_val),
+            "after": _summarize_value(new_val),
+        })
+    return changes
+
+async def log_edit(user: dict, entity_type: str, entity_id: str, action: str, entity_title: str = "", summary: str = "", changes: Optional[list] = None):
+    """Record an edit event with detailed field-level changes."""
     await db.edits.insert_one({
         "entity_type": entity_type,
         "entity_id": entity_id,
         "entity_title": entity_title,
-        "action": action,  # create | update | delete
+        "action": action,
         "summary": summary,
+        "changes": changes or [],
         "user_id": user.get("id"),
         "user_name": user.get("name"),
         "user_avatar": user.get("avatar_url", ""),
+        "user_role": user.get("role", "user"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
@@ -550,15 +588,26 @@ async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depend
         raise HTTPException(status_code=403, detail="Cannot suspend admin")
     if payload.duration_days is None:
         until = "permanent"
+        duration_label = "permanently"
     else:
+        if payload.duration_days <= 0:
+            raise HTTPException(status_code=400, detail="Duration must be positive")
         until = (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat()
+        duration_label = f"for {payload.duration_days} day{'s' if payload.duration_days != 1 else ''}"
     await db.users.update_one({"_id": target["_id"]}, {"$set": {
         "suspended_until": until,
         "suspension_reason": payload.reason or "",
         "suspended_by": mod["id"],
+        "suspended_by_name": mod.get("name"),
         "suspended_at": datetime.now(timezone.utc).isoformat(),
     }})
-    await log_edit(mod, "user", user_id, "suspend", target.get("name", ""), f"Suspended {until}: {payload.reason}")
+    changes = [
+        {"field": "status", "before": "active", "after": "suspended"},
+        {"field": "duration", "before": "—", "after": duration_label},
+        {"field": "until", "before": "—", "after": "permanent" if until == "permanent" else until[:19].replace("T", " ")},
+        {"field": "reason", "before": "—", "after": payload.reason or "(no reason)"},
+    ]
+    await log_edit(mod, "user", user_id, "suspend", target.get("name", ""), f"Suspended {duration_label}: {payload.reason or '(no reason)'}", changes)
     return {"ok": True, "suspended_until": until}
 
 @api_router.post("/moderation/users/{user_id}/unsuspend")
@@ -692,16 +741,48 @@ async def get_movie(movie_id: str):
         raise HTTPException(status_code=404, detail="Movie not found")
     return await enrich_movie(doc)
 
+@api_router.get("/movies/{movie_id}/similar")
+async def similar_movies(movie_id: str, limit: int = 12):
+    try:
+        base = await db.movies.find_one({"_id": ObjectId(movie_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    if not base:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    genres = base.get("genres") or []
+    cast_actor_ids = [c.get("actor_id") for c in (base.get("cast") or []) if c.get("actor_id")]
+    or_conds = []
+    if genres:
+        or_conds.append({"genres": {"$in": genres}})
+    if cast_actor_ids:
+        or_conds.append({"cast.actor_id": {"$in": cast_actor_ids}})
+    if not or_conds:
+        return []
+    docs = []
+    async for d in db.movies.find({"$and": [{"_id": {"$ne": base["_id"]}}, {"$or": or_conds}]}).limit(50):
+        docs.append(d)
+    # score
+    genre_set = set(genres)
+    actor_set = set(cast_actor_ids)
+    def score(d):
+        d_genres = set(d.get("genres") or [])
+        d_actors = set(c.get("actor_id") for c in (d.get("cast") or []) if c.get("actor_id"))
+        return len(d_genres & genre_set) * 2 + len(d_actors & actor_set) * 3
+    docs.sort(key=score, reverse=True)
+    return [await enrich_movie(d) for d in docs[:limit]]
+
 @api_router.patch("/movies/{movie_id}")
 async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "cast" in update_data:
         update_data["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["cast"]]
+    old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
     enriched = await enrich_movie(doc)
-    changed = ", ".join(sorted(update_data.keys())) or "no fields"
-    await log_edit(user, "movie", movie_id, "update", enriched["title"], f"Updated: {changed}")
+    changes = compute_field_changes(old_doc, update_data)
+    changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
+    await log_edit(user, "movie", movie_id, "update", enriched["title"], f"Updated {changed_names}", changes)
     return enriched
 
 @api_router.delete("/movies/{movie_id}")
@@ -805,15 +886,46 @@ async def get_series(series_id: str):
         raise HTTPException(status_code=404, detail="Series not found")
     return await enrich_series(doc)
 
+@api_router.get("/series/{series_id}/similar")
+async def similar_series(series_id: str, limit: int = 12):
+    try:
+        base = await db.series.find_one({"_id": ObjectId(series_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if not base:
+        raise HTTPException(status_code=404, detail="Series not found")
+    genres = base.get("genres") or []
+    main_cast_ids = [c.get("actor_id") for c in (base.get("main_cast") or []) if c.get("actor_id")]
+    or_conds = []
+    if genres:
+        or_conds.append({"genres": {"$in": genres}})
+    if main_cast_ids:
+        or_conds.append({"main_cast.actor_id": {"$in": main_cast_ids}})
+    if not or_conds:
+        return []
+    docs = []
+    async for d in db.series.find({"$and": [{"_id": {"$ne": base["_id"]}}, {"$or": or_conds}]}).limit(50):
+        docs.append(d)
+    genre_set = set(genres)
+    actor_set = set(main_cast_ids)
+    def score(d):
+        d_genres = set(d.get("genres") or [])
+        d_actors = set(c.get("actor_id") for c in (d.get("main_cast") or []) if c.get("actor_id"))
+        return len(d_genres & genre_set) * 2 + len(d_actors & actor_set) * 3
+    docs.sort(key=score, reverse=True)
+    return [await enrich_series(d, deep=False) for d in docs[:limit]]
+
 @api_router.patch("/series/{series_id}")
 async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     update_data = _serialize_series_payload(update_data)
+    old_doc = await db.series.find_one({"_id": ObjectId(series_id)}) or {}
     await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": update_data})
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
     enriched = await enrich_series(doc)
-    changed = ", ".join(sorted(update_data.keys())) or "no fields"
-    await log_edit(user, "series", series_id, "update", enriched["title"], f"Updated: {changed}")
+    changes = compute_field_changes(old_doc, update_data)
+    changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
+    await log_edit(user, "series", series_id, "update", enriched["title"], f"Updated {changed_names}", changes)
     return enriched
 
 @api_router.delete("/series/{series_id}")
@@ -938,11 +1050,13 @@ async def get_actor(actor_id: str):
 @api_router.patch("/actors/{actor_id}")
 async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    old_doc = await db.actors.find_one({"_id": ObjectId(actor_id)}) or {}
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": update_data})
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
     dd = doc_to_dict(doc)
-    changed = ", ".join(sorted(update_data.keys())) or "no fields"
-    await log_edit(user, "actor", actor_id, "update", dd["name"], f"Updated: {changed}")
+    changes = compute_field_changes(old_doc, update_data)
+    changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
+    await log_edit(user, "actor", actor_id, "update", dd["name"], f"Updated {changed_names}", changes)
     return dd
 
 @api_router.delete("/actors/{actor_id}")

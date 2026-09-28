@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
+import SimilarSection from "@/components/SimilarSection";
 
 export default function SeriesDetail() {
   const { id } = useParams();
@@ -202,6 +203,9 @@ export default function SeriesDetail() {
           <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">No gallery images yet. Edit this series to upload some.</div>
         )}
       </section>
+
+      {/* Similar */}
+      <SimilarSection kind="series" entityId={id} />
 
       {/* History */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">

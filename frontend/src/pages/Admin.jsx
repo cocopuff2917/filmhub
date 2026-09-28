@@ -121,6 +121,7 @@ function UsersTab({ currentRole }) {
   const [query, setQuery] = useState("");
   const [suspendTarget, setSuspendTarget] = useState(null);
   const [duration, setDuration] = useState("7");
+  const [customDays, setCustomDays] = useState("");
   const [reason, setReason] = useState("");
 
   const load = async () => { const r = await api.get("/moderation/users"); setUsers(r.data); };
@@ -141,11 +142,19 @@ function UsersTab({ currentRole }) {
 
   const submitSuspend = async () => {
     const body = { reason };
-    if (duration !== "permanent") body.duration_days = Number(duration);
+    if (duration === "permanent") {
+      // no duration_days
+    } else if (duration === "custom") {
+      const n = Number(customDays);
+      if (!n || n <= 0) { toast.error("Enter a valid number of days"); return; }
+      body.duration_days = n;
+    } else {
+      body.duration_days = Number(duration);
+    }
     try {
       await api.post(`/moderation/users/${suspendTarget.id}/suspend`, body);
       toast.success("User suspended");
-      setSuspendTarget(null); setReason(""); setDuration("7"); load();
+      setSuspendTarget(null); setReason(""); setDuration("7"); setCustomDays(""); load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
@@ -214,21 +223,32 @@ function UsersTab({ currentRole }) {
         {suspendTarget && (
           <div className="mt-6 rounded-xl border border-rose-500/40 bg-rose-500/5 p-5">
             <div className="font-heading text-lg text-white mb-3">Suspend {suspendTarget.name}?</div>
-            <div className="grid grid-cols-[200px_1fr] gap-3 items-end">
+            <div className="grid grid-cols-1 md:grid-cols-[200px_140px_1fr] gap-3 items-end">
               <div>
                 <label className="text-xs uppercase tracking-widest text-slate-400">Duration</label>
                 <Select value={duration} onValueChange={setDuration}>
-                  <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-duration-select"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-[#14181f] text-white border-white/10">
                     <SelectItem value="1">1 day</SelectItem>
+                    <SelectItem value="3">3 days</SelectItem>
                     <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="14">14 days</SelectItem>
                     <SelectItem value="30">30 days</SelectItem>
                     <SelectItem value="90">90 days</SelectItem>
+                    <SelectItem value="180">180 days</SelectItem>
+                    <SelectItem value="365">1 year</SelectItem>
+                    <SelectItem value="custom">Custom…</SelectItem>
                     <SelectItem value="permanent">Permanent</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div>
+              {duration === "custom" && (
+                <div>
+                  <label className="text-xs uppercase tracking-widest text-slate-400">Days</label>
+                  <Input type="number" min="1" value={customDays} onChange={(e) => setCustomDays(e.target.value)} placeholder="e.g. 45" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-custom-days" />
+                </div>
+              )}
+              <div className={duration === "custom" ? "" : "md:col-span-2"}>
                 <label className="text-xs uppercase tracking-widest text-slate-400">Reason</label>
                 <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for suspension" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-reason-input" />
               </div>
