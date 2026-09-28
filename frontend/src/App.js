@@ -6,6 +6,7 @@ import Home from "@/pages/Home";
 import MovieDetail from "@/pages/MovieDetail";
 import SeriesDetail from "@/pages/SeriesDetail";
 import ActorDetail from "@/pages/ActorDetail";
+import UserProfile from "@/pages/UserProfile";
 import Browse from "@/pages/Browse";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
@@ -25,6 +26,7 @@ function App() {
             <Route path="/movie/:id" element={<MovieDetail />} />
             <Route path="/series/:id" element={<SeriesDetail />} />
             <Route path="/actor/:id" element={<ActorDetail />} />
+            <Route path="/user/:id" element={<UserProfile />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/watchlist" element={<Watchlist />} />

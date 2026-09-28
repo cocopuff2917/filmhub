@@ -118,6 +118,24 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        # check suspension
+        sus = user.get("suspended_until")
+        if sus:
+            if sus == "permanent":
+                raise HTTPException(status_code=403, detail=f"Account suspended: {user.get('suspension_reason','')}")
+            try:
+                until = datetime.fromisoformat(sus)
+                if until > datetime.now(timezone.utc):
+                    raise HTTPException(status_code=403, detail=f"Account suspended until {sus}: {user.get('suspension_reason','')}")
+                else:
+                    # expired suspension, clear it
+                    await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
+                    user.pop("suspended_until", None)
+                    user.pop("suspension_reason", None)
+            except HTTPException:
+                raise
+            except Exception:
+                pass
         user["id"] = str(user["_id"])
         user.pop("_id", None)
         user.pop("password_hash", None)
@@ -130,6 +148,11 @@ async def get_current_user(request: Request) -> dict:
 async def get_current_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+async def get_current_moderator(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") not in ("moderator", "admin"):
+        raise HTTPException(status_code=403, detail="Moderator access required")
     return user
 
 async def get_optional_user(request: Request) -> Optional[dict]:
@@ -183,12 +206,18 @@ class ActorCreate(BaseModel):
     bio: str = ""
     photo_url: str = ""
     birth_date: Optional[str] = None
+    death_date: Optional[str] = None
+    place_of_birth: str = ""
+    place_of_death: str = ""
 
 class ActorUpdate(BaseModel):
     name: Optional[str] = None
     bio: Optional[str] = None
     photo_url: Optional[str] = None
     birth_date: Optional[str] = None
+    death_date: Optional[str] = None
+    place_of_birth: Optional[str] = None
+    place_of_death: Optional[str] = None
 
 class ReviewCreate(BaseModel):
     rating: float = Field(ge=0.5, le=10.0)
@@ -204,6 +233,7 @@ class EpisodeItem(BaseModel):
     name: str = ""
     air_date: Optional[str] = None
     overview: str = ""
+    still_url: str = ""
     guest_stars: List[GuestStar] = []
 
 class SeasonItem(BaseModel):
@@ -223,7 +253,8 @@ class SeriesCreate(BaseModel):
     poster_url: str = ""
     backdrop_url: str = ""
     trailer_url: str = ""
-    status: str = "Ongoing"  # Ongoing / Ended / Returning
+    status: str = "Ongoing"
+    gallery: List[str] = []
     main_cast: List[CastMember] = []
     seasons: List[SeasonItem] = []
     is_trending: bool = False
@@ -238,9 +269,21 @@ class SeriesUpdate(BaseModel):
     backdrop_url: Optional[str] = None
     trailer_url: Optional[str] = None
     status: Optional[str] = None
+    gallery: Optional[List[str]] = None
     main_cast: Optional[List[CastMember]] = None
     seasons: Optional[List[SeasonItem]] = None
     is_trending: Optional[bool] = None
+
+# ----------- Moderation Models -----------
+class SuspendRequest(BaseModel):
+    duration_days: Optional[int] = None  # None = permanent
+    reason: str = ""
+
+class RoleUpdate(BaseModel):
+    role: str  # user / moderator / admin
+
+class AvatarUpdate(BaseModel):
+    avatar_url: str
 
 # ----------- Utility -----------
 def doc_to_dict(doc, id_key="id"):
@@ -331,6 +374,21 @@ async def enrich_series(doc, deep: bool = True):
     doc["episode_count"] = sum(len(s.get("episodes", []) or []) for s in seasons)
     return doc
 
+# ----------- Edit Log Helper -----------
+async def log_edit(user: dict, entity_type: str, entity_id: str, action: str, entity_title: str = "", summary: str = ""):
+    """Record an edit event."""
+    await db.edits.insert_one({
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "entity_title": entity_title,
+        "action": action,  # create | update | delete
+        "summary": summary,
+        "user_id": user.get("id"),
+        "user_name": user.get("name"),
+        "user_avatar": user.get("avatar_url", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
 # ----------- Auth Routes -----------
 @api_router.post("/auth/register")
 async def register(payload: RegisterRequest, response: Response):
@@ -343,6 +401,7 @@ async def register(payload: RegisterRequest, response: Response):
         "password_hash": hash_password(payload.password),
         "name": payload.name,
         "role": "user",
+        "avatar_url": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     result = await db.users.insert_one(doc)
@@ -350,7 +409,7 @@ async def register(payload: RegisterRequest, response: Response):
     access = create_access_token(user_id, email)
     refresh = create_refresh_token(user_id)
     set_auth_cookies(response, access, refresh)
-    return {"id": user_id, "email": email, "name": payload.name, "role": "user"}
+    return {"id": user_id, "email": email, "name": payload.name, "role": "user", "avatar_url": ""}
 
 @api_router.post("/auth/login")
 async def login(payload: LoginRequest, response: Response):
@@ -358,11 +417,30 @@ async def login(payload: LoginRequest, response: Response):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # check suspension
+    sus = user.get("suspended_until")
+    if sus:
+        blocked = False
+        if sus == "permanent":
+            blocked = True
+        else:
+            try:
+                until = datetime.fromisoformat(sus)
+                if until > datetime.now(timezone.utc):
+                    blocked = True
+                else:
+                    await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
+            except Exception:
+                pass
+        if blocked:
+            reason = user.get("suspension_reason") or ""
+            when = "permanently" if sus == "permanent" else f"until {sus}"
+            raise HTTPException(status_code=403, detail=f"Account suspended {when}. {reason}".strip())
     user_id = str(user["_id"])
     access = create_access_token(user_id, email)
     refresh = create_refresh_token(user_id)
     set_auth_cookies(response, access, refresh)
-    return {"id": user_id, "email": email, "name": user.get("name"), "role": user.get("role", "user")}
+    return {"id": user_id, "email": email, "name": user.get("name"), "role": user.get("role", "user"), "avatar_url": user.get("avatar_url", "")}
 
 @api_router.post("/auth/logout")
 async def logout(response: Response):
@@ -372,17 +450,166 @@ async def logout(response: Response):
 
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    return user
+    return {
+        "id": user["id"],
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "role": user.get("role", "user"),
+        "avatar_url": user.get("avatar_url", ""),
+        "created_at": user.get("created_at"),
+    }
+
+@api_router.patch("/auth/me/avatar")
+async def update_avatar(payload: AvatarUpdate, user: dict = Depends(get_current_user)):
+    await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": {"avatar_url": payload.avatar_url}})
+    return {"ok": True, "avatar_url": payload.avatar_url}
+
+# ----------- Users (Public) -----------
+@api_router.get("/users/{user_id}")
+async def get_user_profile(user_id: str):
+    try:
+        u = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    profile = {
+        "id": str(u["_id"]),
+        "name": u.get("name"),
+        "avatar_url": u.get("avatar_url", ""),
+        "role": u.get("role", "user"),
+        "created_at": u.get("created_at"),
+    }
+    sus = u.get("suspended_until")
+    if sus:
+        profile["suspended_until"] = sus
+        profile["suspension_reason"] = u.get("suspension_reason", "")
+        active_suspension = False
+        if sus == "permanent":
+            active_suspension = True
+        else:
+            try:
+                if datetime.fromisoformat(sus) > datetime.now(timezone.utc):
+                    active_suspension = True
+            except Exception:
+                pass
+        profile["is_suspended"] = active_suspension
+    else:
+        profile["is_suspended"] = False
+
+    # recent edits (last 30)
+    edits = []
+    async for e in db.edits.find({"user_id": str(u["_id"])}).sort("created_at", -1).limit(30):
+        e_id = str(e.pop("_id"))
+        e["id"] = e_id
+        edits.append(e)
+    profile["edits"] = edits
+
+    # reviews by user
+    reviews = []
+    async for r in db.reviews.find({"user_id": str(u["_id"])}).sort("created_at", -1).limit(30):
+        rid = str(r.pop("_id"))
+        r["id"] = rid
+        # attach movie title/poster
+        try:
+            m = await db.movies.find_one({"_id": ObjectId(r["movie_id"])})
+            if m:
+                r["movie_title"] = m.get("title")
+                r["movie_poster_url"] = m.get("poster_url", "")
+        except Exception:
+            pass
+        reviews.append(r)
+    profile["reviews"] = reviews
+    return profile
+
+# ----------- Edits Feed -----------
+@api_router.get("/edits")
+async def list_edits(entity_type: Optional[str] = None, entity_id: Optional[str] = None, limit: int = 50):
+    q = {}
+    if entity_type:
+        q["entity_type"] = entity_type
+    if entity_id:
+        q["entity_id"] = entity_id
+    edits = []
+    async for e in db.edits.find(q).sort("created_at", -1).limit(limit):
+        e_id = str(e.pop("_id"))
+        e["id"] = e_id
+        edits.append(e)
+    return edits
+
+# ----------- Moderation -----------
+@api_router.post("/moderation/users/{user_id}/suspend")
+async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depends(get_current_moderator)):
+    try:
+        target = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") == "admin":
+        raise HTTPException(status_code=403, detail="Cannot suspend admin")
+    if payload.duration_days is None:
+        until = "permanent"
+    else:
+        until = (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat()
+    await db.users.update_one({"_id": target["_id"]}, {"$set": {
+        "suspended_until": until,
+        "suspension_reason": payload.reason or "",
+        "suspended_by": mod["id"],
+        "suspended_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    await log_edit(mod, "user", user_id, "suspend", target.get("name", ""), f"Suspended {until}: {payload.reason}")
+    return {"ok": True, "suspended_until": until}
+
+@api_router.post("/moderation/users/{user_id}/unsuspend")
+async def unsuspend_user(user_id: str, mod: dict = Depends(get_current_moderator)):
+    try:
+        target = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.users.update_one({"_id": target["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
+    await log_edit(mod, "user", user_id, "unsuspend", target.get("name", ""), "Suspension lifted")
+    return {"ok": True}
+
+@api_router.patch("/moderation/users/{user_id}/role")
+async def set_user_role(user_id: str, payload: RoleUpdate, admin: dict = Depends(get_current_admin)):
+    if payload.role not in ("user", "moderator", "admin"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": payload.role}})
+    target = await db.users.find_one({"_id": ObjectId(user_id)})
+    await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Role set to {payload.role}")
+    return {"ok": True, "role": payload.role}
+
+@api_router.get("/moderation/users")
+async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int = 200):
+    users = []
+    async for u in db.users.find({}).sort("created_at", -1).limit(limit):
+        users.append({
+            "id": str(u["_id"]),
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "role": u.get("role", "user"),
+            "avatar_url": u.get("avatar_url", ""),
+            "created_at": u.get("created_at"),
+            "suspended_until": u.get("suspended_until"),
+            "suspension_reason": u.get("suspension_reason", ""),
+        })
+    return users
 
 # ----------- Movies -----------
 @api_router.post("/movies")
-async def create_movie(payload: MovieCreate, _admin: dict = Depends(get_current_admin)):
+async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_user)):
     doc = payload.model_dump()
     doc["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in doc.get("cast", [])]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["created_by"] = user["id"]
     result = await db.movies.insert_one(doc)
     fetched = await db.movies.find_one({"_id": result.inserted_id})
-    return await enrich_movie(fetched)
+    enriched = await enrich_movie(fetched)
+    await log_edit(user, "movie", enriched["id"], "create", enriched["title"], f"Created movie \"{enriched['title']}\"")
+    return enriched
 
 @api_router.get("/movies")
 async def list_movies(
@@ -439,7 +666,17 @@ async def trending_movies(limit: int = 12):
 
 @api_router.get("/movies/recent")
 async def recent_movies(limit: int = 12):
-    cursor = db.movies.find({}).sort("created_at", -1).limit(limit)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cursor = db.movies.find({"release_date": {"$lte": today}}).sort("created_at", -1).limit(limit)
+    docs = []
+    async for d in cursor:
+        docs.append(await enrich_movie(d))
+    return docs
+
+@api_router.get("/movies/upcoming")
+async def upcoming_movies(limit: int = 12):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cursor = db.movies.find({"release_date": {"$gt": today}}).sort("release_date", 1).limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
@@ -456,18 +693,24 @@ async def get_movie(movie_id: str):
     return await enrich_movie(doc)
 
 @api_router.patch("/movies/{movie_id}")
-async def update_movie(movie_id: str, payload: MovieUpdate, _admin: dict = Depends(get_current_admin)):
+async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "cast" in update_data:
         update_data["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["cast"]]
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
-    return await enrich_movie(doc)
+    enriched = await enrich_movie(doc)
+    changed = ", ".join(sorted(update_data.keys())) or "no fields"
+    await log_edit(user, "movie", movie_id, "update", enriched["title"], f"Updated: {changed}")
+    return enriched
 
 @api_router.delete("/movies/{movie_id}")
-async def delete_movie(movie_id: str, _admin: dict = Depends(get_current_admin)):
+async def delete_movie(movie_id: str, user: dict = Depends(get_current_moderator)):
+    doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
+    title = doc.get("title", "") if doc else ""
     await db.movies.delete_one({"_id": ObjectId(movie_id)})
     await db.reviews.delete_many({"movie_id": movie_id})
+    await log_edit(user, "movie", movie_id, "delete", title, f"Deleted movie \"{title}\"")
     return {"ok": True}
 
 # ----------- Series -----------
@@ -490,12 +733,15 @@ def _serialize_series_payload(data: dict) -> dict:
     return data
 
 @api_router.post("/series")
-async def create_series(payload: SeriesCreate, _admin: dict = Depends(get_current_admin)):
+async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_user)):
     doc = _serialize_series_payload(payload.model_dump())
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["created_by"] = user["id"]
     result = await db.series.insert_one(doc)
     fetched = await db.series.find_one({"_id": result.inserted_id})
-    return await enrich_series(fetched)
+    enriched = await enrich_series(fetched)
+    await log_edit(user, "series", enriched["id"], "create", enriched["title"], f"Created series \"{enriched['title']}\"")
+    return enriched
 
 @api_router.get("/series")
 async def list_series(
@@ -560,16 +806,22 @@ async def get_series(series_id: str):
     return await enrich_series(doc)
 
 @api_router.patch("/series/{series_id}")
-async def update_series(series_id: str, payload: SeriesUpdate, _admin: dict = Depends(get_current_admin)):
+async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     update_data = _serialize_series_payload(update_data)
     await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": update_data})
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
-    return await enrich_series(doc)
+    enriched = await enrich_series(doc)
+    changed = ", ".join(sorted(update_data.keys())) or "no fields"
+    await log_edit(user, "series", series_id, "update", enriched["title"], f"Updated: {changed}")
+    return enriched
 
 @api_router.delete("/series/{series_id}")
-async def delete_series(series_id: str, _admin: dict = Depends(get_current_admin)):
+async def delete_series(series_id: str, user: dict = Depends(get_current_moderator)):
+    doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    title = doc.get("title", "") if doc else ""
     await db.series.delete_one({"_id": ObjectId(series_id)})
+    await log_edit(user, "series", series_id, "delete", title, f"Deleted series \"{title}\"")
     return {"ok": True}
 
 # ----------- Global Search -----------
@@ -610,12 +862,15 @@ async def global_search(q: str, limit: int = 20):
 
 # ----------- Actors -----------
 @api_router.post("/actors")
-async def create_actor(payload: ActorCreate, _admin: dict = Depends(get_current_admin)):
+async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_user)):
     doc = payload.model_dump()
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["created_by"] = user["id"]
     result = await db.actors.insert_one(doc)
     fetched = await db.actors.find_one({"_id": result.inserted_id})
-    return doc_to_dict(fetched)
+    dd = doc_to_dict(fetched)
+    await log_edit(user, "actor", dd["id"], "create", dd["name"], f"Created actor \"{dd['name']}\"")
+    return dd
 
 @api_router.get("/actors")
 async def list_actors(q: Optional[str] = None, limit: int = 100):
@@ -681,15 +936,21 @@ async def get_actor(actor_id: str):
     return actor
 
 @api_router.patch("/actors/{actor_id}")
-async def update_actor(actor_id: str, payload: ActorUpdate, _admin: dict = Depends(get_current_admin)):
+async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": update_data})
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
-    return doc_to_dict(doc)
+    dd = doc_to_dict(doc)
+    changed = ", ".join(sorted(update_data.keys())) or "no fields"
+    await log_edit(user, "actor", actor_id, "update", dd["name"], f"Updated: {changed}")
+    return dd
 
 @api_router.delete("/actors/{actor_id}")
-async def delete_actor(actor_id: str, _admin: dict = Depends(get_current_admin)):
+async def delete_actor(actor_id: str, user: dict = Depends(get_current_moderator)):
+    doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
+    name = doc.get("name", "") if doc else ""
     await db.actors.delete_one({"_id": ObjectId(actor_id)})
+    await log_edit(user, "actor", actor_id, "delete", name, f"Deleted actor \"{name}\"")
     return {"ok": True}
 
 # ----------- Reviews -----------
@@ -759,7 +1020,7 @@ async def genres():
 
 # ----------- Uploads -----------
 @api_router.post("/upload")
-async def upload_file(file: UploadFile = File(...), _admin: dict = Depends(get_current_admin)):
+async def upload_file(file: UploadFile = File(...), _user: dict = Depends(get_current_user)):
     ext = (file.filename.rsplit(".", 1)[-1] or "bin").lower()
     file_id = str(uuid.uuid4())
     path = f"{APP_NAME}/uploads/admin/{file_id}.{ext}"

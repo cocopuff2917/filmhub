@@ -5,11 +5,12 @@ import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Sparkles, TrendingUp, Clock, Tv } from "lucide-react";
+import { Search, Sparkles, TrendingUp, Clock, Tv, Rocket } from "lucide-react";
 
 export default function Home() {
   const [trending, setTrending] = useState([]);
   const [recent, setRecent] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
   const [trendingSeries, setTrendingSeries] = useState([]);
   const [recentSeries, setRecentSeries] = useState([]);
   const [query, setQuery] = useState("");
@@ -18,14 +19,16 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const [t, r, ts, rs] = await Promise.all([
+        const [t, r, u, ts, rs] = await Promise.all([
           api.get("/movies/trending"),
           api.get("/movies/recent"),
+          api.get("/movies/upcoming"),
           api.get("/series/trending"),
           api.get("/series/recent"),
         ]);
         setTrending(t.data);
         setRecent(r.data);
+        setUpcoming(u.data);
         setTrendingSeries(ts.data);
         setRecentSeries(rs.data);
       } catch (e) {}
@@ -87,9 +90,29 @@ export default function Home() {
         subtitle="Curated by the CineVerse team"
         items={trending}
         renderCard={(m) => <MovieCard key={m.id} movie={m} />}
-        emptyText="No trending movies yet. Admin can mark movies as trending."
+        emptyText="No trending movies yet. Mark movies as trending to feature them."
         testid="trending-section"
       />
+
+      {/* Upcoming */}
+      {upcoming.length > 0 && (
+        <Section
+          icon={<Rocket className="w-5 h-5 text-amber-400" />}
+          title="Upcoming Releases"
+          subtitle="Coming soon to theaters"
+          items={upcoming}
+          renderCard={(m) => (
+            <div key={m.id} className="relative">
+              <MovieCard movie={m} />
+              <div className="absolute top-2 left-2 flex items-center gap-1 bg-amber-500 text-black px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                {m.release_date}
+              </div>
+            </div>
+          )}
+          emptyText=""
+          testid="upcoming-section"
+        />
+      )}
 
       {/* Trending Series */}
       <Section

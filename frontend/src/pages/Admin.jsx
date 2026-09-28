@@ -1,18 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Plus, X, Trash2, Edit, Shield } from "lucide-react";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users } from "lucide-react";
 import { toast } from "sonner";
+import MovieForm from "@/components/forms/MovieForm";
+import ActorForm from "@/components/forms/ActorForm";
+import SeriesForm from "@/components/forms/SeriesForm";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -21,15 +21,15 @@ export default function Admin() {
   useEffect(() => {
     if (initializing) return;
     if (!user) { navigate("/login"); return; }
-    if (user.role !== "admin") { navigate("/"); }
+    if (!["moderator", "admin"].includes(user.role)) { navigate("/"); }
   }, [user, initializing, navigate]);
 
-  if (initializing || !user || user.role !== "admin") return null;
+  if (initializing || !user || !["moderator", "admin"].includes(user.role)) return null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
-        <Shield className="w-4 h-4" /> Admin Console
+        <Shield className="w-4 h-4" /> {user.role === "admin" ? "Admin" : "Moderator"} Console
       </div>
       <h1 className="mt-2 font-heading text-4xl font-bold text-white">Manage Catalog</h1>
 
@@ -38,661 +38,210 @@ export default function Admin() {
           <TabsTrigger value="movies" data-testid="tab-movies">Movies</TabsTrigger>
           <TabsTrigger value="series" data-testid="tab-series">TV Series</TabsTrigger>
           <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
+          <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
         </TabsList>
-        <TabsContent value="movies" className="mt-6"><MoviesTab /></TabsContent>
-        <TabsContent value="series" className="mt-6"><SeriesTab /></TabsContent>
-        <TabsContent value="actors" className="mt-6"><ActorsTab /></TabsContent>
+        <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
+        <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" /></TabsContent>
+        <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
+        <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.role} /></TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function useUpload() {
-  const upload = async (file) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
-    return r.data.path;
-  };
-  return upload;
-}
+function EntityAdmin({ kind }) {
+  const [items, setItems] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [mode, setMode] = useState("list"); // list | form
 
-function ImageUpload({ value, onChange, testid }) {
-  const upload = useUpload();
-  const ref = useRef();
-  const [busy, setBusy] = useState(false);
+  const endpoint = kind === "movie" ? "/movies" : kind === "series" ? "/series" : "/actors";
+  const label = kind === "movie" ? "Movie" : kind === "series" ? "Series" : "Actor";
 
-  const handle = async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    setBusy(true);
-    try { const p = await upload(f); onChange(p); toast.success("Uploaded"); }
-    catch { toast.error("Upload failed"); }
-    setBusy(false);
-    e.target.value = "";
+  const load = async () => { const r = await api.get(endpoint); setItems(r.data); };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [kind]);
+
+  const del = async (id) => {
+    if (!window.confirm(`Delete this ${label.toLowerCase()}?`)) return;
+    try { await api.delete(`${endpoint}/${id}`); toast.success("Deleted"); load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed to delete"); }
   };
+
+  const onSaved = () => { setMode("list"); setEditing(null); load(); };
+
+  if (mode === "form") {
+    return (
+      <Card className="bg-[#14181f] border-white/10 text-white">
+        <CardHeader><CardTitle>{editing ? `Edit ${label}` : `New ${label}`}</CardTitle></CardHeader>
+        <CardContent>
+          {kind === "movie" && <MovieForm movie={editing} onSaved={onSaved} onCancel={() => { setMode("list"); setEditing(null); }} />}
+          {kind === "series" && <SeriesForm series={editing} onSaved={onSaved} onCancel={() => { setMode("list"); setEditing(null); }} />}
+          {kind === "actor" && <ActorForm actor={editing} onSaved={onSaved} onCancel={() => { setMode("list"); setEditing(null); }} />}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-3">
-      {value ? (
-        <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-[#1e2430] border border-white/10">
-          <img src={fileUrl(value)} alt="" className="w-full h-full object-cover" />
-        </div>
-      ) : (
-        <div className="w-16 h-16 rounded-lg bg-[#1e2430] border border-white/10 flex items-center justify-center text-slate-600">
-          <Upload className="w-5 h-5" />
-        </div>
-      )}
-      <input type="file" accept="image/*" ref={ref} onChange={handle} className="hidden" />
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => ref.current.click()}
-        disabled={busy}
-        className="border-white/20 text-white hover:bg-white/10 hover:text-white"
-        data-testid={testid}
-      >
-        {busy ? "Uploading..." : value ? "Replace" : "Upload"}
-      </Button>
-      {value && (
-        <Button type="button" variant="ghost" onClick={() => onChange("")} className="text-slate-400 hover:text-white hover:bg-white/5">
-          <X className="w-4 h-4" />
+    <Card className="bg-[#14181f] border-white/10 text-white">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>All {label}s ({items.length})</CardTitle>
+        <Button onClick={() => { setEditing(null); setMode("form"); }} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`admin-new-${kind}`}>
+          + New {label}
         </Button>
-      )}
-    </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {items.map((it) => (
+            <div key={it.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-${kind}-row-${it.id}`}>
+              <div className={`${kind === "actor" ? "w-14 h-14 rounded-full" : "w-14 h-20 rounded"} bg-[#1e2430] overflow-hidden flex-shrink-0`}>
+                {(it.poster_url || it.photo_url) && <img src={fileUrl(it.poster_url || it.photo_url)} alt="" className="w-full h-full object-cover" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-white truncate">{it.title || it.name}</div>
+                <div className="text-xs text-slate-400 truncate">
+                  {kind === "movie" && (it.release_date || "—")}
+                  {kind === "series" && `${it.first_air_date?.slice(0, 4) || "—"} • ${it.season_count || 0}s ${it.episode_count || 0}ep`}
+                  {kind === "actor" && (it.birth_date || "—")}
+                </div>
+                {it.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
+              </div>
+              <Button size="sm" variant="outline" onClick={() => { setEditing(it); setMode("form"); }} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-${kind}-${it.id}`}><Edit className="w-4 h-4" /></Button>
+              <Button size="sm" variant="ghost" onClick={() => del(it.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-${kind}-${it.id}`}><Trash2 className="w-4 h-4" /></Button>
+            </div>
+          ))}
+          {items.length === 0 && <div className="text-slate-500 text-sm col-span-2">No {label.toLowerCase()}s yet.</div>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function MoviesTab() {
-  const [movies, setMovies] = useState([]);
-  const [actors, setActors] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const empty = { title: "", release_date: "", genres: "", synopsis: "", poster_url: "", backdrop_url: "", trailer_url: "", runtime: "", is_trending: false, cast: [] };
-  const [form, setForm] = useState(empty);
+function UsersTab({ currentRole }) {
+  const [users, setUsers] = useState([]);
+  const [query, setQuery] = useState("");
+  const [suspendTarget, setSuspendTarget] = useState(null);
+  const [duration, setDuration] = useState("7");
+  const [reason, setReason] = useState("");
 
-  const load = async () => {
-    const [m, a] = await Promise.all([api.get("/movies"), api.get("/actors")]);
-    setMovies(m.data); setActors(a.data);
-  };
+  const load = async () => { const r = await api.get("/moderation/users"); setUsers(r.data); };
   useEffect(() => { load(); }, []);
 
-  const startEdit = (m) => {
-    setEditingId(m.id);
-    setForm({
-      title: m.title, release_date: m.release_date || "", genres: (m.genres || []).join(", "),
-      synopsis: m.synopsis || "", poster_url: m.poster_url || "", backdrop_url: m.backdrop_url || "",
-      trailer_url: m.trailer_url || "", runtime: m.runtime || "", is_trending: !!m.is_trending,
-      cast: (m.cast || []).map((c) => ({ actor_id: c.actor?.id || c.actor_id, character_name: c.character_name })),
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  const filtered = users.filter((u) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
+  });
+
+  const isSuspended = (u) => {
+    const s = u.suspended_until;
+    if (!s) return false;
+    if (s === "permanent") return true;
+    try { return new Date(s) > new Date(); } catch { return false; }
   };
 
-  const reset = () => { setEditingId(null); setForm(empty); };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    const payload = {
-      ...form,
-      genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
-      runtime: form.runtime ? Number(form.runtime) : null,
-      cast: form.cast.filter((c) => c.actor_id && c.character_name),
-    };
+  const submitSuspend = async () => {
+    const body = { reason };
+    if (duration !== "permanent") body.duration_days = Number(duration);
     try {
-      if (editingId) { await api.patch(`/movies/${editingId}`, payload); toast.success("Movie updated"); }
-      else { await api.post("/movies", payload); toast.success("Movie created"); }
-      reset(); load();
-    } catch (e) { toast.error("Failed to save"); }
+      await api.post(`/moderation/users/${suspendTarget.id}/suspend`, body);
+      toast.success("User suspended");
+      setSuspendTarget(null); setReason(""); setDuration("7"); load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const del = async (id) => {
-    if (!window.confirm("Delete this movie?")) return;
-    await api.delete(`/movies/${id}`); toast.success("Deleted"); load();
+  const unsuspend = async (uid) => {
+    if (!window.confirm("Lift suspension?")) return;
+    await api.post(`/moderation/users/${uid}/unsuspend`); toast.success("Unsuspended"); load();
   };
 
-  const addCastRow = () => setForm({ ...form, cast: [...form.cast, { actor_id: "", character_name: "" }] });
-  const updateCastRow = (i, key, val) => {
-    const next = [...form.cast]; next[i] = { ...next[i], [key]: val }; setForm({ ...form, cast: next });
-  };
-  const removeCastRow = (i) => setForm({ ...form, cast: form.cast.filter((_, idx) => idx !== i) });
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card className="bg-[#14181f] border-white/10 text-white">
-        <CardHeader><CardTitle>{editingId ? "Edit Movie" : "New Movie"}</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <Label className="text-slate-300">Title</Label>
-              <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-title-input" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-slate-300">Release date</Label>
-                <Input required type="date" value={form.release_date} onChange={(e) => setForm({ ...form, release_date: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-release-input" />
-              </div>
-              <div>
-                <Label className="text-slate-300">Runtime (min)</Label>
-                <Input type="number" value={form.runtime} onChange={(e) => setForm({ ...form, runtime: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-runtime-input" />
-              </div>
-            </div>
-            <div>
-              <Label className="text-slate-300">Genres (comma separated)</Label>
-              <Input value={form.genres} onChange={(e) => setForm({ ...form, genres: e.target.value })} placeholder="Drama, Sci-Fi" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-genres-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300">Synopsis</Label>
-              <Textarea rows={4} value={form.synopsis} onChange={(e) => setForm({ ...form, synopsis: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-synopsis-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300">Trailer URL</Label>
-              <Input value={form.trailer_url} onChange={(e) => setForm({ ...form, trailer_url: e.target.value })} placeholder="https://youtube.com/..." className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-trailer-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300 block mb-2">Poster</Label>
-              <ImageUpload value={form.poster_url} onChange={(v) => setForm({ ...form, poster_url: v })} testid="movie-poster-upload" />
-            </div>
-            <div>
-              <Label className="text-slate-300 block mb-2">Backdrop</Label>
-              <ImageUpload value={form.backdrop_url} onChange={(v) => setForm({ ...form, backdrop_url: v })} testid="movie-backdrop-upload" />
-            </div>
-            <div className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 px-4 py-3">
-              <Switch checked={form.is_trending} onCheckedChange={(v) => setForm({ ...form, is_trending: v })} data-testid="movie-trending-switch" />
-              <Label className="text-slate-300 cursor-pointer">Mark as trending</Label>
-            </div>
-
-            <div className="pt-2">
-              <div className="flex items-center justify-between mb-2">
-                <Label className="text-slate-300">Cast</Label>
-                <Button type="button" variant="outline" onClick={addCastRow} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-8" data-testid="add-cast-btn">
-                  <Plus className="w-4 h-4 mr-1" /> Add cast
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {form.cast.map((c, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Select value={c.actor_id} onValueChange={(v) => updateCastRow(i, "actor_id", v)}>
-                      <SelectTrigger className="flex-1 bg-[#0d0f12] border-white/10 text-white" data-testid={`cast-actor-${i}`}>
-                        <SelectValue placeholder="Select actor" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-[#14181f] text-white border-white/10 max-h-64">
-                        {actors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Input placeholder="Character" value={c.character_name} onChange={(e) => updateCastRow(i, "character_name", e.target.value)} className="flex-1 bg-[#0d0f12] border-white/10 text-white" data-testid={`cast-character-${i}`} />
-                    <Button type="button" variant="ghost" onClick={() => removeCastRow(i)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"><X className="w-4 h-4" /></Button>
-                  </div>
-                ))}
-                {form.cast.length === 0 && <div className="text-xs text-slate-500">Add actors first, then link them here.</div>}
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="movie-submit-btn">
-                {editingId ? "Update Movie" : "Create Movie"}
-              </Button>
-              {editingId && <Button type="button" variant="outline" onClick={reset} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>}
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-[#14181f] border-white/10 text-white">
-        <CardHeader><CardTitle>All Movies ({movies.length})</CardTitle></CardHeader>
-        <CardContent>
-          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
-            {movies.map((m) => (
-              <div key={m.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-movie-row-${m.id}`}>
-                <div className="w-14 h-20 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
-                  {m.poster_url && <img src={fileUrl(m.poster_url)} alt="" className="w-full h-full object-cover" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-white truncate">{m.title}</div>
-                  <div className="text-xs text-slate-400">{m.release_date || "—"} • {(m.genres || []).slice(0, 2).join(", ")}</div>
-                  {m.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
-                </div>
-                <Button size="sm" variant="outline" onClick={() => startEdit(m)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-movie-${m.id}`}><Edit className="w-4 h-4" /></Button>
-                <Button size="sm" variant="ghost" onClick={() => del(m.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-movie-${m.id}`}><Trash2 className="w-4 h-4" /></Button>
-              </div>
-            ))}
-            {movies.length === 0 && <div className="text-slate-500 text-sm">No movies yet.</div>}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function ActorsTab() {
-  const [actors, setActors] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const empty = { name: "", bio: "", photo_url: "", birth_date: "" };
-  const [form, setForm] = useState(empty);
-
-  const load = async () => { const r = await api.get("/actors"); setActors(r.data); };
-  useEffect(() => { load(); }, []);
-
-  const reset = () => { setEditingId(null); setForm(empty); };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingId) { await api.patch(`/actors/${editingId}`, form); toast.success("Actor updated"); }
-      else { await api.post("/actors", form); toast.success("Actor created"); }
-      reset(); load();
-    } catch { toast.error("Failed to save"); }
-  };
-
-  const del = async (id) => {
-    if (!window.confirm("Delete this actor?")) return;
-    await api.delete(`/actors/${id}`); toast.success("Deleted"); load();
+  const setRole = async (uid, role) => {
+    try { await api.patch(`/moderation/users/${uid}/role`, { role }); toast.success(`Role set to ${role}`); load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card className="bg-[#14181f] border-white/10 text-white">
-        <CardHeader><CardTitle>{editingId ? "Edit Actor" : "New Actor"}</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <Label className="text-slate-300">Full name</Label>
-              <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="actor-name-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300">Birth date</Label>
-              <Input type="date" value={form.birth_date || ""} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="actor-birthdate-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300">Bio</Label>
-              <Textarea rows={4} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="actor-bio-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300 block mb-2">Headshot</Label>
-              <ImageUpload value={form.photo_url} onChange={(v) => setForm({ ...form, photo_url: v })} testid="actor-photo-upload" />
-            </div>
-            <div className="flex gap-2 pt-2">
-              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="actor-submit-btn">
-                {editingId ? "Update Actor" : "Create Actor"}
-              </Button>
-              {editingId && <Button type="button" variant="outline" onClick={reset} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>}
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-[#14181f] border-white/10 text-white">
-        <CardHeader><CardTitle>All Actors ({actors.length})</CardTitle></CardHeader>
-        <CardContent>
-          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
-            {actors.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-actor-row-${a.id}`}>
-                <div className="w-14 h-14 rounded-full bg-[#1e2430] overflow-hidden flex-shrink-0">
-                  {a.photo_url && <img src={fileUrl(a.photo_url)} alt="" className="w-full h-full object-cover" />}
+    <Card className="bg-[#14181f] border-white/10 text-white">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2"><Users className="w-5 h-5" /> All Users ({users.length})</CardTitle>
+        <Input placeholder="Search..." value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-xs bg-[#0d0f12] border-white/10 text-white" data-testid="users-search-input" />
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-2">
+          {filtered.map((u) => (
+            <div key={u.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`user-row-${u.id}`}>
+              <div className="w-10 h-10 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-sm text-slate-400 flex-shrink-0">
+                {u.avatar_url ? <img src={fileUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" /> : (u.name?.[0] || "?")}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-white truncate">{u.name}</div>
+                <div className="text-xs text-slate-400 truncate">{u.email}</div>
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge className={
+                    u.role === "admin" ? "bg-rose-500/15 text-rose-300 border-rose-500/40" :
+                    u.role === "moderator" ? "bg-sky-500/15 text-sky-300 border-sky-500/40" :
+                    "bg-white/5 text-slate-300 border-white/10"
+                  }>{u.role}</Badge>
+                  {isSuspended(u) && <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/40">Suspended{u.suspended_until === "permanent" ? " (permanent)" : ` until ${u.suspended_until?.slice(0,10)}`}</Badge>}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-white truncate">{a.name}</div>
-                  <div className="text-xs text-slate-400">{a.birth_date || "—"}</div>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => { setEditingId(a.id); setForm({ name: a.name, bio: a.bio || "", photo_url: a.photo_url || "", birth_date: a.birth_date || "" }); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-actor-${a.id}`}><Edit className="w-4 h-4" /></Button>
-                <Button size="sm" variant="ghost" onClick={() => del(a.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-actor-${a.id}`}><Trash2 className="w-4 h-4" /></Button>
               </div>
-            ))}
-            {actors.length === 0 && <div className="text-slate-500 text-sm">No actors yet.</div>}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-
-function SeriesTab() {
-  const [seriesList, setSeriesList] = useState([]);
-  const [actors, setActors] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const empty = {
-    title: "", first_air_date: "", last_air_date: "", genres: "",
-    synopsis: "", poster_url: "", backdrop_url: "", trailer_url: "",
-    status: "Ongoing", is_trending: false, main_cast: [], seasons: [],
-  };
-  const [form, setForm] = useState(empty);
-
-  const load = async () => {
-    const [s, a] = await Promise.all([api.get("/series"), api.get("/actors")]);
-    setSeriesList(s.data); setActors(a.data);
-  };
-  useEffect(() => { load(); }, []);
-
-  const startEdit = async (s) => {
-    // fetch full series to get all nested data
-    const full = (await api.get(`/series/${s.id}`)).data;
-    setEditingId(s.id);
-    setForm({
-      title: full.title, first_air_date: full.first_air_date || "", last_air_date: full.last_air_date || "",
-      genres: (full.genres || []).join(", "), synopsis: full.synopsis || "",
-      poster_url: full.poster_url || "", backdrop_url: full.backdrop_url || "",
-      trailer_url: full.trailer_url || "", status: full.status || "Ongoing",
-      is_trending: !!full.is_trending,
-      main_cast: (full.main_cast || []).map((c) => ({ actor_id: c.actor?.id || c.actor_id, character_name: c.character_name })),
-      seasons: (full.seasons || []).map((se) => ({
-        season_number: se.season_number, name: se.name || "", air_date: se.air_date || "",
-        overview: se.overview || "", poster_url: se.poster_url || "",
-        episodes: (se.episodes || []).map((ep) => ({
-          episode_number: ep.episode_number, name: ep.name || "", air_date: ep.air_date || "",
-          overview: ep.overview || "",
-          guest_stars: (ep.guest_stars || []).map((gs) => ({ actor_id: gs.actor?.id || gs.actor_id, character_name: gs.character_name })),
-        })),
-      })),
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const reset = () => { setEditingId(null); setForm(empty); };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    const payload = {
-      ...form,
-      genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
-      main_cast: form.main_cast.filter((c) => c.actor_id && c.character_name),
-      seasons: form.seasons.map((se) => ({
-        ...se,
-        season_number: Number(se.season_number),
-        episodes: (se.episodes || []).map((ep) => ({
-          ...ep,
-          episode_number: Number(ep.episode_number),
-          guest_stars: (ep.guest_stars || []).filter((g) => g.actor_id && g.character_name),
-        })),
-      })),
-    };
-    try {
-      if (editingId) { await api.patch(`/series/${editingId}`, payload); toast.success("Series updated"); }
-      else { await api.post("/series", payload); toast.success("Series created"); }
-      reset(); load();
-    } catch { toast.error("Failed to save series"); }
-  };
-
-  const del = async (id) => {
-    if (!window.confirm("Delete this series?")) return;
-    await api.delete(`/series/${id}`); toast.success("Deleted"); load();
-  };
-
-  // main cast helpers
-  const addMainCast = () => setForm({ ...form, main_cast: [...form.main_cast, { actor_id: "", character_name: "" }] });
-  const updMainCast = (i, k, v) => { const n = [...form.main_cast]; n[i] = { ...n[i], [k]: v }; setForm({ ...form, main_cast: n }); };
-  const remMainCast = (i) => setForm({ ...form, main_cast: form.main_cast.filter((_, x) => x !== i) });
-
-  // season helpers
-  const addSeason = () => {
-    const nextNum = (form.seasons[form.seasons.length - 1]?.season_number || 0) + 1;
-    setForm({ ...form, seasons: [...form.seasons, { season_number: nextNum, name: "", air_date: "", overview: "", poster_url: "", episodes: [] }] });
-  };
-  const updSeason = (i, k, v) => { const n = [...form.seasons]; n[i] = { ...n[i], [k]: v }; setForm({ ...form, seasons: n }); };
-  const remSeason = (i) => setForm({ ...form, seasons: form.seasons.filter((_, x) => x !== i) });
-
-  // episode helpers
-  const addEpisode = (si) => {
-    const eps = form.seasons[si].episodes || [];
-    const nextNum = (eps[eps.length - 1]?.episode_number || 0) + 1;
-    const n = [...form.seasons];
-    n[si] = { ...n[si], episodes: [...eps, { episode_number: nextNum, name: "", air_date: "", overview: "", guest_stars: [] }] };
-    setForm({ ...form, seasons: n });
-  };
-  const updEpisode = (si, ei, k, v) => {
-    const n = [...form.seasons];
-    const eps = [...n[si].episodes];
-    eps[ei] = { ...eps[ei], [k]: v };
-    n[si] = { ...n[si], episodes: eps };
-    setForm({ ...form, seasons: n });
-  };
-  const remEpisode = (si, ei) => {
-    const n = [...form.seasons];
-    n[si] = { ...n[si], episodes: n[si].episodes.filter((_, x) => x !== ei) };
-    setForm({ ...form, seasons: n });
-  };
-
-  // guest star helpers
-  const addGuest = (si, ei) => {
-    const n = [...form.seasons];
-    const eps = [...n[si].episodes];
-    eps[ei] = { ...eps[ei], guest_stars: [...(eps[ei].guest_stars || []), { actor_id: "", character_name: "" }] };
-    n[si] = { ...n[si], episodes: eps };
-    setForm({ ...form, seasons: n });
-  };
-  const updGuest = (si, ei, gi, k, v) => {
-    const n = [...form.seasons];
-    const eps = [...n[si].episodes];
-    const gs = [...(eps[ei].guest_stars || [])];
-    gs[gi] = { ...gs[gi], [k]: v };
-    eps[ei] = { ...eps[ei], guest_stars: gs };
-    n[si] = { ...n[si], episodes: eps };
-    setForm({ ...form, seasons: n });
-  };
-  const remGuest = (si, ei, gi) => {
-    const n = [...form.seasons];
-    const eps = [...n[si].episodes];
-    eps[ei] = { ...eps[ei], guest_stars: eps[ei].guest_stars.filter((_, x) => x !== gi) };
-    n[si] = { ...n[si], episodes: eps };
-    setForm({ ...form, seasons: n });
-  };
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
-      <Card className="bg-[#14181f] border-white/10 text-white">
-        <CardHeader><CardTitle>{editingId ? "Edit TV Series" : "New TV Series"}</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <Label className="text-slate-300">Title</Label>
-              <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-title-input" />
+              <div className="flex items-center gap-2">
+                {currentRole === "admin" && u.role !== "admin" && (
+                  <Select value={u.role} onValueChange={(v) => setRole(u.id, v)}>
+                    <SelectTrigger className="w-[140px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[#14181f] text-white border-white/10">
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="moderator">Moderator</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+                {u.role !== "admin" && (
+                  isSuspended(u) ? (
+                    <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>
+                      <CheckCircle className="w-4 h-4 mr-1" /> Unsuspend
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setSuspendTarget(u)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`suspend-${u.id}`}>
+                      <Ban className="w-4 h-4 mr-1" /> Suspend
+                    </Button>
+                  )
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+          ))}
+        </div>
+
+        {suspendTarget && (
+          <div className="mt-6 rounded-xl border border-rose-500/40 bg-rose-500/5 p-5">
+            <div className="font-heading text-lg text-white mb-3">Suspend {suspendTarget.name}?</div>
+            <div className="grid grid-cols-[200px_1fr] gap-3 items-end">
               <div>
-                <Label className="text-slate-300">First air date</Label>
-                <Input type="date" value={form.first_air_date} onChange={(e) => setForm({ ...form, first_air_date: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-first-air-input" />
-              </div>
-              <div>
-                <Label className="text-slate-300">Last air date</Label>
-                <Input type="date" value={form.last_air_date} onChange={(e) => setForm({ ...form, last_air_date: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-last-air-input" />
-              </div>
-              <div>
-                <Label className="text-slate-300">Status</Label>
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                  <SelectTrigger className="mt-1.5 bg-[#0d0f12] border-white/10 text-white"><SelectValue /></SelectTrigger>
+                <label className="text-xs uppercase tracking-widest text-slate-400">Duration</label>
+                <Select value={duration} onValueChange={setDuration}>
+                  <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-[#14181f] text-white border-white/10">
-                    <SelectItem value="Ongoing">Ongoing</SelectItem>
-                    <SelectItem value="Returning">Returning</SelectItem>
-                    <SelectItem value="Ended">Ended</SelectItem>
-                    <SelectItem value="Cancelled">Cancelled</SelectItem>
+                    <SelectItem value="1">1 day</SelectItem>
+                    <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="30">30 days</SelectItem>
+                    <SelectItem value="90">90 days</SelectItem>
+                    <SelectItem value="permanent">Permanent</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            <div>
-              <Label className="text-slate-300">Genres (comma separated)</Label>
-              <Input value={form.genres} onChange={(e) => setForm({ ...form, genres: e.target.value })} placeholder="Drama, Thriller" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-genres-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300">Synopsis</Label>
-              <Textarea rows={3} value={form.synopsis} onChange={(e) => setForm({ ...form, synopsis: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-synopsis-input" />
-            </div>
-            <div>
-              <Label className="text-slate-300">Trailer URL</Label>
-              <Input value={form.trailer_url} onChange={(e) => setForm({ ...form, trailer_url: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-slate-300 block mb-2">Poster</Label>
-                <ImageUpload value={form.poster_url} onChange={(v) => setForm({ ...form, poster_url: v })} testid="series-poster-upload" />
-              </div>
-              <div>
-                <Label className="text-slate-300 block mb-2">Backdrop</Label>
-                <ImageUpload value={form.backdrop_url} onChange={(v) => setForm({ ...form, backdrop_url: v })} testid="series-backdrop-upload" />
+                <label className="text-xs uppercase tracking-widest text-slate-400">Reason</label>
+                <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for suspension" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-reason-input" />
               </div>
             </div>
-            <div className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 px-4 py-3">
-              <Switch checked={form.is_trending} onCheckedChange={(v) => setForm({ ...form, is_trending: v })} data-testid="series-trending-switch" />
-              <Label className="text-slate-300 cursor-pointer">Mark as trending</Label>
-            </div>
-
-            {/* Main Cast */}
-            <div className="pt-2">
-              <div className="flex items-center justify-between mb-2">
-                <Label className="text-slate-300">Main Cast (Series Regulars)</Label>
-                <Button type="button" variant="outline" onClick={addMainCast} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-8" data-testid="series-add-main-cast">
-                  <Plus className="w-4 h-4 mr-1" /> Add regular
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {form.main_cast.map((c, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Select value={c.actor_id} onValueChange={(v) => updMainCast(i, "actor_id", v)}>
-                      <SelectTrigger className="flex-1 bg-[#0d0f12] border-white/10 text-white"><SelectValue placeholder="Select actor" /></SelectTrigger>
-                      <SelectContent className="bg-[#14181f] text-white border-white/10 max-h-64">
-                        {actors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Input placeholder="Character" value={c.character_name} onChange={(e) => updMainCast(i, "character_name", e.target.value)} className="flex-1 bg-[#0d0f12] border-white/10 text-white" />
-                    <Button type="button" variant="ghost" onClick={() => remMainCast(i)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"><X className="w-4 h-4" /></Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Seasons */}
-            <div className="pt-4 border-t border-white/10">
-              <div className="flex items-center justify-between mb-4">
-                <Label className="text-slate-300 text-base">Seasons & Episodes</Label>
-                <Button type="button" variant="outline" onClick={addSeason} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 h-8" data-testid="series-add-season">
-                  <Plus className="w-4 h-4 mr-1" /> Add season
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                {form.seasons.map((season, si) => (
-                  <div key={si} className="rounded-lg border border-white/10 bg-[#0d0f12] p-4" data-testid={`season-block-${si}`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="font-heading text-white">Season {season.season_number}</div>
-                      <Button type="button" variant="ghost" onClick={() => remSeason(si)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 h-7">
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <Label className="text-xs text-slate-400">Season #</Label>
-                        <Input type="number" value={season.season_number} onChange={(e) => updSeason(si, "season_number", e.target.value)} className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
-                      </div>
-                      <div className="col-span-2">
-                        <Label className="text-xs text-slate-400">Name</Label>
-                        <Input value={season.name} onChange={(e) => updSeason(si, "name", e.target.value)} placeholder="Optional" className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
-                      </div>
-                      <div>
-                        <Label className="text-xs text-slate-400">Air date</Label>
-                        <Input type="date" value={season.air_date} onChange={(e) => updSeason(si, "air_date", e.target.value)} className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
-                      </div>
-                      <div className="col-span-2">
-                        <Label className="text-xs text-slate-400">Overview</Label>
-                        <Input value={season.overview} onChange={(e) => updSeason(si, "overview", e.target.value)} className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
-                      </div>
-                    </div>
-
-                    {/* Episodes */}
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <Label className="text-xs uppercase tracking-widest text-amber-400">Episodes</Label>
-                        <Button type="button" variant="outline" onClick={() => addEpisode(si)} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-7 text-xs" data-testid={`add-episode-${si}`}>
-                          <Plus className="w-3 h-3 mr-1" /> Episode
-                        </Button>
-                      </div>
-                      <div className="space-y-2">
-                        {(season.episodes || []).map((ep, ei) => (
-                          <div key={ei} className="rounded bg-[#14181f] border border-white/10 p-3" data-testid={`episode-block-${si}-${ei}`}>
-                            <div className="grid grid-cols-[60px_1fr_130px_auto] gap-2 items-end">
-                              <div>
-                                <Label className="text-xs text-slate-400">E#</Label>
-                                <Input type="number" value={ep.episode_number} onChange={(e) => updEpisode(si, ei, "episode_number", e.target.value)} className="mt-1 bg-[#0d0f12] border-white/10 text-white h-9" />
-                              </div>
-                              <div>
-                                <Label className="text-xs text-slate-400">Title</Label>
-                                <Input value={ep.name} onChange={(e) => updEpisode(si, ei, "name", e.target.value)} className="mt-1 bg-[#0d0f12] border-white/10 text-white h-9" />
-                              </div>
-                              <div>
-                                <Label className="text-xs text-slate-400">Air date</Label>
-                                <Input type="date" value={ep.air_date} onChange={(e) => updEpisode(si, ei, "air_date", e.target.value)} className="mt-1 bg-[#0d0f12] border-white/10 text-white h-9" />
-                              </div>
-                              <Button type="button" variant="ghost" onClick={() => remEpisode(si, ei)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 h-9">
-                                <X className="w-4 h-4" />
-                              </Button>
-                            </div>
-                            <Input placeholder="Overview (optional)" value={ep.overview} onChange={(e) => updEpisode(si, ei, "overview", e.target.value)} className="mt-2 bg-[#0d0f12] border-white/10 text-white text-sm h-9" />
-
-                            {/* Guest stars */}
-                            <div className="mt-3 pl-3 border-l-2 border-amber-500/40">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs uppercase tracking-wider text-amber-400 font-semibold">Guest stars</span>
-                                <Button type="button" variant="outline" onClick={() => addGuest(si, ei)} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-6 text-xs" data-testid={`add-guest-${si}-${ei}`}>
-                                  <Plus className="w-3 h-3 mr-1" /> Guest
-                                </Button>
-                              </div>
-                              <div className="space-y-1.5">
-                                {(ep.guest_stars || []).map((gs, gi) => (
-                                  <div key={gi} className="flex items-center gap-2">
-                                    <Select value={gs.actor_id} onValueChange={(v) => updGuest(si, ei, gi, "actor_id", v)}>
-                                      <SelectTrigger className="flex-1 bg-[#0d0f12] border-white/10 text-white h-8 text-xs"><SelectValue placeholder="Actor" /></SelectTrigger>
-                                      <SelectContent className="bg-[#14181f] text-white border-white/10 max-h-56">
-                                        {actors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                                      </SelectContent>
-                                    </Select>
-                                    <Input placeholder="Character" value={gs.character_name} onChange={(e) => updGuest(si, ei, gi, "character_name", e.target.value)} className="flex-1 bg-[#0d0f12] border-white/10 text-white h-8 text-xs" />
-                                    <Button type="button" variant="ghost" onClick={() => remGuest(si, ei, gi)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 h-8 w-8 p-0"><X className="w-3 h-3" /></Button>
-                                  </div>
-                                ))}
-                                {(!ep.guest_stars || ep.guest_stars.length === 0) && <div className="text-[11px] text-slate-600">No guest stars for this episode.</div>}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        {(!season.episodes || season.episodes.length === 0) && (
-                          <div className="text-xs text-slate-500 py-2 pl-1">No episodes. Add one above.</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {form.seasons.length === 0 && <div className="text-sm text-slate-500 py-4">No seasons yet — click "Add season" to start.</div>}
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-4 border-t border-white/10">
-              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="series-submit-btn">
-                {editingId ? "Update Series" : "Create Series"}
+            <div className="mt-4 flex gap-2">
+              <Button onClick={submitSuspend} className="bg-rose-500 hover:bg-rose-600 text-white font-semibold" data-testid="suspend-confirm-btn">
+                <Ban className="w-4 h-4 mr-1" /> Confirm suspension
               </Button>
-              {editingId && <Button type="button" variant="outline" onClick={reset} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>}
+              <Button variant="outline" onClick={() => setSuspendTarget(null)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
             </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-[#14181f] border-white/10 text-white h-fit sticky top-20">
-        <CardHeader><CardTitle>All Series ({seriesList.length})</CardTitle></CardHeader>
-        <CardContent>
-          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
-            {seriesList.map((s) => (
-              <div key={s.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-series-row-${s.id}`}>
-                <div className="w-12 h-16 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
-                  {s.poster_url && <img src={fileUrl(s.poster_url)} alt="" className="w-full h-full object-cover" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-white truncate">{s.title}</div>
-                  <div className="text-xs text-slate-400">{s.first_air_date?.slice(0,4) || "—"} • {s.season_count} seasons</div>
-                  {s.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
-                </div>
-                <Button size="sm" variant="outline" onClick={() => startEdit(s)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-series-${s.id}`}><Edit className="w-4 h-4" /></Button>
-                <Button size="sm" variant="ghost" onClick={() => del(s.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-series-${s.id}`}><Trash2 className="w-4 h-4" /></Button>
-              </div>
-            ))}
-            {seriesList.length === 0 && <div className="text-slate-500 text-sm">No series yet.</div>}
           </div>
-        </CardContent>
-      </Card>
-    </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
