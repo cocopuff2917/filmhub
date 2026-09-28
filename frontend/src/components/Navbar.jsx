@@ -42,6 +42,7 @@ export default function Navbar() {
             <NavLink to="/" end className={linkClass} data-testid="nav-home">Home</NavLink>
             <NavLink to="/browse" className={linkClass} data-testid="nav-browse">Browse</NavLink>
             <NavLink to="/browse?tab=series" className={linkClass} data-testid="nav-series">TV Series</NavLink>
+            <NavLink to="/threads" className={linkClass} data-testid="nav-threads">Forum</NavLink>
             {user && <NavLink to="/watchlist" className={linkClass} data-testid="nav-watchlist">Watchlist</NavLink>}
             {user && ["moderator", "admin"].includes(user.role) && (
               <NavLink to="/admin" className={linkClass} data-testid="nav-admin">{user.role === "admin" ? "Admin" : "Mod"}</NavLink>

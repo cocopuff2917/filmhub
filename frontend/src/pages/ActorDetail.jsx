@@ -5,10 +5,12 @@ import { useAuth } from "@/context/AuthContext";
 import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
-import { Calendar, Film, Cake, Tv, UserPlus, Edit, Trash2, MapPin, Skull, ImageIcon } from "lucide-react";
+import { Calendar, Film, Cake, Tv, UserPlus, Edit, Trash2, MapPin, Skull, ImageIcon, Flag, Lock } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
+import ReportDialog from "@/components/ReportDialog";
+import LockFieldsDialog from "@/components/LockFieldsDialog";
 
 function computeAge(dobStr, dodStr) {
   if (!dobStr) return null;
@@ -35,6 +37,8 @@ export default function ActorDetail() {
   const navigate = useNavigate();
   const [actor, setActor] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
 
   const load = async () => { try { const r = await api.get(`/actors/${id}`); setActor(r.data); } catch {} };
@@ -121,10 +125,20 @@ export default function ActorDetail() {
                     <Edit className="w-4 h-4 mr-2" /> Edit
                   </Button>
                 )}
-                {canDelete && (
-                  <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-actor-btn">
-                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                {user && (
+                  <Button variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-actor-btn">
+                    <Flag className="w-4 h-4 mr-2" /> Report a Problem
                   </Button>
+                )}
+                {canDelete && (
+                  <>
+                    <Button variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-actor-btn">
+                      <Lock className="w-4 h-4 mr-2" /> Locks{actor.locked_fields?.length ? ` (${actor.locked_fields.length})` : ""}
+                    </Button>
+                    <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-actor-btn">
+                      <Trash2 className="w-4 h-4 mr-2" /> Delete
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -225,6 +239,8 @@ export default function ActorDetail() {
         entity={actor}
         onSaved={() => { load(); setHistoryKey((k) => k + 1); }}
       />
+      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} entityType="actor" entityId={id} entityTitle={actor.name} />
+      <LockFieldsDialog open={lockOpen} onOpenChange={setLockOpen} entityType="actor" entity={actor} onSaved={(d) => { setActor((prev) => ({ ...prev, ...d })); setHistoryKey((k) => k + 1); }} />
     </div>
   );
 }

@@ -5,12 +5,14 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Star, Bookmark, BookmarkCheck, PlayCircle, Calendar, Clock, Users, ImageIcon, Edit, Trash2 } from "lucide-react";
+import { Star, Bookmark, BookmarkCheck, PlayCircle, Calendar, Clock, Users, ImageIcon, Edit, Trash2, Flag, Lock } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
 import SimilarSection from "@/components/SimilarSection";
 import DiscussionSection from "@/components/DiscussionSection";
+import ReportDialog from "@/components/ReportDialog";
+import LockFieldsDialog, { LockedBadge } from "@/components/LockFieldsDialog";
 
 export default function MovieDetail() {
   const { id } = useParams();
@@ -22,6 +24,8 @@ export default function MovieDetail() {
   const [reviewText, setReviewText] = useState("");
   const [inWatchlist, setInWatchlist] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
 
   const load = async () => {
@@ -106,10 +110,20 @@ export default function MovieDetail() {
                     <Edit className="w-4 h-4 mr-2" /> Edit
                   </Button>
                 )}
-                {canDelete && (
-                  <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-movie-btn">
-                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                {user && (
+                  <Button variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-movie-btn">
+                    <Flag className="w-4 h-4 mr-2" /> Report a Problem
                   </Button>
+                )}
+                {canDelete && (
+                  <>
+                    <Button variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-movie-btn">
+                      <Lock className="w-4 h-4 mr-2" /> Locks{movie.locked_fields?.length ? ` (${movie.locked_fields.length})` : ""}
+                    </Button>
+                    <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-movie-btn">
+                      <Trash2 className="w-4 h-4 mr-2" /> Delete
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -203,6 +217,8 @@ export default function MovieDetail() {
         entity={movie}
         onSaved={() => { load(); setHistoryKey((k) => k + 1); }}
       />
+      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} entityType="movie" entityId={id} entityTitle={movie.title} />
+      <LockFieldsDialog open={lockOpen} onOpenChange={setLockOpen} entityType="movie" entity={movie} onSaved={(d) => { setMovie(d); setHistoryKey((k) => k + 1); }} />
     </div>
   );
 }

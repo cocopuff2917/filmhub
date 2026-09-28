@@ -4,13 +4,15 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Calendar, Tv, Users, PlayCircle, UserPlus, Edit, Trash2, ImageIcon } from "lucide-react";
+import { Calendar, Tv, Users, PlayCircle, UserPlus, Edit, Trash2, ImageIcon, Flag, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
 import SimilarSection from "@/components/SimilarSection";
 import DiscussionSection from "@/components/DiscussionSection";
+import ReportDialog from "@/components/ReportDialog";
+import LockFieldsDialog from "@/components/LockFieldsDialog";
 
 export default function SeriesDetail() {
   const { id } = useParams();
@@ -18,6 +20,8 @@ export default function SeriesDetail() {
   const navigate = useNavigate();
   const [series, setSeries] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
 
   const load = async () => { try { const r = await api.get(`/series/${id}`); setSeries(r.data); } catch {} };
@@ -78,10 +82,20 @@ export default function SeriesDetail() {
                     <Edit className="w-4 h-4 mr-2" /> Edit
                   </Button>
                 )}
-                {canDelete && (
-                  <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-series-btn">
-                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                {user && (
+                  <Button variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-series-btn">
+                    <Flag className="w-4 h-4 mr-2" /> Report a Problem
                   </Button>
+                )}
+                {canDelete && (
+                  <>
+                    <Button variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-series-btn">
+                      <Lock className="w-4 h-4 mr-2" /> Locks{series.locked_fields?.length ? ` (${series.locked_fields.length})` : ""}
+                    </Button>
+                    <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-series-btn">
+                      <Trash2 className="w-4 h-4 mr-2" /> Delete
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -235,6 +249,8 @@ export default function SeriesDetail() {
         entity={series}
         onSaved={() => { load(); setHistoryKey((k) => k + 1); }}
       />
+      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} entityType="series" entityId={id} entityTitle={series.title} />
+      <LockFieldsDialog open={lockOpen} onOpenChange={setLockOpen} entityType="series" entity={series} onSaved={(d) => { setSeries(d); setHistoryKey((k) => k + 1); }} />
     </div>
   );
 }

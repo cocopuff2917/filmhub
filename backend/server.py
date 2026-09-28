@@ -294,6 +294,25 @@ class CommentCreate(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     parent_id: Optional[str] = None
 
+# ----------- Threads -----------
+class ThreadCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+    body: str = Field(min_length=1, max_length=5000)
+    category: str = "support"  # support | report | general
+    entity_type: Optional[str] = None  # movie | series | actor
+    entity_id: Optional[str] = None
+    entity_title: Optional[str] = None
+
+class ThreadMessageCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+class ThreadStatusUpdate(BaseModel):
+    status: str  # open | closed
+
+# ----------- Locks -----------
+class LockUpdate(BaseModel):
+    locked_fields: List[str]
+
 # ----------- Utility -----------
 def doc_to_dict(doc, id_key="id"):
     if not doc:
@@ -763,6 +782,163 @@ async def delete_comment(comment_id: str, user: dict = Depends(get_current_user)
     await db.comments.delete_one({"_id": ObjectId(comment_id)})
     return {"ok": True}
 
+# ----------- Threads -----------
+def _serialize_thread(t: dict) -> dict:
+    t["id"] = str(t.pop("_id"))
+    return t
+
+@api_router.post("/threads")
+async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_user)):
+    if payload.category not in ("support", "report", "general"):
+        raise HTTPException(status_code=400, detail="Invalid category")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "title": payload.title.strip(),
+        "body": payload.body.strip(),
+        "category": payload.category,
+        "status": "open",
+        "entity_type": payload.entity_type,
+        "entity_id": payload.entity_id,
+        "entity_title": payload.entity_title,
+        "user_id": user["id"],
+        "user_name": user.get("name"),
+        "user_avatar": user.get("avatar_url", ""),
+        "user_role": user.get("role", "user"),
+        "created_at": now,
+        "last_activity_at": now,
+        "message_count": 0,
+    }
+    result = await db.threads.insert_one(doc)
+    return _serialize_thread(doc)
+
+@api_router.get("/threads")
+async def list_threads(
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    limit: int = 100,
+):
+    q = {}
+    if category: q["category"] = category
+    if status: q["status"] = status
+    if entity_type: q["entity_type"] = entity_type
+    if entity_id: q["entity_id"] = entity_id
+    docs = []
+    async for t in db.threads.find(q).sort("last_activity_at", -1).limit(limit):
+        docs.append(_serialize_thread(t))
+    return docs
+
+@api_router.get("/threads/{thread_id}")
+async def get_thread(thread_id: str):
+    try:
+        t = await db.threads.find_one({"_id": ObjectId(thread_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not t:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    t = _serialize_thread(t)
+    messages = []
+    async for m in db.thread_messages.find({"thread_id": thread_id}).sort("created_at", 1):
+        m["id"] = str(m.pop("_id"))
+        messages.append(m)
+    t["messages"] = messages
+    return t
+
+@api_router.post("/threads/{thread_id}/messages")
+async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user: dict = Depends(get_current_user)):
+    try:
+        t = await db.threads.find_one({"_id": ObjectId(thread_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not t:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if t.get("status") == "closed" and user.get("role") not in ("moderator", "admin"):
+        raise HTTPException(status_code=403, detail="Thread is closed")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "thread_id": thread_id,
+        "text": payload.text.strip(),
+        "user_id": user["id"],
+        "user_name": user.get("name"),
+        "user_avatar": user.get("avatar_url", ""),
+        "user_role": user.get("role", "user"),
+        "created_at": now,
+    }
+    result = await db.thread_messages.insert_one(doc)
+    doc["id"] = str(result.inserted_id)
+    doc.pop("_id", None)
+    await db.threads.update_one(
+        {"_id": ObjectId(thread_id)},
+        {"$set": {"last_activity_at": now}, "$inc": {"message_count": 1}},
+    )
+    return doc
+
+@api_router.patch("/threads/{thread_id}/status")
+async def set_thread_status(thread_id: str, payload: ThreadStatusUpdate, mod: dict = Depends(get_current_moderator)):
+    if payload.status not in ("open", "closed"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    await db.threads.update_one({"_id": ObjectId(thread_id)}, {"$set": {
+        "status": payload.status,
+        "status_changed_by": mod["id"],
+        "status_changed_by_name": mod.get("name"),
+        "status_changed_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    # also log system message
+    await db.thread_messages.insert_one({
+        "thread_id": thread_id,
+        "text": f"Thread {payload.status} by {mod.get('name')}",
+        "user_id": mod["id"],
+        "user_name": mod.get("name"),
+        "user_role": mod.get("role"),
+        "user_avatar": mod.get("avatar_url", ""),
+        "system": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    t = await db.threads.find_one({"_id": ObjectId(thread_id)})
+    return _serialize_thread(t)
+
+@api_router.delete("/threads/{thread_id}")
+async def delete_thread(thread_id: str, user: dict = Depends(get_current_user)):
+    try:
+        t = await db.threads.find_one({"_id": ObjectId(thread_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not t:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if user.get("role") not in ("moderator", "admin") and t.get("user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    await db.threads.delete_one({"_id": ObjectId(thread_id)})
+    await db.thread_messages.delete_many({"thread_id": thread_id})
+    return {"ok": True}
+
+# ----------- IP overlap groups -----------
+@api_router.get("/moderation/ip-groups")
+async def ip_overlap_groups(mod: dict = Depends(get_current_moderator)):
+    """Return IP addresses with 2+ accounts using them."""
+    pipeline = [
+        {"$unwind": {"path": "$ips", "preserveNullAndEmptyArrays": False}},
+        {"$group": {
+            "_id": "$ips.ip",
+            "users": {"$push": {
+                "id": {"$toString": "$_id"},
+                "name": "$name",
+                "email": "$email",
+                "role": "$role",
+                "avatar_url": "$avatar_url",
+                "suspended_until": "$suspended_until",
+                "last_seen": "$ips.last_seen",
+            }},
+            "count": {"$sum": 1},
+        }},
+        {"$match": {"count": {"$gte": 2}}},
+        {"$sort": {"count": -1}},
+    ]
+    result = []
+    async for row in db.users.aggregate(pipeline):
+        result.append({"ip": row["_id"], "users": row["users"], "count": row["count"]})
+    return result
+
 # ----------- Movies -----------
 @api_router.post("/movies")
 async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_user)):
@@ -887,18 +1063,44 @@ async def similar_movies(movie_id: str, limit: int = 12):
     docs.sort(key=score, reverse=True)
     return [await enrich_movie(d) for d in docs[:limit]]
 
+def _check_locks(old_doc: dict, update_data: dict, user: dict, action: str = "edit"):
+    """Raise 403 if any locked field is being modified by a non-moderator."""
+    if user.get("role") in ("moderator", "admin"):
+        return
+    locked = old_doc.get("locked_fields", []) or []
+    violated = [f for f in locked if f in update_data]
+    if violated:
+        raise HTTPException(status_code=403, detail=f"These fields are locked by moderators: {', '.join(violated)}")
+
 @api_router.patch("/movies/{movie_id}")
 async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "cast" in update_data:
         update_data["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["cast"]]
     old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
+    _check_locks(old_doc, update_data, user)
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
     enriched = await enrich_movie(doc)
     changes = compute_field_changes(old_doc, update_data)
     changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
     await log_edit(user, "movie", movie_id, "update", enriched["title"], f"Updated {changed_names}", changes)
+    return enriched
+
+@api_router.patch("/movies/{movie_id}/lock")
+async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
+    old = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
+    prev = old.get("locked_fields", []) or []
+    await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": {"locked_fields": payload.locked_fields}})
+    doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
+    enriched = await enrich_movie(doc)
+    added = [f for f in payload.locked_fields if f not in prev]
+    removed = [f for f in prev if f not in payload.locked_fields]
+    parts = []
+    if added: parts.append(f"locked: {', '.join(added)}")
+    if removed: parts.append(f"unlocked: {', '.join(removed)}")
+    changes = [{"field": "locked_fields", "before": ", ".join(prev) or "—", "after": ", ".join(payload.locked_fields) or "—"}]
+    await log_edit(mod, "movie", movie_id, "lock", enriched["title"], "; ".join(parts) or "No change", changes)
     return enriched
 
 @api_router.delete("/movies/{movie_id}")
@@ -1036,12 +1238,24 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     update_data = _serialize_series_payload(update_data)
     old_doc = await db.series.find_one({"_id": ObjectId(series_id)}) or {}
+    _check_locks(old_doc, update_data, user)
     await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": update_data})
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
     enriched = await enrich_series(doc)
     changes = compute_field_changes(old_doc, update_data)
     changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
     await log_edit(user, "series", series_id, "update", enriched["title"], f"Updated {changed_names}", changes)
+    return enriched
+
+@api_router.patch("/series/{series_id}/lock")
+async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
+    old = await db.series.find_one({"_id": ObjectId(series_id)}) or {}
+    prev = old.get("locked_fields", []) or []
+    await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": {"locked_fields": payload.locked_fields}})
+    doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    enriched = await enrich_series(doc)
+    changes = [{"field": "locked_fields", "before": ", ".join(prev) or "—", "after": ", ".join(payload.locked_fields) or "—"}]
+    await log_edit(mod, "series", series_id, "lock", enriched["title"], "Updated field locks", changes)
     return enriched
 
 @api_router.delete("/series/{series_id}")
@@ -1167,12 +1381,24 @@ async def get_actor(actor_id: str):
 async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     old_doc = await db.actors.find_one({"_id": ObjectId(actor_id)}) or {}
+    _check_locks(old_doc, update_data, user)
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": update_data})
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
     dd = doc_to_dict(doc)
     changes = compute_field_changes(old_doc, update_data)
     changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
     await log_edit(user, "actor", actor_id, "update", dd["name"], f"Updated {changed_names}", changes)
+    return dd
+
+@api_router.patch("/actors/{actor_id}/lock")
+async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
+    old = await db.actors.find_one({"_id": ObjectId(actor_id)}) or {}
+    prev = old.get("locked_fields", []) or []
+    await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": {"locked_fields": payload.locked_fields}})
+    doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
+    dd = doc_to_dict(doc)
+    changes = [{"field": "locked_fields", "before": ", ".join(prev) or "—", "after": ", ".join(payload.locked_fields) or "—"}]
+    await log_edit(mod, "actor", actor_id, "lock", dd["name"], "Updated field locks", changes)
     return dd
 
 @api_router.delete("/actors/{actor_id}")
