@@ -2,7 +2,25 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
 import MovieCard from "@/components/MovieCard";
-import { Calendar, Film } from "lucide-react";
+import { Calendar, Film, Cake } from "lucide-react";
+
+function computeAge(dobStr) {
+  if (!dobStr) return null;
+  const dob = new Date(dobStr);
+  if (isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
+
+function formatDob(dobStr) {
+  if (!dobStr) return "";
+  const d = new Date(dobStr);
+  if (isNaN(d.getTime())) return dobStr;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
 
 export default function ActorDetail() {
   const { id } = useParams();
@@ -36,9 +54,26 @@ export default function ActorDetail() {
             <div>
               <div className="text-xs uppercase tracking-widest text-amber-400 font-semibold">Actor Profile</div>
               <h1 className="mt-2 font-display text-5xl sm:text-6xl tracking-tight text-white" data-testid="actor-name">{actor.name}</h1>
-              <div className="mt-3 flex items-center gap-4 text-sm text-slate-400">
-                {actor.birth_date && <span className="flex items-center gap-1"><Calendar className="w-4 h-4 text-amber-400" /> {actor.birth_date}</span>}
-                <span className="flex items-center gap-1"><Film className="w-4 h-4 text-amber-400" /> {actor.movies?.length || 0} film{(actor.movies?.length || 0) !== 1 && "s"}</span>
+              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-300">
+                {actor.birth_date && (
+                  <span className="flex items-center gap-2" data-testid="actor-dob">
+                    <Calendar className="w-4 h-4 text-amber-400" />
+                    <span className="text-slate-500">Born</span>
+                    <span className="font-medium text-white">{formatDob(actor.birth_date)}</span>
+                  </span>
+                )}
+                {actor.birth_date && computeAge(actor.birth_date) != null && (
+                  <span className="flex items-center gap-2" data-testid="actor-age">
+                    <Cake className="w-4 h-4 text-amber-400" />
+                    <span className="font-medium text-white">{computeAge(actor.birth_date)}</span>
+                    <span className="text-slate-500">years old</span>
+                  </span>
+                )}
+                <span className="flex items-center gap-2" data-testid="actor-film-count">
+                  <Film className="w-4 h-4 text-amber-400" />
+                  <span className="font-medium text-white">{actor.movies?.length || 0}</span>
+                  <span className="text-slate-500">film{(actor.movies?.length || 0) !== 1 && "s"}</span>
+                </span>
               </div>
               {actor.bio && <p className="mt-6 text-slate-300 leading-relaxed max-w-3xl">{actor.bio}</p>}
             </div>
