@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
-import { Calendar, Film, Cake, Tv, UserPlus, Edit, Trash2, MapPin, Skull } from "lucide-react";
+import { Calendar, Film, Cake, Tv, UserPlus, Edit, Trash2, MapPin, Skull, ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
@@ -197,6 +197,21 @@ export default function ActorDetail() {
           </div>
         )}
       </section>
+
+      {/* Gallery */}
+      {actor.gallery && actor.gallery.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="actor-gallery-section">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold"><ImageIcon className="w-4 h-4" /> Photos</div>
+          <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">Gallery</h2>
+          <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            {actor.gallery.map((img, i) => (
+              <div key={i} className="rounded-xl overflow-hidden aspect-square bg-[#1e2430] border border-white/5">
+                <img src={fileUrl(img)} alt="" className="w-full h-full object-cover" />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* History */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">

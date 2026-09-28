@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
 import SimilarSection from "@/components/SimilarSection";
+import DiscussionSection from "@/components/DiscussionSection";
 
 export default function MovieDetail() {
   const { id } = useParams();
@@ -186,6 +187,9 @@ export default function MovieDetail() {
 
       {/* Similar */}
       <SimilarSection kind="movie" entityId={id} />
+
+      {/* Discussion */}
+      <DiscussionSection entityType="movie" entityId={id} />
 
       {/* Edit History */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">

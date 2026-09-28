@@ -39,6 +39,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
             episodes: (se.episodes || []).map((ep) => ({
               episode_number: ep.episode_number, name: ep.name || "", air_date: ep.air_date || "",
               overview: ep.overview || "", still_url: ep.still_url || "",
+              stills: ep.stills || (ep.still_url ? [ep.still_url] : []),
               guest_stars: (ep.guest_stars || []).map((gs) => ({ actor_id: gs.actor?.id || gs.actor_id, character_name: gs.character_name })),
             })),
           })),
@@ -94,7 +95,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
     const eps = form.seasons[si].episodes || [];
     const nextNum = (eps[eps.length - 1]?.episode_number || 0) + 1;
     const n = [...form.seasons];
-    n[si] = { ...n[si], episodes: [...eps, { episode_number: nextNum, name: "", air_date: "", overview: "", still_url: "", guest_stars: [] }] };
+    n[si] = { ...n[si], episodes: [...eps, { episode_number: nextNum, name: "", air_date: "", overview: "", still_url: "", stills: [], guest_stars: [] }] };
     setForm({ ...form, seasons: n });
   };
   const updEp = (si, ei, k, v) => {
@@ -271,8 +272,8 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
                       </div>
                       <Input placeholder="Overview (optional)" value={ep.overview} onChange={(e) => updEp(si, ei, "overview", e.target.value)} className="mt-2 bg-[#0d0f12] border-white/10 text-white text-sm h-9" />
                       <div className="mt-2">
-                        <Label className="text-xs text-slate-400 block mb-1">Episode still image</Label>
-                        <ImageUpload value={ep.still_url} onChange={(v) => updEp(si, ei, "still_url", v)} />
+                        <Label className="text-xs text-slate-400 block mb-1">Episode stills ({(ep.stills || []).length} images)</Label>
+                        <GalleryUpload value={ep.stills || []} onChange={(v) => updEp(si, ei, "stills", v)} />
                       </div>
 
                       <div className="mt-3 pl-3 border-l-2 border-amber-500/40">

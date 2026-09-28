@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users } from "lucide-react";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
@@ -123,6 +123,9 @@ function UsersTab({ currentRole }) {
   const [duration, setDuration] = useState("7");
   const [customDays, setCustomDays] = useState("");
   const [reason, setReason] = useState("");
+  const [ipData, setIpData] = useState({}); // userId -> ips response
+  const [ipLoading, setIpLoading] = useState({});
+  const [ipOpen, setIpOpen] = useState({});
 
   const load = async () => { const r = await api.get("/moderation/users"); setUsers(r.data); };
   useEffect(() => { load(); }, []);
@@ -168,6 +171,19 @@ function UsersTab({ currentRole }) {
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
+  const toggleIps = async (uid) => {
+    const isOpen = !!ipOpen[uid];
+    setIpOpen((s) => ({ ...s, [uid]: !isOpen }));
+    if (isOpen) return;
+    if (ipData[uid]) return;
+    setIpLoading((s) => ({ ...s, [uid]: true }));
+    try {
+      const r = await api.get(`/moderation/users/${uid}/ips`);
+      setIpData((s) => ({ ...s, [uid]: r.data }));
+    } catch (e) { toast.error("Failed to load IPs"); }
+    setIpLoading((s) => ({ ...s, [uid]: false }));
+  };
+
   return (
     <Card className="bg-[#14181f] border-white/10 text-white">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -177,23 +193,31 @@ function UsersTab({ currentRole }) {
       <CardContent>
         <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-2">
           {filtered.map((u) => (
-            <div key={u.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`user-row-${u.id}`}>
+            <div key={u.id} data-testid={`user-row-${u.id}`}>
+            <div className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3">
               <div className="w-10 h-10 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-sm text-slate-400 flex-shrink-0">
                 {u.avatar_url ? <img src={fileUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" /> : (u.name?.[0] || "?")}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-white truncate">{u.name}</div>
                 <div className="text-xs text-slate-400 truncate">{u.email}</div>
-                <div className="flex items-center gap-2 mt-1">
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <Badge className={
                     u.role === "admin" ? "bg-rose-500/15 text-rose-300 border-rose-500/40" :
                     u.role === "moderator" ? "bg-sky-500/15 text-sky-300 border-sky-500/40" :
                     "bg-white/5 text-slate-300 border-white/10"
                   }>{u.role}</Badge>
+                  {u.ip_count > 0 && (
+                    <span className="text-[10px] text-slate-500 uppercase tracking-widest">{u.ip_count} IP{u.ip_count !== 1 && "s"}</span>
+                  )}
                   {isSuspended(u) && <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/40">Suspended{u.suspended_until === "permanent" ? " (permanent)" : ` until ${u.suspended_until?.slice(0,10)}`}</Badge>}
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => toggleIps(u.id)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`ips-toggle-${u.id}`}>
+                  <Network className="w-4 h-4 mr-1" /> IPs
+                  {ipOpen[u.id] ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+                </Button>
                 {currentRole === "admin" && u.role !== "admin" && (
                   <Select value={u.role} onValueChange={(v) => setRole(u.id, v)}>
                     <SelectTrigger className="w-[140px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
@@ -216,6 +240,52 @@ function UsersTab({ currentRole }) {
                   )
                 )}
               </div>
+            </div>
+            {ipOpen[u.id] && (
+              <div className="mt-2 rounded-lg border border-white/10 bg-[#0d0f12] p-4 ml-13" data-testid={`ip-panel-${u.id}`}>
+                {ipLoading[u.id] ? (
+                  <div className="text-sm text-slate-500">Loading IPs...</div>
+                ) : !ipData[u.id] || !ipData[u.id].ips?.length ? (
+                  <div className="text-sm text-slate-500">No IPs recorded yet for this user.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {ipData[u.id].ips.map((entry, i) => (
+                      <div key={i} className="rounded border border-white/10 bg-[#14181f] p-3">
+                        <div className="flex items-center justify-between gap-4 flex-wrap">
+                          <div>
+                            <div className="font-mono text-amber-400 text-sm" data-testid={`ip-address-${u.id}-${i}`}>{entry.ip}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              {entry.count} sign-in{entry.count !== 1 && "s"} • last {entry.last_seen?.slice(0, 19).replace("T", " ")}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            first {entry.first_seen?.slice(0, 10)}
+                          </div>
+                        </div>
+                        {entry.shared_with && entry.shared_with.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-white/5">
+                            <div className="text-[10px] uppercase tracking-widest text-rose-300 font-semibold mb-2">
+                              Shared with {entry.shared_with.length} other account{entry.shared_with.length !== 1 && "s"}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {entry.shared_with.map((s) => (
+                                <Link to={`/user/${s.id}`} key={s.id} className="flex items-center gap-2 rounded-full bg-rose-500/10 border border-rose-500/30 pl-1 pr-3 py-1 hover:bg-rose-500/20 transition" data-testid={`shared-account-${s.id}`}>
+                                  <div className="w-5 h-5 rounded-full bg-[#1e2430] overflow-hidden flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
+                                    {s.avatar_url ? <img src={fileUrl(s.avatar_url)} alt="" className="w-full h-full object-cover" /> : (s.name?.[0] || "?")}
+                                  </div>
+                                  <span className="text-xs text-white">{s.name}</span>
+                                  <span className="text-[10px] text-rose-200/70">{s.role}</span>
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             </div>
           ))}
         </div>

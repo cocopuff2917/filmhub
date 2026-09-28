@@ -209,6 +209,7 @@ class ActorCreate(BaseModel):
     death_date: Optional[str] = None
     place_of_birth: str = ""
     place_of_death: str = ""
+    gallery: List[str] = []
 
 class ActorUpdate(BaseModel):
     name: Optional[str] = None
@@ -218,6 +219,7 @@ class ActorUpdate(BaseModel):
     death_date: Optional[str] = None
     place_of_birth: Optional[str] = None
     place_of_death: Optional[str] = None
+    gallery: Optional[List[str]] = None
 
 class ReviewCreate(BaseModel):
     rating: float = Field(ge=0.5, le=10.0)
@@ -234,6 +236,7 @@ class EpisodeItem(BaseModel):
     air_date: Optional[str] = None
     overview: str = ""
     still_url: str = ""
+    stills: List[str] = []
     guest_stars: List[GuestStar] = []
 
 class SeasonItem(BaseModel):
@@ -284,6 +287,12 @@ class RoleUpdate(BaseModel):
 
 class AvatarUpdate(BaseModel):
     avatar_url: str
+
+class CommentCreate(BaseModel):
+    entity_type: str  # movie | series
+    entity_id: str
+    text: str = Field(min_length=1, max_length=2000)
+    parent_id: Optional[str] = None
 
 # ----------- Utility -----------
 def doc_to_dict(doc, id_key="id"):
@@ -427,9 +436,34 @@ async def log_edit(user: dict, entity_type: str, entity_id: str, action: str, en
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
+def get_client_ip(request: Request) -> str:
+    # honor x-forwarded-for from ingress
+    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    xrip = request.headers.get("x-real-ip") or request.headers.get("X-Real-IP")
+    if xrip:
+        return xrip.strip()
+    return request.client.host if request.client else "unknown"
+
+async def record_user_ip(user_id: ObjectId, ip: str):
+    if not ip or ip == "unknown":
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    # try to update existing entry
+    result = await db.users.update_one(
+        {"_id": user_id, "ips.ip": ip},
+        {"$set": {"ips.$.last_seen": now}, "$inc": {"ips.$.count": 1}},
+    )
+    if result.matched_count == 0:
+        await db.users.update_one(
+            {"_id": user_id},
+            {"$push": {"ips": {"ip": ip, "first_seen": now, "last_seen": now, "count": 1}}},
+        )
+
 # ----------- Auth Routes -----------
 @api_router.post("/auth/register")
-async def register(payload: RegisterRequest, response: Response):
+async def register(payload: RegisterRequest, request: Request, response: Response):
     email = payload.email.lower()
     existing = await db.users.find_one({"email": email})
     if existing:
@@ -441,16 +475,18 @@ async def register(payload: RegisterRequest, response: Response):
         "role": "user",
         "avatar_url": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "ips": [],
     }
     result = await db.users.insert_one(doc)
-    user_id = str(result.inserted_id)
-    access = create_access_token(user_id, email)
-    refresh = create_refresh_token(user_id)
+    user_id = result.inserted_id
+    await record_user_ip(user_id, get_client_ip(request))
+    access = create_access_token(str(user_id), email)
+    refresh = create_refresh_token(str(user_id))
     set_auth_cookies(response, access, refresh)
-    return {"id": user_id, "email": email, "name": payload.name, "role": "user", "avatar_url": ""}
+    return {"id": str(user_id), "email": email, "name": payload.name, "role": "user", "avatar_url": ""}
 
 @api_router.post("/auth/login")
-async def login(payload: LoginRequest, response: Response):
+async def login(payload: LoginRequest, request: Request, response: Response):
     email = payload.email.lower()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
@@ -474,6 +510,7 @@ async def login(payload: LoginRequest, response: Response):
             reason = user.get("suspension_reason") or ""
             when = "permanently" if sus == "permanent" else f"until {sus}"
             raise HTTPException(status_code=403, detail=f"Account suspended {when}. {reason}".strip())
+    await record_user_ip(user["_id"], get_client_ip(request))
     user_id = str(user["_id"])
     access = create_access_token(user_id, email)
     refresh = create_refresh_token(user_id)
@@ -631,6 +668,42 @@ async def set_user_role(user_id: str, payload: RoleUpdate, admin: dict = Depends
     await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Role set to {payload.role}")
     return {"ok": True, "role": payload.role}
 
+@api_router.get("/moderation/users/{user_id}/ips")
+async def get_user_ips(user_id: str, mod: dict = Depends(get_current_moderator)):
+    try:
+        target = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    ips = target.get("ips", []) or []
+    # find other users sharing any of these IPs
+    result = []
+    for entry in ips:
+        ip = entry.get("ip")
+        if not ip:
+            continue
+        shared = []
+        async for u in db.users.find({"ips.ip": ip, "_id": {"$ne": target["_id"]}}):
+            shared.append({
+                "id": str(u["_id"]),
+                "name": u.get("name"),
+                "email": u.get("email"),
+                "role": u.get("role", "user"),
+                "avatar_url": u.get("avatar_url", ""),
+                "suspended_until": u.get("suspended_until"),
+            })
+        result.append({
+            "ip": ip,
+            "first_seen": entry.get("first_seen"),
+            "last_seen": entry.get("last_seen"),
+            "count": entry.get("count", 1),
+            "shared_with": shared,
+        })
+    # sort by last_seen desc
+    result.sort(key=lambda x: x.get("last_seen") or "", reverse=True)
+    return {"user_id": user_id, "user_name": target.get("name"), "ips": result}
+
 @api_router.get("/moderation/users")
 async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int = 200):
     users = []
@@ -644,8 +717,51 @@ async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int 
             "created_at": u.get("created_at"),
             "suspended_until": u.get("suspended_until"),
             "suspension_reason": u.get("suspension_reason", ""),
+            "ip_count": len(u.get("ips", []) or []),
         })
     return users
+
+# ----------- Comments (Discussion) -----------
+@api_router.post("/comments")
+async def create_comment(payload: CommentCreate, user: dict = Depends(get_current_user)):
+    if payload.entity_type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="Invalid entity_type")
+    doc = {
+        "entity_type": payload.entity_type,
+        "entity_id": payload.entity_id,
+        "text": payload.text.strip(),
+        "parent_id": payload.parent_id,
+        "user_id": user["id"],
+        "user_name": user.get("name"),
+        "user_avatar": user.get("avatar_url", ""),
+        "user_role": user.get("role", "user"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    result = await db.comments.insert_one(doc)
+    doc["id"] = str(result.inserted_id)
+    doc.pop("_id", None)
+    return doc
+
+@api_router.get("/comments")
+async def list_comments(entity_type: str, entity_id: str, limit: int = 200):
+    docs = []
+    async for c in db.comments.find({"entity_type": entity_type, "entity_id": entity_id}).sort("created_at", 1).limit(limit):
+        c["id"] = str(c.pop("_id"))
+        docs.append(c)
+    return docs
+
+@api_router.delete("/comments/{comment_id}")
+async def delete_comment(comment_id: str, user: dict = Depends(get_current_user)):
+    try:
+        c = await db.comments.find_one({"_id": ObjectId(comment_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if not c:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if c.get("user_id") != user["id"] and user.get("role") not in ("moderator", "admin"):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    await db.comments.delete_one({"_id": ObjectId(comment_id)})
+    return {"ok": True}
 
 # ----------- Movies -----------
 @api_router.post("/movies")

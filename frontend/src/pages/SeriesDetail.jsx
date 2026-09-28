@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
 import SimilarSection from "@/components/SimilarSection";
+import DiscussionSection from "@/components/DiscussionSection";
 
 export default function SeriesDetail() {
   const { id } = useParams();
@@ -139,12 +140,14 @@ export default function SeriesDetail() {
                 <AccordionContent className="pb-4">
                   {season.overview && <p className="text-sm text-slate-400 mb-4">{season.overview}</p>}
                   <div className="space-y-3">
-                    {(season.episodes || []).sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0)).map((ep, i) => (
+                    {(season.episodes || []).sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0)).map((ep, i) => {
+                      const stills = (ep.stills && ep.stills.length > 0) ? ep.stills : (ep.still_url ? [ep.still_url] : []);
+                      return (
                       <div key={i} className="rounded-lg bg-[#0d0f12] border border-white/10 overflow-hidden">
                         <div className="flex flex-col sm:flex-row">
-                          {ep.still_url && (
+                          {stills.length > 0 && (
                             <div className="sm:w-52 h-32 sm:h-auto flex-shrink-0 bg-[#1e2430] overflow-hidden">
-                              <img src={fileUrl(ep.still_url)} alt="" className="w-full h-full object-cover" />
+                              <img src={fileUrl(stills[0])} alt="" className="w-full h-full object-cover" />
                             </div>
                           )}
                           <div className="flex-1 p-4">
@@ -156,6 +159,15 @@ export default function SeriesDetail() {
                               </div>
                             </div>
                             {ep.overview && <p className="mt-2 text-sm text-slate-400">{ep.overview}</p>}
+                            {stills.length > 1 && (
+                              <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                {stills.slice(1).map((s, si2) => (
+                                  <div key={si2} className="rounded overflow-hidden aspect-video bg-[#1e2430] border border-white/5">
+                                    <img src={fileUrl(s)} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {ep.guest_stars && ep.guest_stars.length > 0 && (
                               <div className="mt-3">
                                 <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold mb-2">
@@ -177,7 +189,8 @@ export default function SeriesDetail() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     {(!season.episodes || season.episodes.length === 0) && <div className="text-sm text-slate-500">No episodes yet.</div>}
                   </div>
                 </AccordionContent>
@@ -206,6 +219,9 @@ export default function SeriesDetail() {
 
       {/* Similar */}
       <SimilarSection kind="series" entityId={id} />
+
+      {/* Discussion */}
+      <DiscussionSection entityType="series" entityId={id} />
 
       {/* History */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">

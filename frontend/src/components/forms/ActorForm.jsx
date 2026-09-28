@@ -5,10 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import ImageUpload from "@/components/ImageUpload";
+import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 
 export default function ActorForm({ actor, onSaved, onCancel }) {
-  const empty = { name: "", bio: "", photo_url: "", birth_date: "", death_date: "", place_of_birth: "", place_of_death: "" };
+  const empty = { name: "", bio: "", photo_url: "", birth_date: "", death_date: "", place_of_birth: "", place_of_death: "", gallery: [] };
   const [form, setForm] = useState(empty);
 
   useEffect(() => {
@@ -21,6 +21,7 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
         death_date: actor.death_date || "",
         place_of_birth: actor.place_of_birth || "",
         place_of_death: actor.place_of_death || "",
+        gallery: actor.gallery || [],
       });
     } else {
       setForm(empty);
@@ -78,6 +79,10 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
       <div>
         <Label className="text-slate-300 block mb-2">Headshot</Label>
         <ImageUpload value={form.photo_url} onChange={(v) => setForm({ ...form, photo_url: v })} testid="actor-photo-upload" />
+      </div>
+      <div>
+        <Label className="text-slate-300 block mb-2">Gallery ({(form.gallery || []).length} images)</Label>
+        <GalleryUpload value={form.gallery} onChange={(v) => setForm({ ...form, gallery: v })} testid="actor-gallery-upload" />
       </div>
       <div className="flex gap-2 pt-4 border-t border-white/10">
         <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="actor-submit-btn">
