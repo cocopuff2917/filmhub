@@ -36,9 +36,11 @@ export default function Admin() {
       <Tabs defaultValue="movies" className="mt-8">
         <TabsList className="bg-[#14181f] border border-white/10">
           <TabsTrigger value="movies" data-testid="tab-movies">Movies</TabsTrigger>
+          <TabsTrigger value="series" data-testid="tab-series">TV Series</TabsTrigger>
           <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
         </TabsList>
         <TabsContent value="movies" className="mt-6"><MoviesTab /></TabsContent>
+        <TabsContent value="series" className="mt-6"><SeriesTab /></TabsContent>
         <TabsContent value="actors" className="mt-6"><ActorsTab /></TabsContent>
       </Tabs>
     </div>
@@ -334,6 +336,360 @@ function ActorsTab() {
               </div>
             ))}
             {actors.length === 0 && <div className="text-slate-500 text-sm">No actors yet.</div>}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+
+function SeriesTab() {
+  const [seriesList, setSeriesList] = useState([]);
+  const [actors, setActors] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const empty = {
+    title: "", first_air_date: "", last_air_date: "", genres: "",
+    synopsis: "", poster_url: "", backdrop_url: "", trailer_url: "",
+    status: "Ongoing", is_trending: false, main_cast: [], seasons: [],
+  };
+  const [form, setForm] = useState(empty);
+
+  const load = async () => {
+    const [s, a] = await Promise.all([api.get("/series"), api.get("/actors")]);
+    setSeriesList(s.data); setActors(a.data);
+  };
+  useEffect(() => { load(); }, []);
+
+  const startEdit = async (s) => {
+    // fetch full series to get all nested data
+    const full = (await api.get(`/series/${s.id}`)).data;
+    setEditingId(s.id);
+    setForm({
+      title: full.title, first_air_date: full.first_air_date || "", last_air_date: full.last_air_date || "",
+      genres: (full.genres || []).join(", "), synopsis: full.synopsis || "",
+      poster_url: full.poster_url || "", backdrop_url: full.backdrop_url || "",
+      trailer_url: full.trailer_url || "", status: full.status || "Ongoing",
+      is_trending: !!full.is_trending,
+      main_cast: (full.main_cast || []).map((c) => ({ actor_id: c.actor?.id || c.actor_id, character_name: c.character_name })),
+      seasons: (full.seasons || []).map((se) => ({
+        season_number: se.season_number, name: se.name || "", air_date: se.air_date || "",
+        overview: se.overview || "", poster_url: se.poster_url || "",
+        episodes: (se.episodes || []).map((ep) => ({
+          episode_number: ep.episode_number, name: ep.name || "", air_date: ep.air_date || "",
+          overview: ep.overview || "",
+          guest_stars: (ep.guest_stars || []).map((gs) => ({ actor_id: gs.actor?.id || gs.actor_id, character_name: gs.character_name })),
+        })),
+      })),
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const reset = () => { setEditingId(null); setForm(empty); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      ...form,
+      genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
+      main_cast: form.main_cast.filter((c) => c.actor_id && c.character_name),
+      seasons: form.seasons.map((se) => ({
+        ...se,
+        season_number: Number(se.season_number),
+        episodes: (se.episodes || []).map((ep) => ({
+          ...ep,
+          episode_number: Number(ep.episode_number),
+          guest_stars: (ep.guest_stars || []).filter((g) => g.actor_id && g.character_name),
+        })),
+      })),
+    };
+    try {
+      if (editingId) { await api.patch(`/series/${editingId}`, payload); toast.success("Series updated"); }
+      else { await api.post("/series", payload); toast.success("Series created"); }
+      reset(); load();
+    } catch { toast.error("Failed to save series"); }
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this series?")) return;
+    await api.delete(`/series/${id}`); toast.success("Deleted"); load();
+  };
+
+  // main cast helpers
+  const addMainCast = () => setForm({ ...form, main_cast: [...form.main_cast, { actor_id: "", character_name: "" }] });
+  const updMainCast = (i, k, v) => { const n = [...form.main_cast]; n[i] = { ...n[i], [k]: v }; setForm({ ...form, main_cast: n }); };
+  const remMainCast = (i) => setForm({ ...form, main_cast: form.main_cast.filter((_, x) => x !== i) });
+
+  // season helpers
+  const addSeason = () => {
+    const nextNum = (form.seasons[form.seasons.length - 1]?.season_number || 0) + 1;
+    setForm({ ...form, seasons: [...form.seasons, { season_number: nextNum, name: "", air_date: "", overview: "", poster_url: "", episodes: [] }] });
+  };
+  const updSeason = (i, k, v) => { const n = [...form.seasons]; n[i] = { ...n[i], [k]: v }; setForm({ ...form, seasons: n }); };
+  const remSeason = (i) => setForm({ ...form, seasons: form.seasons.filter((_, x) => x !== i) });
+
+  // episode helpers
+  const addEpisode = (si) => {
+    const eps = form.seasons[si].episodes || [];
+    const nextNum = (eps[eps.length - 1]?.episode_number || 0) + 1;
+    const n = [...form.seasons];
+    n[si] = { ...n[si], episodes: [...eps, { episode_number: nextNum, name: "", air_date: "", overview: "", guest_stars: [] }] };
+    setForm({ ...form, seasons: n });
+  };
+  const updEpisode = (si, ei, k, v) => {
+    const n = [...form.seasons];
+    const eps = [...n[si].episodes];
+    eps[ei] = { ...eps[ei], [k]: v };
+    n[si] = { ...n[si], episodes: eps };
+    setForm({ ...form, seasons: n });
+  };
+  const remEpisode = (si, ei) => {
+    const n = [...form.seasons];
+    n[si] = { ...n[si], episodes: n[si].episodes.filter((_, x) => x !== ei) };
+    setForm({ ...form, seasons: n });
+  };
+
+  // guest star helpers
+  const addGuest = (si, ei) => {
+    const n = [...form.seasons];
+    const eps = [...n[si].episodes];
+    eps[ei] = { ...eps[ei], guest_stars: [...(eps[ei].guest_stars || []), { actor_id: "", character_name: "" }] };
+    n[si] = { ...n[si], episodes: eps };
+    setForm({ ...form, seasons: n });
+  };
+  const updGuest = (si, ei, gi, k, v) => {
+    const n = [...form.seasons];
+    const eps = [...n[si].episodes];
+    const gs = [...(eps[ei].guest_stars || [])];
+    gs[gi] = { ...gs[gi], [k]: v };
+    eps[ei] = { ...eps[ei], guest_stars: gs };
+    n[si] = { ...n[si], episodes: eps };
+    setForm({ ...form, seasons: n });
+  };
+  const remGuest = (si, ei, gi) => {
+    const n = [...form.seasons];
+    const eps = [...n[si].episodes];
+    eps[ei] = { ...eps[ei], guest_stars: eps[ei].guest_stars.filter((_, x) => x !== gi) };
+    n[si] = { ...n[si], episodes: eps };
+    setForm({ ...form, seasons: n });
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
+      <Card className="bg-[#14181f] border-white/10 text-white">
+        <CardHeader><CardTitle>{editingId ? "Edit TV Series" : "New TV Series"}</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-4">
+            <div>
+              <Label className="text-slate-300">Title</Label>
+              <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-title-input" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label className="text-slate-300">First air date</Label>
+                <Input type="date" value={form.first_air_date} onChange={(e) => setForm({ ...form, first_air_date: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-first-air-input" />
+              </div>
+              <div>
+                <Label className="text-slate-300">Last air date</Label>
+                <Input type="date" value={form.last_air_date} onChange={(e) => setForm({ ...form, last_air_date: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-last-air-input" />
+              </div>
+              <div>
+                <Label className="text-slate-300">Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger className="mt-1.5 bg-[#0d0f12] border-white/10 text-white"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-[#14181f] text-white border-white/10">
+                    <SelectItem value="Ongoing">Ongoing</SelectItem>
+                    <SelectItem value="Returning">Returning</SelectItem>
+                    <SelectItem value="Ended">Ended</SelectItem>
+                    <SelectItem value="Cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-slate-300">Genres (comma separated)</Label>
+              <Input value={form.genres} onChange={(e) => setForm({ ...form, genres: e.target.value })} placeholder="Drama, Thriller" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-genres-input" />
+            </div>
+            <div>
+              <Label className="text-slate-300">Synopsis</Label>
+              <Textarea rows={3} value={form.synopsis} onChange={(e) => setForm({ ...form, synopsis: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-synopsis-input" />
+            </div>
+            <div>
+              <Label className="text-slate-300">Trailer URL</Label>
+              <Input value={form.trailer_url} onChange={(e) => setForm({ ...form, trailer_url: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-slate-300 block mb-2">Poster</Label>
+                <ImageUpload value={form.poster_url} onChange={(v) => setForm({ ...form, poster_url: v })} testid="series-poster-upload" />
+              </div>
+              <div>
+                <Label className="text-slate-300 block mb-2">Backdrop</Label>
+                <ImageUpload value={form.backdrop_url} onChange={(v) => setForm({ ...form, backdrop_url: v })} testid="series-backdrop-upload" />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 px-4 py-3">
+              <Switch checked={form.is_trending} onCheckedChange={(v) => setForm({ ...form, is_trending: v })} data-testid="series-trending-switch" />
+              <Label className="text-slate-300 cursor-pointer">Mark as trending</Label>
+            </div>
+
+            {/* Main Cast */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-slate-300">Main Cast (Series Regulars)</Label>
+                <Button type="button" variant="outline" onClick={addMainCast} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-8" data-testid="series-add-main-cast">
+                  <Plus className="w-4 h-4 mr-1" /> Add regular
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {form.main_cast.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Select value={c.actor_id} onValueChange={(v) => updMainCast(i, "actor_id", v)}>
+                      <SelectTrigger className="flex-1 bg-[#0d0f12] border-white/10 text-white"><SelectValue placeholder="Select actor" /></SelectTrigger>
+                      <SelectContent className="bg-[#14181f] text-white border-white/10 max-h-64">
+                        {actors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Input placeholder="Character" value={c.character_name} onChange={(e) => updMainCast(i, "character_name", e.target.value)} className="flex-1 bg-[#0d0f12] border-white/10 text-white" />
+                    <Button type="button" variant="ghost" onClick={() => remMainCast(i)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"><X className="w-4 h-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Seasons */}
+            <div className="pt-4 border-t border-white/10">
+              <div className="flex items-center justify-between mb-4">
+                <Label className="text-slate-300 text-base">Seasons & Episodes</Label>
+                <Button type="button" variant="outline" onClick={addSeason} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 h-8" data-testid="series-add-season">
+                  <Plus className="w-4 h-4 mr-1" /> Add season
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                {form.seasons.map((season, si) => (
+                  <div key={si} className="rounded-lg border border-white/10 bg-[#0d0f12] p-4" data-testid={`season-block-${si}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-heading text-white">Season {season.season_number}</div>
+                      <Button type="button" variant="ghost" onClick={() => remSeason(si)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 h-7">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <Label className="text-xs text-slate-400">Season #</Label>
+                        <Input type="number" value={season.season_number} onChange={(e) => updSeason(si, "season_number", e.target.value)} className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
+                      </div>
+                      <div className="col-span-2">
+                        <Label className="text-xs text-slate-400">Name</Label>
+                        <Input value={season.name} onChange={(e) => updSeason(si, "name", e.target.value)} placeholder="Optional" className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-slate-400">Air date</Label>
+                        <Input type="date" value={season.air_date} onChange={(e) => updSeason(si, "air_date", e.target.value)} className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
+                      </div>
+                      <div className="col-span-2">
+                        <Label className="text-xs text-slate-400">Overview</Label>
+                        <Input value={season.overview} onChange={(e) => updSeason(si, "overview", e.target.value)} className="mt-1 bg-[#14181f] border-white/10 text-white h-9" />
+                      </div>
+                    </div>
+
+                    {/* Episodes */}
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-xs uppercase tracking-widest text-amber-400">Episodes</Label>
+                        <Button type="button" variant="outline" onClick={() => addEpisode(si)} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-7 text-xs" data-testid={`add-episode-${si}`}>
+                          <Plus className="w-3 h-3 mr-1" /> Episode
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        {(season.episodes || []).map((ep, ei) => (
+                          <div key={ei} className="rounded bg-[#14181f] border border-white/10 p-3" data-testid={`episode-block-${si}-${ei}`}>
+                            <div className="grid grid-cols-[60px_1fr_130px_auto] gap-2 items-end">
+                              <div>
+                                <Label className="text-xs text-slate-400">E#</Label>
+                                <Input type="number" value={ep.episode_number} onChange={(e) => updEpisode(si, ei, "episode_number", e.target.value)} className="mt-1 bg-[#0d0f12] border-white/10 text-white h-9" />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-slate-400">Title</Label>
+                                <Input value={ep.name} onChange={(e) => updEpisode(si, ei, "name", e.target.value)} className="mt-1 bg-[#0d0f12] border-white/10 text-white h-9" />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-slate-400">Air date</Label>
+                                <Input type="date" value={ep.air_date} onChange={(e) => updEpisode(si, ei, "air_date", e.target.value)} className="mt-1 bg-[#0d0f12] border-white/10 text-white h-9" />
+                              </div>
+                              <Button type="button" variant="ghost" onClick={() => remEpisode(si, ei)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 h-9">
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                            <Input placeholder="Overview (optional)" value={ep.overview} onChange={(e) => updEpisode(si, ei, "overview", e.target.value)} className="mt-2 bg-[#0d0f12] border-white/10 text-white text-sm h-9" />
+
+                            {/* Guest stars */}
+                            <div className="mt-3 pl-3 border-l-2 border-amber-500/40">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs uppercase tracking-wider text-amber-400 font-semibold">Guest stars</span>
+                                <Button type="button" variant="outline" onClick={() => addGuest(si, ei)} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-6 text-xs" data-testid={`add-guest-${si}-${ei}`}>
+                                  <Plus className="w-3 h-3 mr-1" /> Guest
+                                </Button>
+                              </div>
+                              <div className="space-y-1.5">
+                                {(ep.guest_stars || []).map((gs, gi) => (
+                                  <div key={gi} className="flex items-center gap-2">
+                                    <Select value={gs.actor_id} onValueChange={(v) => updGuest(si, ei, gi, "actor_id", v)}>
+                                      <SelectTrigger className="flex-1 bg-[#0d0f12] border-white/10 text-white h-8 text-xs"><SelectValue placeholder="Actor" /></SelectTrigger>
+                                      <SelectContent className="bg-[#14181f] text-white border-white/10 max-h-56">
+                                        {actors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                                      </SelectContent>
+                                    </Select>
+                                    <Input placeholder="Character" value={gs.character_name} onChange={(e) => updGuest(si, ei, gi, "character_name", e.target.value)} className="flex-1 bg-[#0d0f12] border-white/10 text-white h-8 text-xs" />
+                                    <Button type="button" variant="ghost" onClick={() => remGuest(si, ei, gi)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 h-8 w-8 p-0"><X className="w-3 h-3" /></Button>
+                                  </div>
+                                ))}
+                                {(!ep.guest_stars || ep.guest_stars.length === 0) && <div className="text-[11px] text-slate-600">No guest stars for this episode.</div>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {(!season.episodes || season.episodes.length === 0) && (
+                          <div className="text-xs text-slate-500 py-2 pl-1">No episodes. Add one above.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {form.seasons.length === 0 && <div className="text-sm text-slate-500 py-4">No seasons yet — click "Add season" to start.</div>}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-4 border-t border-white/10">
+              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="series-submit-btn">
+                {editingId ? "Update Series" : "Create Series"}
+              </Button>
+              {editingId && <Button type="button" variant="outline" onClick={reset} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-[#14181f] border-white/10 text-white h-fit sticky top-20">
+        <CardHeader><CardTitle>All Series ({seriesList.length})</CardTitle></CardHeader>
+        <CardContent>
+          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
+            {seriesList.map((s) => (
+              <div key={s.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-series-row-${s.id}`}>
+                <div className="w-12 h-16 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
+                  {s.poster_url && <img src={fileUrl(s.poster_url)} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-white truncate">{s.title}</div>
+                  <div className="text-xs text-slate-400">{s.first_air_date?.slice(0,4) || "—"} • {s.season_count} seasons</div>
+                  {s.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
+                </div>
+                <Button size="sm" variant="outline" onClick={() => startEdit(s)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-series-${s.id}`}><Edit className="w-4 h-4" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => del(s.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-series-${s.id}`}><Trash2 className="w-4 h-4" /></Button>
+              </div>
+            ))}
+            {seriesList.length === 0 && <div className="text-slate-500 text-sm">No series yet.</div>}
           </div>
         </CardContent>
       </Card>

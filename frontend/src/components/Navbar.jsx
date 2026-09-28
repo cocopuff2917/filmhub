@@ -39,6 +39,7 @@ export default function Navbar() {
           <nav className="hidden md:flex items-center gap-8">
             <NavLink to="/" end className={linkClass} data-testid="nav-home">Home</NavLink>
             <NavLink to="/browse" className={linkClass} data-testid="nav-browse">Browse</NavLink>
+            <NavLink to="/browse?tab=series" className={linkClass} data-testid="nav-series">TV Series</NavLink>
             {user && <NavLink to="/watchlist" className={linkClass} data-testid="nav-watchlist">Watchlist</NavLink>}
             {user && user.role === "admin" && (
               <NavLink to="/admin" className={linkClass} data-testid="nav-admin">Admin</NavLink>

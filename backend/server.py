@@ -194,6 +194,54 @@ class ReviewCreate(BaseModel):
     rating: float = Field(ge=0.5, le=10.0)
     text: str = ""
 
+# ----------- Series Models -----------
+class GuestStar(BaseModel):
+    actor_id: str
+    character_name: str
+
+class EpisodeItem(BaseModel):
+    episode_number: int
+    name: str = ""
+    air_date: Optional[str] = None
+    overview: str = ""
+    guest_stars: List[GuestStar] = []
+
+class SeasonItem(BaseModel):
+    season_number: int
+    name: str = ""
+    air_date: Optional[str] = None
+    overview: str = ""
+    poster_url: str = ""
+    episodes: List[EpisodeItem] = []
+
+class SeriesCreate(BaseModel):
+    title: str
+    first_air_date: Optional[str] = None
+    last_air_date: Optional[str] = None
+    genres: List[str] = []
+    synopsis: str = ""
+    poster_url: str = ""
+    backdrop_url: str = ""
+    trailer_url: str = ""
+    status: str = "Ongoing"  # Ongoing / Ended / Returning
+    main_cast: List[CastMember] = []
+    seasons: List[SeasonItem] = []
+    is_trending: bool = False
+
+class SeriesUpdate(BaseModel):
+    title: Optional[str] = None
+    first_air_date: Optional[str] = None
+    last_air_date: Optional[str] = None
+    genres: Optional[List[str]] = None
+    synopsis: Optional[str] = None
+    poster_url: Optional[str] = None
+    backdrop_url: Optional[str] = None
+    trailer_url: Optional[str] = None
+    status: Optional[str] = None
+    main_cast: Optional[List[CastMember]] = None
+    seasons: Optional[List[SeasonItem]] = None
+    is_trending: Optional[bool] = None
+
 # ----------- Utility -----------
 def doc_to_dict(doc, id_key="id"):
     if not doc:
@@ -235,6 +283,52 @@ async def enrich_movie(doc):
     else:
         doc["avg_rating"] = None
         doc["rating_count"] = 0
+    return doc
+
+async def enrich_series(doc, deep: bool = True):
+    """Enrich a series doc with actor data on main_cast and, if deep, on episode guest_stars."""
+    doc_to_dict(doc)
+    # gather all actor ids used
+    actor_ids = set()
+    for c in doc.get("main_cast", []) or []:
+        if c.get("actor_id"):
+            actor_ids.add(c["actor_id"])
+    if deep:
+        for season in doc.get("seasons", []) or []:
+            for ep in season.get("episodes", []) or []:
+                for gs in ep.get("guest_stars", []) or []:
+                    if gs.get("actor_id"):
+                        actor_ids.add(gs["actor_id"])
+    actors_map = {}
+    if actor_ids:
+        object_ids = []
+        for aid in actor_ids:
+            try:
+                object_ids.append(ObjectId(aid))
+            except Exception:
+                pass
+        async for a in db.actors.find({"_id": {"$in": object_ids}}):
+            aid = str(a["_id"])
+            actors_map[aid] = {"id": aid, "name": a.get("name"), "photo_url": a.get("photo_url", "")}
+    enriched_main = []
+    for c in doc.get("main_cast", []) or []:
+        actor = actors_map.get(c.get("actor_id"))
+        if actor:
+            enriched_main.append({**c, "actor": actor})
+    doc["main_cast"] = enriched_main
+    if deep:
+        for season in doc.get("seasons", []) or []:
+            for ep in season.get("episodes", []) or []:
+                enriched_gs = []
+                for gs in ep.get("guest_stars", []) or []:
+                    actor = actors_map.get(gs.get("actor_id"))
+                    if actor:
+                        enriched_gs.append({**gs, "actor": actor})
+                ep["guest_stars"] = enriched_gs
+    # episode / season counts
+    seasons = doc.get("seasons", []) or []
+    doc["season_count"] = len(seasons)
+    doc["episode_count"] = sum(len(s.get("episodes", []) or []) for s in seasons)
     return doc
 
 # ----------- Auth Routes -----------
@@ -376,6 +470,144 @@ async def delete_movie(movie_id: str, _admin: dict = Depends(get_current_admin))
     await db.reviews.delete_many({"movie_id": movie_id})
     return {"ok": True}
 
+# ----------- Series -----------
+def _serialize_series_payload(data: dict) -> dict:
+    if "main_cast" in data and data["main_cast"] is not None:
+        data["main_cast"] = [c if isinstance(c, dict) else c.model_dump() for c in data["main_cast"]]
+    if "seasons" in data and data["seasons"] is not None:
+        out_seasons = []
+        for s in data["seasons"]:
+            s = s if isinstance(s, dict) else s.model_dump()
+            eps = []
+            for ep in s.get("episodes", []) or []:
+                ep = ep if isinstance(ep, dict) else ep.model_dump()
+                gs = [(g if isinstance(g, dict) else g.model_dump()) for g in ep.get("guest_stars", []) or []]
+                ep["guest_stars"] = gs
+                eps.append(ep)
+            s["episodes"] = eps
+            out_seasons.append(s)
+        data["seasons"] = out_seasons
+    return data
+
+@api_router.post("/series")
+async def create_series(payload: SeriesCreate, _admin: dict = Depends(get_current_admin)):
+    doc = _serialize_series_payload(payload.model_dump())
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.series.insert_one(doc)
+    fetched = await db.series.find_one({"_id": result.inserted_id})
+    return await enrich_series(fetched)
+
+@api_router.get("/series")
+async def list_series(
+    q: Optional[str] = None,
+    genre: Optional[str] = None,
+    year: Optional[int] = None,
+    sort: Optional[str] = "recent",
+    limit: int = 60,
+):
+    filter_query: dict = {}
+    if q:
+        actor_ids = []
+        async for a in db.actors.find({"name": {"$regex": q, "$options": "i"}}, {"_id": 1}):
+            actor_ids.append(str(a["_id"]))
+        or_filters = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"genres": {"$regex": q, "$options": "i"}},
+        ]
+        if actor_ids:
+            or_filters.append({"main_cast.actor_id": {"$in": actor_ids}})
+            or_filters.append({"seasons.episodes.guest_stars.actor_id": {"$in": actor_ids}})
+        filter_query["$or"] = or_filters
+    if genre:
+        filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
+    if year:
+        filter_query["first_air_date"] = {"$regex": f"^{year}"}
+    cursor = db.series.find(filter_query).limit(limit)
+    docs = []
+    async for d in cursor:
+        docs.append(await enrich_series(d, deep=False))
+    if sort == "year":
+        docs.sort(key=lambda x: x.get("first_air_date", ""), reverse=True)
+    else:
+        docs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return docs
+
+@api_router.get("/series/trending")
+async def trending_series(limit: int = 12):
+    docs = []
+    async for d in db.series.find({"is_trending": True}).limit(limit):
+        docs.append(await enrich_series(d, deep=False))
+    if not docs:
+        async for d in db.series.find({}).sort("created_at", -1).limit(limit):
+            docs.append(await enrich_series(d, deep=False))
+    return docs
+
+@api_router.get("/series/recent")
+async def recent_series(limit: int = 12):
+    docs = []
+    async for d in db.series.find({}).sort("created_at", -1).limit(limit):
+        docs.append(await enrich_series(d, deep=False))
+    return docs
+
+@api_router.get("/series/{series_id}")
+async def get_series(series_id: str):
+    try:
+        doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+    return await enrich_series(doc)
+
+@api_router.patch("/series/{series_id}")
+async def update_series(series_id: str, payload: SeriesUpdate, _admin: dict = Depends(get_current_admin)):
+    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    update_data = _serialize_series_payload(update_data)
+    await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": update_data})
+    doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    return await enrich_series(doc)
+
+@api_router.delete("/series/{series_id}")
+async def delete_series(series_id: str, _admin: dict = Depends(get_current_admin)):
+    await db.series.delete_one({"_id": ObjectId(series_id)})
+    return {"ok": True}
+
+# ----------- Global Search -----------
+@api_router.get("/search")
+async def global_search(q: str, limit: int = 20):
+    q = q.strip()
+    if not q:
+        return {"movies": [], "series": [], "actors": []}
+    # actors
+    actor_docs = []
+    actor_ids_str = []
+    async for a in db.actors.find({"name": {"$regex": q, "$options": "i"}}).limit(limit):
+        actor_ids_str.append(str(a["_id"]))
+        actor_docs.append(doc_to_dict(a))
+    # movies: title, genre, or cast actor
+    m_or = [
+        {"title": {"$regex": q, "$options": "i"}},
+        {"genres": {"$regex": q, "$options": "i"}},
+    ]
+    if actor_ids_str:
+        m_or.append({"cast.actor_id": {"$in": actor_ids_str}})
+    movies = []
+    async for d in db.movies.find({"$or": m_or}).limit(limit):
+        movies.append(await enrich_movie(d))
+    # series
+    s_or = [
+        {"title": {"$regex": q, "$options": "i"}},
+        {"genres": {"$regex": q, "$options": "i"}},
+    ]
+    if actor_ids_str:
+        s_or.append({"main_cast.actor_id": {"$in": actor_ids_str}})
+        s_or.append({"seasons.episodes.guest_stars.actor_id": {"$in": actor_ids_str}})
+    series_docs = []
+    async for d in db.series.find({"$or": s_or}).limit(limit):
+        series_docs.append(await enrich_series(d, deep=False))
+    return {"movies": movies, "series": series_docs, "actors": actor_docs}
+
+
 # ----------- Actors -----------
 @api_router.post("/actors")
 async def create_actor(payload: ActorCreate, _admin: dict = Depends(get_current_admin)):
@@ -407,13 +639,45 @@ async def get_actor(actor_id: str):
     movies = []
     async for m in movies_cursor:
         m_dict = await enrich_movie(m)
-        # find character name from cast
         for c in m_dict.get("cast", []):
             if c.get("actor_id") == actor_id:
                 m_dict["character_name"] = c.get("character_name")
                 break
         movies.append(m_dict)
     actor["movies"] = movies
+
+    # find series where actor is in main_cast
+    series_main = []
+    async for s in db.series.find({"main_cast.actor_id": actor_id}):
+        s_dict = await enrich_series(s, deep=False)
+        for c in s_dict.get("main_cast", []):
+            if c.get("actor_id") == actor_id:
+                s_dict["character_name"] = c.get("character_name")
+                break
+        series_main.append(s_dict)
+    actor["series"] = series_main
+
+    # find guest star episodes
+    guest_episodes = []
+    async for s in db.series.find({"seasons.episodes.guest_stars.actor_id": actor_id}):
+        sid = str(s["_id"])
+        for season in s.get("seasons", []) or []:
+            for ep in season.get("episodes", []) or []:
+                for gs in ep.get("guest_stars", []) or []:
+                    if gs.get("actor_id") == actor_id:
+                        guest_episodes.append({
+                            "series_id": sid,
+                            "series_title": s.get("title"),
+                            "series_poster_url": s.get("poster_url", ""),
+                            "season_number": season.get("season_number"),
+                            "episode_number": ep.get("episode_number"),
+                            "episode_name": ep.get("name"),
+                            "air_date": ep.get("air_date"),
+                            "character_name": gs.get("character_name"),
+                        })
+    # sort by season/episode
+    guest_episodes.sort(key=lambda x: (x.get("season_number") or 0, x.get("episode_number") or 0))
+    actor["guest_episodes"] = guest_episodes
     return actor
 
 @api_router.patch("/actors/{actor_id}")
@@ -527,6 +791,7 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.movies.create_index("title")
     await db.actors.create_index("name")
+    await db.series.create_index("title")
     await db.watchlist.create_index([("user_id", 1), ("movie_id", 1)], unique=True)
     await db.reviews.create_index([("movie_id", 1), ("user_id", 1)], unique=True)
 

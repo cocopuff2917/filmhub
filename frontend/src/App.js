@@ -4,6 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
 import Home from "@/pages/Home";
 import MovieDetail from "@/pages/MovieDetail";
+import SeriesDetail from "@/pages/SeriesDetail";
 import ActorDetail from "@/pages/ActorDetail";
 import Browse from "@/pages/Browse";
 import Login from "@/pages/Login";
@@ -22,6 +23,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
             <Route path="/movie/:id" element={<MovieDetail />} />
+            <Route path="/series/:id" element={<SeriesDetail />} />
             <Route path="/actor/:id" element={<ActorDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />

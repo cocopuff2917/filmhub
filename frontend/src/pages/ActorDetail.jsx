@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
 import MovieCard from "@/components/MovieCard";
-import { Calendar, Film, Cake } from "lucide-react";
+import SeriesCard from "@/components/SeriesCard";
+import { Calendar, Film, Cake, Tv, UserPlus } from "lucide-react";
 
 function computeAge(dobStr) {
   if (!dobStr) return null;
@@ -27,15 +28,13 @@ export default function ActorDetail() {
   const [actor, setActor] = useState(null);
 
   useEffect(() => {
-    (async () => {
-      const r = await api.get(`/actors/${id}`);
-      setActor(r.data);
-    })();
+    api.get(`/actors/${id}`).then((r) => setActor(r.data)).catch(() => {});
   }, [id]);
 
   if (!actor) return <div className="max-w-7xl mx-auto px-4 py-20 text-slate-500">Loading...</div>;
 
   const photo = actor.photo_url ? fileUrl(actor.photo_url) : null;
+  const totalCredits = (actor.movies?.length || 0) + (actor.series?.length || 0);
 
   return (
     <div>
@@ -69,10 +68,10 @@ export default function ActorDetail() {
                     <span className="text-slate-500">years old</span>
                   </span>
                 )}
-                <span className="flex items-center gap-2" data-testid="actor-film-count">
+                <span className="flex items-center gap-2">
                   <Film className="w-4 h-4 text-amber-400" />
-                  <span className="font-medium text-white">{actor.movies?.length || 0}</span>
-                  <span className="text-slate-500">film{(actor.movies?.length || 0) !== 1 && "s"}</span>
+                  <span className="font-medium text-white">{totalCredits}</span>
+                  <span className="text-slate-500">credit{totalCredits !== 1 && "s"}</span>
                 </span>
               </div>
               {actor.bio && <p className="mt-6 text-slate-300 leading-relaxed max-w-3xl">{actor.bio}</p>}
@@ -81,8 +80,12 @@ export default function ActorDetail() {
         </div>
       </section>
 
+      {/* Movies */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
-        <h2 className="font-heading text-3xl sm:text-4xl font-bold text-white">Filmography</h2>
+        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
+          <Film className="w-4 h-4" /> Filmography
+        </div>
+        <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">Movies</h2>
         {(!actor.movies || actor.movies.length === 0) ? (
           <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">
             No movies linked yet.
@@ -96,6 +99,69 @@ export default function ActorDetail() {
                   <div className="mt-2 text-xs text-slate-500 px-1">as <span className="text-amber-400">{m.character_name}</span></div>
                 )}
               </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* TV Series (main cast) */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="actor-series-section">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
+          <Tv className="w-4 h-4" /> Series Regular
+        </div>
+        <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">TV Series</h2>
+        {(!actor.series || actor.series.length === 0) ? (
+          <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">
+            No series credits yet.
+          </div>
+        ) : (
+          <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
+            {actor.series.map((s) => (
+              <div key={s.id}>
+                <SeriesCard series={s} />
+                {s.character_name && (
+                  <div className="mt-2 text-xs text-slate-500 px-1">as <span className="text-amber-400">{s.character_name}</span></div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Guest Appearances */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="actor-guest-section">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
+          <UserPlus className="w-4 h-4" /> Guest Appearances
+        </div>
+        <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">Guest Star Episodes</h2>
+        {(!actor.guest_episodes || actor.guest_episodes.length === 0) ? (
+          <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">
+            No guest star appearances yet.
+          </div>
+        ) : (
+          <div className="mt-6 space-y-2">
+            {actor.guest_episodes.map((ge, i) => (
+              <Link
+                key={i}
+                to={`/series/${ge.series_id}`}
+                className="flex items-center gap-4 rounded-xl bg-[#14181f] border border-white/10 p-4 hover:border-amber-500/40 hover:bg-amber-500/5 transition"
+                data-testid={`guest-episode-${i}`}
+              >
+                <div className="w-12 h-16 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
+                  {ge.series_poster_url && <img src={fileUrl(ge.series_poster_url)} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-heading text-white font-semibold truncate">{ge.series_title}</span>
+                    <span className="text-xs text-amber-400 font-mono">S{String(ge.season_number).padStart(2, "0")}E{String(ge.episode_number).padStart(2, "0")}</span>
+                  </div>
+                  <div className="text-sm text-slate-300 truncate">{ge.episode_name || `Episode ${ge.episode_number}`}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    as <span className="text-amber-400">{ge.character_name}</span>
+                    {ge.air_date && <span> • {ge.air_date}</span>}
+                  </div>
+                </div>
+              </Link>
             ))}
           </div>
         )}

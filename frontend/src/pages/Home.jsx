@@ -2,25 +2,32 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import MovieCard from "@/components/MovieCard";
+import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Sparkles, TrendingUp, Clock } from "lucide-react";
+import { Search, Sparkles, TrendingUp, Clock, Tv } from "lucide-react";
 
 export default function Home() {
   const [trending, setTrending] = useState([]);
   const [recent, setRecent] = useState([]);
+  const [trendingSeries, setTrendingSeries] = useState([]);
+  const [recentSeries, setRecentSeries] = useState([]);
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
       try {
-        const [t, r] = await Promise.all([
+        const [t, r, ts, rs] = await Promise.all([
           api.get("/movies/trending"),
           api.get("/movies/recent"),
+          api.get("/series/trending"),
+          api.get("/series/recent"),
         ]);
         setTrending(t.data);
         setRecent(r.data);
+        setTrendingSeries(ts.data);
+        setRecentSeries(rs.data);
       } catch (e) {}
     })();
   }, []);
@@ -76,22 +83,48 @@ export default function Home() {
       {/* Trending */}
       <Section
         icon={<TrendingUp className="w-5 h-5 text-amber-400" />}
-        title="Trending Now"
+        title="Trending Movies"
         subtitle="Curated by the CineVerse team"
-        movies={trending}
+        items={trending}
+        renderCard={(m) => <MovieCard key={m.id} movie={m} />}
         emptyText="No trending movies yet. Admin can mark movies as trending."
         testid="trending-section"
       />
 
-      {/* Recently Added */}
+      {/* Trending Series */}
+      <Section
+        icon={<Tv className="w-5 h-5 text-amber-400" />}
+        title="Trending TV Series"
+        subtitle="Binge-worthy right now"
+        items={trendingSeries}
+        renderCard={(s) => <SeriesCard key={s.id} series={s} />}
+        emptyText="No TV series yet. Add one from the admin panel."
+        testid="trending-series-section"
+      />
+
+      {/* Recently Added Movies */}
       <Section
         icon={<Clock className="w-5 h-5 text-amber-400" />}
         title="Recently Added"
         subtitle="Freshly cataloged in the database"
-        movies={recent}
+        items={recent}
+        renderCard={(m) => <MovieCard key={m.id} movie={m} />}
         emptyText="No movies yet. Login as admin to add the first one."
         testid="recent-section"
       />
+
+      {/* Recently Added Series */}
+      {recentSeries.length > 0 && (
+        <Section
+          icon={<Tv className="w-5 h-5 text-amber-400" />}
+          title="New Series"
+          subtitle="Fresh episodes to explore"
+          items={recentSeries}
+          renderCard={(s) => <SeriesCard key={s.id} series={s} />}
+          emptyText=""
+          testid="recent-series-section"
+        />
+      )}
 
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
         <div className="stripe-divider mb-10" />
@@ -102,7 +135,7 @@ export default function Home() {
   );
 }
 
-function Section({ icon, title, subtitle, movies, emptyText, testid }) {
+function Section({ icon, title, subtitle, items, renderCard, emptyText, testid }) {
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid={testid}>
       <div className="flex items-end justify-between mb-8">
@@ -113,15 +146,13 @@ function Section({ icon, title, subtitle, movies, emptyText, testid }) {
           <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">{title}</h2>
         </div>
       </div>
-      {movies.length === 0 ? (
+      {items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-16 text-center text-slate-500">
           {emptyText}
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
-          {movies.map((m) => (
-            <MovieCard key={m.id} movie={m} />
-          ))}
+          {items.map((it) => renderCard(it))}
         </div>
       )}
     </section>
