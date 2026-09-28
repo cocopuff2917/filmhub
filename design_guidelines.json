@@ -1,0 +1,139 @@
+{
+  "project_name": "CineVerse Movie Database",
+  "theme_mode": "dark",
+  "archetype": "Cinematic Obsidian & Warm Amber Gold",
+  "typography": {
+    "headline_font": "Plus Jakarta Sans, sans-serif",
+    "display_font": "Bebas Neue, sans-serif",
+    "body_font": "Inter, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "google_fonts_import": "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap",
+    "sizes": {
+      "h1_hero": "text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight",
+      "h2_section": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight",
+      "h3_subsection": "text-xl sm:text-2xl font-semibold",
+      "h4_card": "text-lg sm:text-xl font-medium",
+      "body": "text-sm sm:text-base leading-relaxed text-slate-300",
+      "small_label": "text-xs font-semibold tracking-wider uppercase text-amber-500/90"
+    }
+  },
+  "colors": {
+    "base_background": "#0D0F12",
+    "card_background": "#14181F",
+    "elevated_surface": "#1E2430",
+    "glass_overlay": "rgba(20, 24, 31, 0.75)",
+    "primary_accent": "#F59E0B",
+    "primary_hover": "#D97706",
+    "secondary_accent": "#E11D48",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "text_muted": "#64748B",
+    "border_subtle": "rgba(255, 255, 255, 0.08)",
+    "border_active": "rgba(245, 158, 11, 0.4)",
+    "gold_gradient": "bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600",
+    "dark_gradient_overlay": "bg-gradient-to-t from-[#0D0F12] via-[#0D0F12]/80 to-transparent",
+    "forbidden_colors": ["#7351B7", "#1B93A4"]
+  },
+  "visual_enhancers": {
+    "border_radius": "rounded-xl",
+    "card_shadow": "shadow-[0_8px_30px_rgb(0,0,0,0.5)]",
+    "glow_shadow": "shadow-[0_0_25px_rgba(245,158,11,0.25)]",
+    "backdrop_blur": "backdrop-blur-xl",
+    "glassmorphism_class": "bg-[#14181F]/80 backdrop-blur-md border border-white/10 shadow-2xl"
+  },
+  "grids_and_layouts": {
+    "page_container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8",
+    "hero_grid": "grid grid-cols-1 lg:grid-cols-12 gap-8 items-center",
+    "trending_movie_grid": "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6",
+    "cast_grid": "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4",
+    "detail_layout": "grid grid-cols-1 lg:grid-cols-3 gap-8",
+    "bento_features_grid": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6"
+  },
+  "motion": {
+    "hover_lift": "transition-all duration-300 ease-out hover:-translate-y-2 hover:shadow-[0_12px_30px_rgba(0,0,0,0.8)]",
+    "poster_zoom": "transition-transform duration-500 ease-out hover:scale-105",
+    "button_press": "active:scale-95 transition-transform duration-150",
+    "entrance_fade": "animate-in fade-in slide-in-from-bottom-4 duration-500"
+  },
+  "accessibility": {
+    "contrast_ratio": "APCA & WCAG AA compliant (minimum 4.5:1 for body text on dark backgrounds)",
+    "focus_state": "focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-[#0D0F12]",
+    "hover_contrast_rule": "Always explicitly specify hover text colors alongside background changes (e.g. hover:bg-amber-500 hover:text-black)",
+    "data_testid_rule": "MUST include data-testid attribute on all interactive elements (buttons, inputs, links, movie cards, rating stars, watchlist toggles)"
+  },
+  "image_urls": {
+    "hero_banner": [
+      {
+        "url": "https://images.unsplash.com/photo-1679482451632-b2e126da7142?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwyfHxjaW5lbWF0aWMlMjBtb3ZpZSUyMHBvc3RlciUyMGRhcmslMjBkcmFtYSUyMGFjdGlvbiUyMHNjaSUyMGZpfGVufDB8fHx8MTc5MDYyMjI1Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "hero_backdrop",
+        "description": "Sci-fi cinematic alien scene backdrop"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1789470873521-b994b77df4f7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHw0fHxjaW5lbWF0aWMlMjB0aGVhdGVyJTIwZGFyayUyMGJhY2tncm91bmQlMjBwcm9qZWN0b3IlMjBzcG90bGlnaHR8ZW58MHx8fHwxNzkwNjIyMjU2fDA&ixlib=rb-4.1.0&q=85",
+        "category": "theater_seats",
+        "description": "Red velvet cinema auditorium seats"
+      }
+    ],
+    "movie_posters": [
+      {
+        "url": "https://images.unsplash.com/photo-1679482451632-b2e126da7142?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwyfHxjaW5lbWF0aWMlMjBtb3ZpZSUyMHBvc3RlciUyMGRhcmslMjBkcmFtYSUyMGFjdGlvbiUyMHNjaSUyMGZpfGVufDB8fHx8MTc5MDYyMjI1Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "poster_scifi",
+        "description": "Sci-fi titan exploration poster"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1634840150834-f6d4544f5b9b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwxfHxjaW5lbWF0aWMlMjBtb3ZpZSUyMHBvc3RlciUyMGRhcmslMjBkcmFtYSUyMGFjdGlvbiUyMHNjaSUyMGZpfGVufDB8fHx8MTc5MDYyMjI1Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "poster_noir",
+        "description": "Dark urban thriller poster"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1554875032-2de0215e64c5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwzfHxjaW5lbWF0aWMlMjBtb3ZpZSUyMHBvc3RlciUyMGRhcmslMjBkcmFtYSUyMGFjdGlvbiUyMHNjaSUyMGZpfGVufDB8fHx8MTc5MDYyMjI1Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "poster_mystery",
+        "description": "Detective thriller silhouette poster"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1614201842267-206a09286c3b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHw0fHxjaW5lbWF0aWMlMjBtb3ZpZSUyMHBvc3RlciUyMGRhcmslMjBkcmFtYSUyMGFjdGlvbiUyMHNjaSUyMGZpfGVufDB8fHx8MTc5MDYyMjI1Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "poster_action",
+        "description": "Action spy agent poster"
+      }
+    ],
+    "actor_headshots": [
+      {
+        "url": "https://images.unsplash.com/photo-1587397845856-e6cf49176c70?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwyfHxhY3RvciUyMHBvcnRyYWl0JTIwaGVhZHNob3QlMjBjaW5lbWElMjBzdHVkaW8lMjBsaWdodGluZ3xlbnwwfHx8fDE3OTA2MjIyNTZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "actor_male_1",
+        "description": "Dramatic portrait headshot male actor"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1548251147-dda09867567a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwzfHxhY3RvciUyMHBvcnRyYWl0JTIwaGVhZHNob3QlMjBjaW5lbWElMjBzdHVkaW8lMjBsaWdodGluZ3xlbnwwfHx8fDE3OTA2MjIyNTZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "actor_male_2",
+        "description": "Male lead actor headshot studio lighting"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxhY3RvciUyMHBvcnRyYWl0JTIwaGVhZHNob3QlMjBjaW5lbWElMjBzdHVkaW8lMjBsaWdodGluZ3xlbnwwfHx8fDE3OTA2MjIyNTZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "actor_male_3",
+        "description": "Character actor portrait"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1654765437547-6b572f52ee1a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHw0fHxhY3RvciUyMHBvcnRyYWl0JTIwaGVhZHNob3QlMjBjaW5lbWElMjBzdHVkaW8lMjBsaWdodGluZ3xlbnwwfHx8fDE3OTA2MjIyNTZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "actor_female_1",
+        "description": "Female lead actress studio headshot"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "1. Home Page Navigation & Hero: Build a top sticky blur header with logo 'CineVerse', nav links (Movies, Genres, Watchlist, Admin), search bar, user auth avatar/button.",
+    "2. Hero Search Bar: Prominent search input with auto-suggestions filtering by title, genre, and actor name in real-time.",
+    "3. Movie Sections: Display 'Trending Movies' and 'Recently Added' in responsive grids. Each card must show poster image, warm gold star rating badge, title, year, and genre chips.",
+    "4. Movie Detail Page: Cinematic header with full backdrop gradient overlay, large poster, title, release date, runtime, IMDb rating, genre tags, quick actions (Add to Watchlist, Rate/Review, Watch Trailer), synopsis, Cast & Crew grid (headshot, real name, character name), and media gallery.",
+    "5. Actor Detail Page: Actor headshot, bio, known for statistics, and grid of all movies they starred in.",
+    "6. User Interactive Features: User signup/login simulation or JWT auth, star rating widget with review text box, personal Watchlist / Favorites page with clear remove actions.",
+    "7. Filter & Sort Toolbar: Multi-select genre filter pills, year range dropdown, rating sorting (Highest rated, Recently added, Release date).",
+    "8. Admin Panel Page: Secure management tab to add/edit/delete movies and actors with poster URL inputs, cast tagger, and preview modal.",
+    "9. Data Test ID: Every button, link, input, tab, card, and star rating element MUST include a clear `data-testid` attribute (e.g. `data-testid='movie-card-1'`, `data-testid='search-input'`, `data-testid='add-watchlist-button'`)."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Do NOT use transparent backgrounds on headers or overlays; use dark translucent glassmorphism like bg-[#14181F]/90 backdrop-blur-md.",
+    "Ensure high contrast on hover states (e.g., hover:bg-amber-500 hover:text-black).",
+    "Use 2-3x generous spacing for section padding (py-12 to py-20).",
+    "Include data-testid on all interactive elements in kebab-case."
+  ]
+}
