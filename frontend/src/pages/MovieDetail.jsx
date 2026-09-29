@@ -226,7 +226,7 @@ export default function MovieDetail() {
               {/* Owner/mod actions row */}
               <div className="mt-6 flex flex-wrap gap-2">
                 {user && (
-                  <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-movie-btn">
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/movie/${id}/edit`)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-movie-btn">
                     <Edit className="w-4 h-4 mr-2" /> Edit
                   </Button>
                 )}
@@ -478,7 +478,7 @@ export default function MovieDetail() {
           </div>
 
           {user && (
-            <Button onClick={() => setEditOpen(true)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn">
+            <Button onClick={() => navigate(`/movie/${id}/edit`)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn">
               <Edit className="w-4 h-4 mr-2" /> Edit Page
             </Button>
           )}
