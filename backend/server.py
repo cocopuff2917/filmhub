@@ -654,6 +654,17 @@ async def enrich_series(doc, deep: bool = True):
     seasons = doc.get("seasons", []) or []
     doc["season_count"] = len(seasons)
     doc["episode_count"] = sum(len(s.get("episodes", []) or []) for s in seasons)
+    # rating aggregation (series-scoped reviews)
+    agg = await db.reviews.aggregate([
+        {"$match": {"series_id": doc["id"]}},
+        {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "count": {"$sum": 1}}}
+    ]).to_list(1)
+    if agg:
+        doc["avg_rating"] = round(agg[0]["avg"], 1)
+        doc["rating_count"] = agg[0]["count"]
+    else:
+        doc["avg_rating"] = None
+        doc["rating_count"] = 0
     return doc
 
 # ----------- Edit Log Helper -----------
@@ -1069,24 +1080,35 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
 
     # ---------- rating stats ----------
     uid_str = str(u["_id"])
-    ratings_agg = await db.reviews.aggregate([
-        {"$match": {"user_id": uid_str}},
+    # Movies
+    movie_agg = await db.reviews.aggregate([
+        {"$match": {"user_id": uid_str, "movie_id": {"$exists": True}}},
         {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "count": {"$sum": 1}}},
     ]).to_list(1)
-    if ratings_agg:
-        profile["total_ratings"] = ratings_agg[0]["count"]
-        profile["avg_movie_rating"] = round(ratings_agg[0]["avg"] * 10)  # % out of 100
+    if movie_agg:
+        profile["total_movie_ratings"] = movie_agg[0]["count"]
+        profile["avg_movie_rating"] = round(movie_agg[0]["avg"] * 10)  # % out of 100
     else:
-        profile["total_ratings"] = 0
+        profile["total_movie_ratings"] = 0
         profile["avg_movie_rating"] = None
-    # rating distribution buckets 1..10 (floor)
+    # Series
+    series_agg = await db.reviews.aggregate([
+        {"$match": {"user_id": uid_str, "series_id": {"$exists": True}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "count": {"$sum": 1}}},
+    ]).to_list(1)
+    if series_agg:
+        profile["total_series_ratings"] = series_agg[0]["count"]
+        profile["avg_series_rating"] = round(series_agg[0]["avg"] * 10)
+    else:
+        profile["total_series_ratings"] = 0
+        profile["avg_series_rating"] = None
+    profile["total_ratings"] = profile["total_movie_ratings"] + profile["total_series_ratings"]
+    # rating distribution buckets 1..10 (floor) across everything the user rated
     dist = [0] * 10
     async for r in db.reviews.find({"user_id": uid_str}, {"rating": 1}):
         b = max(1, min(10, int(round(r.get("rating", 0)))))
         dist[b - 1] += 1
     profile["rating_distribution"] = dist
-    # Currently no series reviews collection — placeholder
-    profile["avg_series_rating"] = None
 
     # ---------- top genres from rated movies ----------
     genre_counts = {}
@@ -2708,6 +2730,8 @@ async def purge_entity(kind: str, entity_id: str, admin: dict = Depends(get_curr
     await coll.delete_one({"_id": ObjectId(entity_id)})
     if kind == "movie":
         await db.reviews.delete_many({"movie_id": entity_id})
+    elif kind == "series":
+        await db.reviews.delete_many({"series_id": entity_id})
     await log_edit(admin, kind, entity_id, "purge", label, f"Permanently deleted {kind} \"{label}\"")
     return {"ok": True}
 
@@ -2777,6 +2801,34 @@ async def create_review(movie_id: str, payload: ReviewCreate, user: dict = Depen
 @api_router.get("/movies/{movie_id}/reviews")
 async def list_reviews(movie_id: str):
     cursor = db.reviews.find({"movie_id": movie_id}).sort("created_at", -1)
+    return [doc_to_dict(d) async for d in cursor]
+
+@api_router.post("/series/{series_id}/reviews")
+async def create_series_review(series_id: str, payload: ReviewCreate, user: dict = Depends(get_current_user)):
+    try:
+        exists = await db.series.find_one({"_id": ObjectId(series_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if not exists or exists.get("deleted"):
+        raise HTTPException(status_code=404, detail="Series not found")
+    doc = {
+        "series_id": series_id,
+        "user_id": user["id"],
+        "user_name": user.get("name"),
+        "rating": payload.rating,
+        "text": payload.text,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.reviews.update_one(
+        {"series_id": series_id, "user_id": user["id"]},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {"ok": True}
+
+@api_router.get("/series/{series_id}/reviews")
+async def list_series_reviews(series_id: str):
+    cursor = db.reviews.find({"series_id": series_id}).sort("created_at", -1)
     return [doc_to_dict(d) async for d in cursor]
 
 # ----------- Watchlist -----------
@@ -2856,7 +2908,23 @@ async def startup():
     await db.actors.create_index("name")
     await db.series.create_index("title")
     await db.watchlist.create_index([("user_id", 1), ("movie_id", 1)], unique=True)
-    await db.reviews.create_index([("movie_id", 1), ("user_id", 1)], unique=True)
+    # Movie reviews unique per (movie_id, user_id) — only when movie_id is set (allows series reviews)
+    try:
+        await db.reviews.drop_index("movie_id_1_user_id_1")
+    except Exception:
+        pass
+    await db.reviews.create_index(
+        [("movie_id", 1), ("user_id", 1)],
+        unique=True,
+        partialFilterExpression={"movie_id": {"$exists": True}},
+        name="movie_id_1_user_id_1",
+    )
+    await db.reviews.create_index(
+        [("series_id", 1), ("user_id", 1)],
+        unique=True,
+        partialFilterExpression={"series_id": {"$exists": True}},
+        name="series_id_1_user_id_1",
+    )
 
     # seed admin
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@cineverse.com").lower()

@@ -50,6 +50,13 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - Fix: (a) top + bottom Save buttons now use `onClick={() => save()}` on both pages, (b) `save()` defensively rejects non-form args via `Array.isArray(overrideForm.cast/main_cast)`.
   - New auto-save: JSON-diff based, 900 ms debounce, driven by `savedFormRef` snapshot set on initial load + updated after each successful PATCH. Status pill next to the Save button (`data-testid=autosave-status`) shows *Unsaved changes… → Saving… → All changes saved → idle*.
   - Testing agent: 100 % pass (8/8 cases: manual save top+bottom on movie+series, auto-save on typed edits, no-op on page load, cast-add flow still saves, changes persist across reload).
+- **TV Series ratings** (2026-09-29 very-latest):
+  - Reviews model extended: `series_id` field added; existing unique `(movie_id, user_id)` index made partial (`movie_id` exists) so series reviews don't collide, plus new partial unique `(series_id, user_id)` index. Old index dropped and re-created on startup.
+  - New endpoints: `POST /api/series/{id}/reviews` (validates 0.5–10, upserts per user) and `GET /api/series/{id}/reviews` (list). 404 for deleted/missing series, 401 unauth.
+  - `enrich_series` now returns `avg_rating` and `rating_count` computed via aggregation over `series_id`-scoped reviews. All existing series score UI (`series.avg_rating * 10`) lights up automatically.
+  - Purge cascade extended: hard-delete of a series now clears `db.reviews.delete_many({"series_id": id})` too.
+  - User profile split: `avg_movie_rating` / `total_movie_ratings` + new `avg_series_rating` / `total_series_ratings` (both scaled 0–100), plus combined `total_ratings`. Verified via curl (mixed movie+series ratings tally correctly).
+  - Frontend: `SeriesDetail.jsx` now has a "Reviews" tab (default) alongside "Discussions", identical UX to MovieDetail — rating slider + optional text + Submit → toast + list re-render + `avg_rating` on the score pill.
 
 ## Backlog (P1/P2)
 - P1: Drag-to-reorder for crew, creators, and season/episode lists

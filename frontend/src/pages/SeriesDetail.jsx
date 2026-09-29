@@ -130,6 +130,9 @@ export default function SeriesDetail() {
   const navigate = useNavigate();
   const [series, setSeries] = useState(null);
   const [stats, setStats] = useState({ trend: [], contributors: [], content_score: 0, total_views: 0 });
+  const [reviews, setReviews] = useState([]);
+  const [rating, setRating] = useState(8);
+  const [reviewText, setReviewText] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
@@ -137,17 +140,32 @@ export default function SeriesDetail() {
 
   const load = async () => {
     try {
-      const [s, st] = await Promise.all([
+      const [s, st, rv] = await Promise.all([
         api.get(`/series/${id}`),
         api.get(`/series/${id}/stats`).catch(() => ({ data: { trend: [], contributors: [], content_score: 0, total_views: 0 } })),
+        api.get(`/series/${id}/reviews`).catch(() => ({ data: [] })),
       ]);
       setSeries(s.data);
       setStats(st.data);
+      setReviews(rv.data);
     } catch { toast.error("Failed to load series"); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
   const canModerate = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+
+  const submitReview = async (e) => {
+    e.preventDefault();
+    if (!user) { toast.error("Sign in to rate"); return; }
+    try {
+      await api.post(`/series/${id}/reviews`, { rating: Number(rating), text: reviewText });
+      toast.success("Review submitted");
+      setReviewText("");
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to submit review");
+    }
+  };
 
   const del = async () => {
     if (!window.confirm(`Delete "${series.title}"?`)) return;
@@ -335,12 +353,45 @@ export default function SeriesDetail() {
           {/* Social */}
           <section className="mt-12" data-testid="social-section">
             <h2 className="font-heading text-2xl font-bold">Social</h2>
-            <Tabs defaultValue="discussions" className="mt-4">
+            <Tabs defaultValue="reviews" className="mt-4">
               <TabsList className="bg-transparent border-b border-white/10 rounded-none p-0 h-auto w-full justify-start gap-6">
+                <TabsTrigger value="reviews" className="rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 data-[state=active]:bg-transparent data-[state=active]:text-white text-slate-400 px-1 pb-3 pt-0" data-testid="tab-reviews">
+                  <Star className="w-4 h-4 mr-2" /> Reviews <span className="ml-1 text-xs text-slate-500">{reviews.length}</span>
+                </TabsTrigger>
                 <TabsTrigger value="discussions" className="rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 data-[state=active]:bg-transparent data-[state=active]:text-white text-slate-400 px-1 pb-3 pt-0" data-testid="tab-discussions">
                   <MessageSquare className="w-4 h-4 mr-2" /> Discussions
                 </TabsTrigger>
               </TabsList>
+              <TabsContent value="reviews" className="mt-6">
+                {user ? (
+                  <form onSubmit={submitReview} className="rounded-xl bg-[#14181f] border border-white/10 p-5">
+                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-widest">Your rating: <span className="text-amber-400 text-lg">{rating}/10</span></label>
+                    <input type="range" min="1" max="10" step="0.5" value={rating} onChange={(e) => setRating(e.target.value)} className="w-full mt-3 accent-amber-500" data-testid="rating-slider" />
+                    <Textarea value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder="Share your thoughts about this series..." className="mt-4 bg-[#0d0f12] border-white/10 text-white" rows={3} data-testid="review-text-input" />
+                    <Button type="submit" className="mt-4 bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="submit-review-btn">Submit Review</Button>
+                  </form>
+                ) : (
+                  <div className="rounded-xl bg-[#14181f] border border-white/10 p-5 text-slate-400 text-sm">
+                    <Link to="/login" className="text-amber-400 hover:text-amber-300 font-medium">Sign in</Link> to rate this series.
+                  </div>
+                )}
+                <div className="mt-6 space-y-3" data-testid="reviews-list">
+                  {reviews.length === 0 ? (
+                    <div className="text-slate-500 text-sm">No reviews yet. Be the first!</div>
+                  ) : reviews.map((r) => (
+                    <div key={r.id} className="rounded-xl bg-[#14181f] border border-white/10 p-5" data-testid={`review-${r.id}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400">{r.user_name?.[0] || "?"}</div>
+                          <Link to={`/user/${r.user_id}`} className="font-semibold text-white hover:text-amber-400">{r.user_name || "Anonymous"}</Link>
+                        </div>
+                        <div className="flex items-center gap-1 text-amber-400 font-bold"><Star className="w-4 h-4 fill-amber-400" /> {r.rating}</div>
+                      </div>
+                      {r.text && <p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p>}
+                    </div>
+                  ))}
+                </div>
+              </TabsContent>
               <TabsContent value="discussions" className="mt-6">
                 <DiscussionSection entityType="series" entityId={id} embedded />
               </TabsContent>
