@@ -2532,8 +2532,8 @@ async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_us
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
     result = await db.actors.insert_one(doc)
-    fetched = await db.actors.find_one({"_id": result.inserted_id})
-    dd = doc_to_dict(fetched)
+    doc["_id"] = result.inserted_id
+    dd = doc_to_dict(doc)
     await log_edit(user, "actor", dd["id"], "create", dd["name"], f"Created actor \"{dd['name']}\"")
     return dd
 

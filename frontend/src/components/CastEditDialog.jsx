@@ -20,6 +20,10 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef(null);
+  const characterRef = useRef(null);
+  const characterValRef = useRef("");
+
+  useEffect(() => { characterValRef.current = character; }, [character]);
 
   useEffect(() => {
     if (!open) return;
@@ -47,25 +51,38 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
     return actors.find((a) => (a.name || "").toLowerCase() === q) || null;
   }, [actors, query]);
 
+  const focusCharacter = () => setTimeout(() => characterRef.current?.focus(), 30);
+
   const pick = (a) => {
     setSelected(a);
     setQuery(a.name);
+    if (!character.trim()) focusCharacter();
   };
 
-  const createActor = async () => {
+  const createActor = async ({ autoSaveIfCharacter = false } = {}) => {
     const name = query.trim();
-    if (!name) return;
+    if (!name || creating) return null;
     setCreating(true);
     try {
       const r = await api.post("/actors", { name });
-      toast.success(`Created actor "${name}"`);
+      const newActor = { id: r.data.id, name: r.data.name, photo_url: r.data.photo_url || "" };
+      toast.success(`Created "${name}"`);
       onActorCreated?.(r.data);
-      setSelected({ id: r.data.id, name: r.data.name, photo_url: r.data.photo_url || "" });
-      setQuery(r.data.name);
+      setSelected(newActor);
+      setQuery(newActor.name);
+      setCreating(false);
+      if (autoSaveIfCharacter && (characterValRef.current || "").trim()) {
+        onSave?.({ actor_id: newActor.id, character_name: characterValRef.current.trim() });
+        onOpenChange(false);
+      } else {
+        focusCharacter();
+      }
+      return newActor;
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create actor");
+      setCreating(false);
+      return null;
     }
-    setCreating(false);
   };
 
   const clearActor = () => {
@@ -74,18 +91,46 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
     setTimeout(() => inputRef.current?.focus(), 20);
   };
 
+  const onSearchKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    const q = query.trim();
+    if (!q) return;
+    e.preventDefault();
+    if (exactMatch) {
+      pick(exactMatch);
+      return;
+    }
+    if (suggestions.length === 1) {
+      pick(suggestions[0]);
+      return;
+    }
+    // No match -> create (and auto-save if character already filled)
+    createActor({ autoSaveIfCharacter: true });
+  };
+
   const submit = async (e) => {
     e.preventDefault();
-    if (!selected?.id) {
-      toast.error("Pick an actor or create a new one");
+    // If user typed a name but never clicked "Create", auto-create on submit.
+    let actor = selected;
+    if (!actor?.id) {
+      if (exactMatch) {
+        actor = exactMatch;
+        setSelected(exactMatch);
+      } else if (query.trim()) {
+        actor = await createActor({ autoSaveIfCharacter: false });
+      }
+    }
+    if (!actor?.id) {
+      toast.error("Pick an actor or type a name to create one");
       return;
     }
     if (!character.trim()) {
       toast.error("Character name is required");
+      characterRef.current?.focus();
       return;
     }
     setSaving(true);
-    onSave?.({ actor_id: selected.id, character_name: character.trim() });
+    onSave?.({ actor_id: actor.id, character_name: character.trim() });
     setSaving(false);
     onOpenChange(false);
   };
@@ -117,7 +162,8 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
                     ref={inputRef}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search for a person…"
+                    onKeyDown={onSearchKeyDown}
+                    placeholder="Type a name and press Enter to pick or create…"
                     className="bg-white border-slate-300 pr-8 focus-visible:ring-cyan-400 focus-visible:border-cyan-400"
                     data-testid="person-search-input"
                     autoComplete="off"
@@ -146,13 +192,13 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
                       {showCreate && (
                         <button
                           type="button"
-                          onClick={createActor}
+                          onClick={() => createActor({ autoSaveIfCharacter: true })}
                           disabled={creating}
                           className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 text-emerald-700 border-t border-slate-100 text-left font-medium"
                           data-testid="create-person-btn"
                         >
                           <UserPlus className="w-4 h-4" />
-                          <span className="text-sm">{creating ? "Creating…" : `Create new actor "${query.trim()}"`}</span>
+                          <span className="text-sm">{creating ? "Creating…" : `Create new actor "${query.trim()}" (Enter)`}</span>
                         </button>
                       )}
                     </div>
@@ -160,6 +206,9 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
                 </>
               )}
             </div>
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              Tip: type a full name, hit <kbd className="px-1 rounded border border-slate-300 bg-slate-50 text-[10px] font-mono">Enter</kbd> to create and save in one step.
+            </p>
           </div>
 
           <div>
@@ -168,6 +217,7 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
               <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
             </div>
             <Input
+              ref={characterRef}
               value={character}
               onChange={(e) => setCharacter(e.target.value)}
               placeholder="Character name"
@@ -181,8 +231,8 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="border-slate-300 text-slate-700 hover:bg-white" data-testid="cast-cancel-btn">
               <Ban className="w-4 h-4 mr-2" /> Cancel
             </Button>
-            <Button type="submit" disabled={saving} className="bg-cyan-500 hover:bg-cyan-600 text-white" data-testid="cast-save-btn">
-              <Save className="w-4 h-4 mr-2" /> Save
+            <Button type="submit" disabled={saving || creating} className="bg-cyan-500 hover:bg-cyan-600 text-white" data-testid="cast-save-btn">
+              <Save className="w-4 h-4 mr-2" /> {creating ? "Creating…" : "Save"}
             </Button>
           </DialogFooter>
         </form>

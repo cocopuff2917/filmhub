@@ -40,6 +40,11 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - New scheduled task `.emergent/crons.yml` runs `POST /api/cron/lift-suspensions` every 15 minutes.
   - Endpoint requires `Authorization: Bearer $WEBHOOK_CRON_SECRET` (constant-time compare via `hmac.compare_digest`), idempotent via `X-Webhook-Id` stored in `cron_runs`. Kicks off `asyncio.create_task(_lift_expired_suspensions())` which runs `db.users.update_many({"suspended_until": {"$ne": "permanent", "$lt": now_iso}}, $unset)` and immediately returns 200.
   - Verified: expired temporary suspension lifted, permanent + future suspensions preserved, 401 without/wrong auth, duplicate replay returns `{duplicate: true}`, previously suspended user now `is_suspended:False` on next login.
+- **Faster actor creation from cast dialog** (2026-09-29 last-last-last):
+  - `CastEditDialog.jsx`: Enter in the search input now creates the actor **and** saves the row when the character name is already filled — collapses 3 clicks into 1 keystroke.
+  - After picking a suggestion or creating an actor, focus jumps to Character (unless it's already filled). Save button also auto-creates on submit if the typed name has no match.
+  - Uses `characterValRef` to avoid stale-closure reads when the async create resolves.
+  - Backend `POST /api/actors` no longer does a redundant `find_one` after insert (saves one round-trip).
 
 ## Backlog (P1/P2)
 - P1: Drag-to-reorder for crew, creators, and season/episode lists
