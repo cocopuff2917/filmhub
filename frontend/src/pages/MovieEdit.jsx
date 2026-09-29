@@ -103,12 +103,15 @@ export default function MovieEdit() {
   const [actors, setActors] = useState([]);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [autoStatus, setAutoStatus] = useState("idle"); // idle | pending | saving | saved | error
   const [activeSection, setActiveSection] = useState("primary-facts");
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
   const [castDialog, setCastDialog] = useState({ open: false, index: null });
   const [dragIdx, setDragIdx] = useState(null);
   const sectionRefs = useRef({});
+  const savedFormRef = useRef(null);
+  const savedAtRef = useRef(null);
 
   const isMod = user && ["moderator", "admin"].includes(user.effective_role || user.role);
 
@@ -146,11 +149,19 @@ export default function MovieEdit() {
           crew: (m.data.crew || []).map((c) => ({ name: c.name, role: c.role })),
           gallery: m.data.gallery || [],
         });
+        savedFormRef.current = null; // will be set on first render after mount
       } catch {
         toast.error("Failed to load movie");
       }
     })();
   }, [id]);
+
+  // First-render snapshot: whenever form loads, take its baseline once so auto-save doesn't fire on load.
+  useEffect(() => {
+    if (form && savedFormRef.current == null) {
+      savedFormRef.current = JSON.stringify(form);
+    }
+  }, [form]);
 
   // Scroll spy
   useEffect(() => {
@@ -182,10 +193,15 @@ export default function MovieEdit() {
     }
   };
 
-  const save = async (overrideForm) => {
-    const src = overrideForm || form;
+  const save = async (overrideForm, opts = {}) => {
+    // Guard: onClick handlers may pass a SyntheticEvent. Only accept plain form objects.
+    const looksLikeForm = overrideForm && typeof overrideForm === "object"
+      && !overrideForm.nativeEvent && !overrideForm.currentTarget && Array.isArray(overrideForm.cast);
+    const src = looksLikeForm ? overrideForm : form;
     if (!src) return;
+    const silent = !!opts.silent;
     setSaving(true);
+    if (silent) setAutoStatus("saving");
     try {
       const payload = {};
       const fields = ["title", "release_date", "runtime", "synopsis", "tagline", "status", "original_language",
@@ -200,17 +216,38 @@ export default function MovieEdit() {
         }
         payload[f] = v;
       }
-      payload.cast = src.cast.filter((c) => c.actor_id && c.character_name);
-      payload.crew = src.crew.filter((c) => c.name && c.role);
+      payload.cast = (src.cast || []).filter((c) => c.actor_id && c.character_name);
+      payload.crew = (src.crew || []).filter((c) => c.name && c.role);
       const r = await api.patch(`/movies/${id}`, payload);
-      toast.success("Changes saved");
+      // Snapshot the just-saved form so auto-save doesn't re-fire
+      savedFormRef.current = JSON.stringify(src);
+      savedAtRef.current = Date.now();
+      if (silent) {
+        setAutoStatus("saved");
+        setTimeout(() => setAutoStatus((s) => (s === "saved" ? "idle" : s)), 1600);
+      } else {
+        toast.success("Changes saved");
+      }
       setMovie(r.data);
       try { const s = await api.get(`/movies/${id}/stats`); setStats(s.data); } catch {}
     } catch (e) {
+      if (silent) setAutoStatus("error");
       toast.error(e.response?.data?.detail || "Save failed");
     }
     setSaving(false);
   };
+
+  // Debounced auto-save: whenever the form changes, save 900ms after the last change.
+  useEffect(() => {
+    if (!form || savedFormRef.current == null) return;
+    if (JSON.stringify(form) === savedFormRef.current) return;
+    setAutoStatus("pending");
+    const t = setTimeout(() => {
+      if (!saving) save(form, { silent: true });
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [form]);
 
   const scrollTo = (sid) => {
     const el = sectionRefs.current[sid];
@@ -275,9 +312,25 @@ export default function MovieEdit() {
           <button onClick={() => navigate(`/movie/${id}`)} className="flex items-center gap-2 text-slate-200 hover:text-white text-sm" data-testid="back-to-movie">
             <ArrowLeft className="w-4 h-4" /> Back to {movie.title}
           </button>
-          <Button onClick={save} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white h-9 font-semibold" data-testid="top-save-btn">
-            <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <span
+              className={`text-xs font-medium ${
+                autoStatus === "saving" ? "text-amber-300" :
+                autoStatus === "saved" ? "text-emerald-300" :
+                autoStatus === "pending" ? "text-slate-400" :
+                autoStatus === "error" ? "text-rose-300" : "text-transparent"
+              }`}
+              data-testid="autosave-status"
+            >
+              {autoStatus === "saving" ? "Saving…" :
+                autoStatus === "saved" ? "All changes saved" :
+                autoStatus === "pending" ? "Unsaved changes…" :
+                autoStatus === "error" ? "Save failed" : "\u00A0"}
+            </span>
+            <Button onClick={() => save()} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white h-9 font-semibold" data-testid="top-save-btn">
+              <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -480,7 +533,7 @@ export default function MovieEdit() {
 
           <div className="pt-4 pb-16 flex justify-end gap-2 border-t border-slate-200">
             <Button variant="outline" onClick={() => navigate(`/movie/${id}`)} className="border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</Button>
-            <Button onClick={save} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold" data-testid="bottom-save-btn">
+            <Button onClick={() => save()} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold" data-testid="bottom-save-btn">
               <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
             </Button>
           </div>

@@ -89,6 +89,7 @@ export default function SeriesEdit() {
   const [actors, setActors] = useState([]);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [autoStatus, setAutoStatus] = useState("idle");
   const [activeSection, setActiveSection] = useState("primary-facts");
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
@@ -97,6 +98,7 @@ export default function SeriesEdit() {
   const [dragIdx, setDragIdx] = useState(null);
   const [openSeason, setOpenSeason] = useState(null);
   const sectionRefs = useRef({});
+  const savedFormRef = useRef(null);
 
   const isMod = user && ["moderator", "admin"].includes(user.effective_role || user.role);
 
@@ -158,6 +160,13 @@ export default function SeriesEdit() {
     })();
   }, [id]);
 
+  // First-render snapshot: mark baseline once so auto-save doesn't fire on load.
+  useEffect(() => {
+    if (form && savedFormRef.current == null) {
+      savedFormRef.current = JSON.stringify(form);
+    }
+  }, [form]);
+
   useEffect(() => {
     const onScroll = () => {
       let current = SECTIONS[0].id;
@@ -185,10 +194,14 @@ export default function SeriesEdit() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const save = async (overrideForm) => {
-    const src = overrideForm || form;
+  const save = async (overrideForm, opts = {}) => {
+    const looksLikeForm = overrideForm && typeof overrideForm === "object"
+      && !overrideForm.nativeEvent && !overrideForm.currentTarget && Array.isArray(overrideForm.main_cast);
+    const src = looksLikeForm ? overrideForm : form;
     if (!src) return;
+    const silent = !!opts.silent;
     setSaving(true);
+    if (silent) setAutoStatus("saving");
     try {
       const payload = {};
       const fields = ["title", "first_air_date", "last_air_date", "synopsis", "tagline", "status",
@@ -201,11 +214,11 @@ export default function SeriesEdit() {
         if (["awards_wins", "awards_nominations"].includes(f)) v = v === "" || v == null ? null : Number(v);
         payload[f] = v;
       }
-      payload.main_cast = src.main_cast.filter((c) => c.actor_id && c.character_name);
-      payload.creators = src.creators.filter((c) => c.name && c.role);
-      payload.seasons = src.seasons.map((sn) => ({
+      payload.main_cast = (src.main_cast || []).filter((c) => c.actor_id && c.character_name);
+      payload.creators = (src.creators || []).filter((c) => c.name && c.role);
+      payload.seasons = (src.seasons || []).map((sn) => ({
         ...sn,
-        episodes: sn.episodes.map((ep) => ({
+        episodes: (sn.episodes || []).map((ep) => ({
           episode_number: ep.episode_number,
           name: ep.title || "",  // backend model uses `name`
           air_date: ep.air_date || null,
@@ -216,14 +229,33 @@ export default function SeriesEdit() {
         })),
       }));
       const r = await api.patch(`/series/${id}`, payload);
-      toast.success("Changes saved");
+      savedFormRef.current = JSON.stringify(src);
+      if (silent) {
+        setAutoStatus("saved");
+        setTimeout(() => setAutoStatus((s) => (s === "saved" ? "idle" : s)), 1600);
+      } else {
+        toast.success("Changes saved");
+      }
       setSeries(r.data);
       try { const st = await api.get(`/series/${id}/stats`); setStats(st.data); } catch {}
     } catch (e) {
+      if (silent) setAutoStatus("error");
       toast.error(e.response?.data?.detail || "Save failed");
     }
     setSaving(false);
   };
+
+  // Debounced auto-save
+  useEffect(() => {
+    if (!form || savedFormRef.current == null) return;
+    if (JSON.stringify(form) === savedFormRef.current) return;
+    setAutoStatus("pending");
+    const t = setTimeout(() => {
+      if (!saving) save(form, { silent: true });
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [form]);
 
   const scrollTo = (sid) => { const el = sectionRefs.current[sid]; if (el) window.scrollTo({ top: el.offsetTop - 90, behavior: "smooth" }); };
 
@@ -328,9 +360,25 @@ export default function SeriesEdit() {
           <button onClick={() => navigate(`/series/${id}`)} className="flex items-center gap-2 text-slate-200 hover:text-white text-sm" data-testid="back-to-series">
             <ArrowLeft className="w-4 h-4" /> Back to {series.title}
           </button>
-          <Button onClick={save} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white h-9 font-semibold" data-testid="top-save-btn">
-            <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <span
+              className={`text-xs font-medium ${
+                autoStatus === "saving" ? "text-amber-300" :
+                autoStatus === "saved" ? "text-emerald-300" :
+                autoStatus === "pending" ? "text-slate-400" :
+                autoStatus === "error" ? "text-rose-300" : "text-transparent"
+              }`}
+              data-testid="autosave-status"
+            >
+              {autoStatus === "saving" ? "Saving…" :
+                autoStatus === "saved" ? "All changes saved" :
+                autoStatus === "pending" ? "Unsaved changes…" :
+                autoStatus === "error" ? "Save failed" : "\u00A0"}
+            </span>
+            <Button onClick={() => save()} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white h-9 font-semibold" data-testid="top-save-btn">
+              <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -622,7 +670,7 @@ export default function SeriesEdit() {
 
           <div className="pt-4 pb-16 flex justify-end gap-2 border-t border-slate-200">
             <Button variant="outline" onClick={() => navigate(`/series/${id}`)} className="border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</Button>
-            <Button onClick={save} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold" data-testid="bottom-save-btn">
+            <Button onClick={() => save()} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold" data-testid="bottom-save-btn">
               <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
             </Button>
           </div>
