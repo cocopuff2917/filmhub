@@ -1,0 +1,29 @@
+{
+  "summary": "Regression + auto-save verification for MovieEdit/SeriesEdit save flow. All acceptance criteria in the review request pass: no 'Save failed' toast anywhere; top-save-btn and bottom-save-btn on both movie and series produce a 200 PATCH and 'Changes saved' toast; debounced auto-save fires ~900ms after last input, shows 'Unsaved changes…' -> 'Saving…' -> 'All changes saved' and resets to blank ~1.6s later; no spurious PATCH on page load; changes persist across reload (verified via GET); cast add via 'Add cast' dialog + Enter on new person creates the row (#N badge visible) with no Save failed toast.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "SeriesEdit seasons list", "issues": ["Console: 'validateDOMNesting: <button> cannot appear as a descendant of <button>' — the season header <button> (SeriesEdit.jsx ~L587) wraps a shadcn <Button> remove-season control (~L593). Unrelated to the save bug but should be refactored to a <div role=button> or move the remove button out of the header button. Causes hydration warnings, not a blocker."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: refactor nested <button> in SeriesEdit.jsx (season header ~L587 contains Button ~L593) to remove hydration warning.",
+    "Optional: series PATCH takes ~3s under load; if UX-sensitive, consider partial-payload PATCH instead of resending full seasons array on every auto-save."
+  ],
+  "critical_code_review_comments": [
+    "save() guard using Array.isArray(overrideForm.cast/main_cast) is correct and defensively rejects SyntheticEvent args — fix is solid.",
+    "Auto-save useEffect skips save when `saving` is true; because savedFormRef only advances on success, the next form mutation will re-trigger — acceptable but could result in stale-typed content flush; low priority.",
+    "MovieEdit auto-save silent path does NOT call setStats within the save handler when an exception occurs (only success path). Fine as-is."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100%"},
+  "test_credentials": "admin@cineverse.com / Admin@123",
+  "seed_data_creation": "None — mutated tagline of the first movie (id 6ababf8b7469c60a3977a05b) and first series (id 6abac6dea1ab23ad3f8d8871). Final movie tagline='...TESTTOP BOTTOM' + reloaded auto-tagline 'AUTO_...'; final series tagline='S_AUTO_..._BOT'. Cast add created a new actor 'TestActor_<ts>' attached to the movie.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The debounced auto-save wait window should be >=4s for series (payload is heavy due to full seasons resend). Movie auto-save completes in ~1.5-2s. Watch for the DOM-nesting warning in SeriesEdit season header if refactoring — that predates this bug fix.",
+  "rca of the issue": "Root cause: <Button onClick={save}> passes React SyntheticEvent as the first arg to save(overrideForm). save() then called overrideForm.cast.filter(...) which threw because SyntheticEvent has no .cast, triggering the catch and the 'Save failed' toast — even though no PATCH was ever attempted. Fix (verified): onClick={() => save()} on both top/bottom buttons and defensive guard `Array.isArray(overrideForm.cast|main_cast)` before treating the arg as a form override. Additionally, a JSON-diff based debounced auto-save (900ms) with a savedFormRef snapshot was added, wired to an autosave-status indicator (data-testid=autosave-status)."
+}

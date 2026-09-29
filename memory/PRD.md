@@ -45,6 +45,11 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - After picking a suggestion or creating an actor, focus jumps to Character (unless it's already filled). Save button also auto-creates on submit if the typed name has no match.
   - Uses `characterValRef` to avoid stale-closure reads when the async create resolves.
   - Backend `POST /api/actors` no longer does a redundant `find_one` after insert (saves one round-trip).
+- **Fix "Save failed" + auto-save on all edits** (2026-09-29 latest):
+  - Root cause: `onClick={save}` in MovieEdit/SeriesEdit passed the SyntheticEvent as `overrideForm` — `save` then called `.filter()` on the event's non-existent `.cast`, throwing before any PATCH was sent. Programmatic auto-save calls (`save(nextForm)`) always worked because they passed a real form.
+  - Fix: (a) top + bottom Save buttons now use `onClick={() => save()}` on both pages, (b) `save()` defensively rejects non-form args via `Array.isArray(overrideForm.cast/main_cast)`.
+  - New auto-save: JSON-diff based, 900 ms debounce, driven by `savedFormRef` snapshot set on initial load + updated after each successful PATCH. Status pill next to the Save button (`data-testid=autosave-status`) shows *Unsaved changes… → Saving… → All changes saved → idle*.
+  - Testing agent: 100 % pass (8/8 cases: manual save top+bottom on movie+series, auto-save on typed edits, no-op on page load, cast-add flow still saves, changes persist across reload).
 
 ## Backlog (P1/P2)
 - P1: Drag-to-reorder for crew, creators, and season/episode lists
