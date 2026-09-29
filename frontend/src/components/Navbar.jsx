@@ -10,6 +10,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import NotificationBell from "@/components/NotificationBell";
+import SearchBar from "@/components/SearchBar";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -31,8 +32,8 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-white/5 glass" data-testid="app-header">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          <Link to={user && user.is_suspended ? "/inbox" : "/"} className="flex items-center gap-2" data-testid="nav-logo">
+        <div className="flex items-center gap-6 h-16">
+          <Link to={user && user.is_suspended ? "/inbox" : "/"} className="flex items-center gap-2 flex-shrink-0" data-testid="nav-logo">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.4)]">
               <Film className="w-5 h-5 text-black" strokeWidth={2.5} />
             </div>
@@ -40,7 +41,7 @@ export default function Navbar() {
           </Link>
 
           {!(user && user.is_suspended) && (
-            <nav className="hidden md:flex items-center gap-8">
+            <nav className="hidden lg:flex items-center gap-6">
               <NavLink to="/" end className={linkClass} data-testid="nav-home">Home</NavLink>
               <NavLink to="/browse" className={linkClass} data-testid="nav-browse">Browse</NavLink>
               <NavLink to="/browse?tab=series" className={linkClass} data-testid="nav-series">TV Series</NavLink>
@@ -52,7 +53,13 @@ export default function Navbar() {
             </nav>
           )}
 
-          <div className="flex items-center gap-3">
+          {!(user && user.is_suspended) && (
+            <div className="hidden md:flex flex-1 justify-center px-4 max-w-xl">
+              <SearchBar />
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 ml-auto flex-shrink-0">
             {user && !user.is_suspended && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
