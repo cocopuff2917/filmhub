@@ -203,7 +203,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=86400, path="/")
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
 
-async def get_current_user(request: Request) -> dict:
+async def get_current_user_allow_suspended(request: Request) -> dict:
     token = request.cookies.get("access_token")
     if not token:
         auth_header = request.headers.get("Authorization", "")
@@ -218,26 +218,28 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
-        # check suspension
+        # auto-lift expired suspensions
         sus = user.get("suspended_until")
+        is_suspended = False
         if sus:
             if sus == "permanent":
-                raise HTTPException(status_code=403, detail=f"Account suspended: {user.get('suspension_reason','')}")
-            try:
-                until = datetime.fromisoformat(sus)
-                if until > datetime.now(timezone.utc):
-                    raise HTTPException(status_code=403, detail=f"Account suspended until {sus}: {user.get('suspension_reason','')}")
-                else:
-                    await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
-                    user.pop("suspended_until", None)
-                    user.pop("suspension_reason", None)
-            except HTTPException:
-                raise
-            except Exception:
-                pass
+                is_suspended = True
+            else:
+                try:
+                    until = datetime.fromisoformat(sus)
+                    if until > datetime.now(timezone.utc):
+                        is_suspended = True
+                    else:
+                        await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
+                        user.pop("suspended_until", None)
+                        user.pop("suspension_reason", None)
+                except Exception:
+                    pass
         user["id"] = str(user["_id"])
         user.pop("_id", None)
         user.pop("password_hash", None)
+        user["is_suspended"] = is_suspended
+        user["suspension_until"] = user.get("suspended_until")
         # resolve custom role
         custom_role = None
         crid = user.get("custom_role_id")
@@ -257,13 +259,11 @@ async def get_current_user(request: Request) -> dict:
             except Exception:
                 pass
         user["custom_role"] = custom_role
-        # effective role = highest of system role + custom_role base
         rank = {"user": 0, "moderator": 1, "admin": 2}
         eff = user.get("role", "user")
         if custom_role and rank.get(custom_role["base"], 0) > rank.get(eff, 0):
             eff = custom_role["base"]
         user["effective_role"] = eff
-        # effective permissions
         eff_perms = set()
         if user.get("role") == "admin" or eff == "admin":
             eff_perms = set(PERMISSIONS_ALL)
@@ -278,6 +278,15 @@ async def get_current_user(request: Request) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+async def get_current_user(request: Request) -> dict:
+    user = await get_current_user_allow_suspended(request)
+    if user.get("is_suspended"):
+        reason = user.get("suspension_reason") or ""
+        until = user.get("suspension_until")
+        when = "permanently" if until == "permanent" else f"until {until}"
+        raise HTTPException(status_code=403, detail=f"Account suspended {when}. {reason}".strip())
+    return user
+
 async def get_current_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("effective_role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -290,7 +299,7 @@ async def get_current_moderator(user: dict = Depends(get_current_user)) -> dict:
 
 async def get_optional_user(request: Request) -> Optional[dict]:
     try:
-        return await get_current_user(request)
+        return await get_current_user_allow_suspended(request)
     except HTTPException:
         return None
 
@@ -500,6 +509,12 @@ class ThreadMessageCreate(BaseModel):
 
 class ThreadStatusUpdate(BaseModel):
     status: str  # open | closed
+
+# ----------- Direct Threads / Notifications -----------
+class DirectThreadCreate(BaseModel):
+    target_user_id: str
+    title: str = Field(min_length=3, max_length=200)
+    body: str = Field(min_length=1, max_length=5000)
 
 # ----------- Locks -----------
 class LockUpdate(BaseModel):
@@ -743,31 +758,40 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    # check suspension
+    # Suspension: DO NOT block login anymore; suspended users can log in to access their inbox.
+    # Auto-lift expired suspensions.
     sus = user.get("suspended_until")
+    is_suspended = False
     if sus:
-        blocked = False
         if sus == "permanent":
-            blocked = True
+            is_suspended = True
         else:
             try:
                 until = datetime.fromisoformat(sus)
                 if until > datetime.now(timezone.utc):
-                    blocked = True
+                    is_suspended = True
                 else:
                     await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
+                    user.pop("suspended_until", None)
+                    user.pop("suspension_reason", None)
+                    sus = None
             except Exception:
                 pass
-        if blocked:
-            reason = user.get("suspension_reason") or ""
-            when = "permanently" if sus == "permanent" else f"until {sus}"
-            raise HTTPException(status_code=403, detail=f"Account suspended {when}. {reason}".strip())
     await record_user_ip(user["_id"], get_client_ip(request))
     user_id = str(user["_id"])
     access = create_access_token(user_id, email)
     refresh = create_refresh_token(user_id)
     set_auth_cookies(response, access, refresh)
-    return {"id": user_id, "email": email, "name": user.get("name"), "role": user.get("role", "user"), "avatar_url": user.get("avatar_url", "")}
+    return {
+        "id": user_id,
+        "email": email,
+        "name": user.get("name"),
+        "role": user.get("role", "user"),
+        "avatar_url": user.get("avatar_url", ""),
+        "is_suspended": is_suspended,
+        "suspension_reason": user.get("suspension_reason") if is_suspended else None,
+        "suspension_until": sus if is_suspended else None,
+    }
 
 @api_router.post("/auth/logout")
 async def logout(response: Response):
@@ -776,7 +800,7 @@ async def logout(response: Response):
     return {"ok": True}
 
 @api_router.get("/auth/me")
-async def me(user: dict = Depends(get_current_user)):
+async def me(user: dict = Depends(get_current_user_allow_suspended)):
     return {
         "id": user["id"],
         "email": user.get("email"),
@@ -787,6 +811,9 @@ async def me(user: dict = Depends(get_current_user)):
         "custom_role": user.get("custom_role"),
         "avatar_url": user.get("avatar_url", ""),
         "created_at": user.get("created_at"),
+        "is_suspended": user.get("is_suspended", False),
+        "suspension_reason": user.get("suspension_reason") if user.get("is_suspended") else None,
+        "suspension_until": user.get("suspension_until") if user.get("is_suspended") else None,
     }
 
 @api_router.patch("/auth/me/avatar")
@@ -1393,6 +1420,14 @@ async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depend
         {"field": "reason", "before": "—", "after": payload.reason or "(no reason)"},
     ]
     await log_edit(mod, "user", user_id, "suspend", target.get("name", ""), f"Suspended {duration_label}: {payload.reason or '(no reason)'}", changes)
+    await _create_notification(
+        user_id=str(target["_id"]),
+        ntype="suspension",
+        title=f"Your account has been suspended {duration_label}",
+        body=payload.reason or "",
+        link="/inbox",
+        from_user=mod,
+    )
     return {"ok": True, "suspended_until": until}
 
 @api_router.post("/moderation/users/{user_id}/unsuspend")
@@ -1526,6 +1561,39 @@ def _serialize_thread(t: dict) -> dict:
     t["id"] = str(t.pop("_id"))
     return t
 
+def _is_mod_role(user: dict) -> bool:
+    return user.get("effective_role") in ("moderator", "admin")
+
+def _can_view_direct_thread(t: dict, user: Optional[dict]) -> bool:
+    if not user:
+        return False
+    if _is_mod_role(user):
+        return True
+    uid = user["id"]
+    return uid == t.get("user_id") or uid == t.get("target_user_id")
+
+async def _create_notification(*, user_id: str, ntype: str, title: str, body: str = "",
+                                link: str = "", thread_id: Optional[str] = None,
+                                from_user: Optional[dict] = None):
+    if not user_id:
+        return
+    doc = {
+        "user_id": user_id,
+        "type": ntype,
+        "title": title,
+        "body": body,
+        "link": link,
+        "thread_id": thread_id,
+        "read": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if from_user:
+        doc["from_user_id"] = from_user.get("id")
+        doc["from_user_name"] = from_user.get("name")
+        doc["from_user_avatar"] = from_user.get("avatar_url", "")
+        doc["from_user_role"] = from_user.get("effective_role", from_user.get("role", "user"))
+    await db.notifications.insert_one(doc)
+
 @api_router.post("/threads")
 async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_user)):
     if payload.category not in ("support", "report", "general"):
@@ -1543,11 +1611,56 @@ async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_
         "user_name": user.get("name"),
         "user_avatar": user.get("avatar_url", ""),
         "user_role": user.get("role", "user"),
+        "is_direct": False,
+        "created_at": now,
+        "last_activity_at": now,
+        "message_count": 0,
+    }
+    await db.threads.insert_one(doc)
+    return _serialize_thread(doc)
+
+@api_router.post("/moderation/threads")
+async def create_direct_thread(payload: DirectThreadCreate, mod: dict = Depends(get_current_moderator)):
+    try:
+        target = await db.users.find_one({"_id": ObjectId(payload.target_user_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if str(target["_id"]) == mod["id"]:
+        raise HTTPException(status_code=400, detail="Cannot message yourself")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "title": payload.title.strip(),
+        "body": payload.body.strip(),
+        "category": "direct",
+        "status": "open",
+        "entity_type": None,
+        "entity_id": None,
+        "entity_title": None,
+        "user_id": mod["id"],
+        "user_name": mod.get("name"),
+        "user_avatar": mod.get("avatar_url", ""),
+        "user_role": mod.get("effective_role", mod.get("role", "moderator")),
+        "target_user_id": str(target["_id"]),
+        "target_user_name": target.get("name"),
+        "is_direct": True,
         "created_at": now,
         "last_activity_at": now,
         "message_count": 0,
     }
     result = await db.threads.insert_one(doc)
+    thread_id = str(result.inserted_id)
+    await _create_notification(
+        user_id=str(target["_id"]),
+        ntype="direct_thread",
+        title=f"New message from {mod.get('name')}",
+        body=payload.title.strip(),
+        link=f"/threads/{thread_id}",
+        thread_id=thread_id,
+        from_user=mod,
+    )
+    doc["_id"] = result.inserted_id
     return _serialize_thread(doc)
 
 @api_router.get("/threads")
@@ -1557,24 +1670,75 @@ async def list_threads(
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
     limit: int = 100,
+    viewer: Optional[dict] = Depends(get_optional_user),
 ):
-    q = {}
-    if category: q["category"] = category
-    if status: q["status"] = status
-    if entity_type: q["entity_type"] = entity_type
-    if entity_id: q["entity_id"] = entity_id
+    q: dict = {}
+    if category:
+        q["category"] = category
+    if status:
+        q["status"] = status
+    if entity_type:
+        q["entity_type"] = entity_type
+    if entity_id:
+        q["entity_id"] = entity_id
+    # Hide direct threads from public listing unless viewer is a participant / mod
+    if category == "direct":
+        if not viewer:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        if not _is_mod_role(viewer):
+            q = {"$and": [q, {"$or": [{"user_id": viewer["id"]}, {"target_user_id": viewer["id"]}]}]}
+    else:
+        # exclude direct threads from generic listings
+        base_exclude = {"$or": [{"is_direct": {"$ne": True}}, {"is_direct": {"$exists": False}}]}
+        q = {"$and": [q, base_exclude]} if q else base_exclude
+    docs = []
+    async for t in db.threads.find(q).sort("last_activity_at", -1).limit(limit):
+        docs.append(_serialize_thread(t))
+    return docs
+
+@api_router.get("/inbox/threads")
+async def inbox_threads(user: dict = Depends(get_current_user_allow_suspended), limit: int = 100):
+    """List direct threads visible to the current user (participant or mod)."""
+    if _is_mod_role(user):
+        q = {"is_direct": True}
+    else:
+        q = {"is_direct": True, "$or": [{"user_id": user["id"]}, {"target_user_id": user["id"]}]}
     docs = []
     async for t in db.threads.find(q).sort("last_activity_at", -1).limit(limit):
         docs.append(_serialize_thread(t))
     return docs
 
 @api_router.get("/threads/{thread_id}")
-async def get_thread(thread_id: str):
+async def get_thread(thread_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     try:
         t = await db.threads.find_one({"_id": ObjectId(thread_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not t:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if t.get("is_direct"):
+        if not _can_view_direct_thread(t, viewer):
+            raise HTTPException(status_code=404, detail="Thread not found")
+    t = _serialize_thread(t)
+    messages = []
+    async for m in db.thread_messages.find({"thread_id": thread_id}).sort("created_at", 1):
+        m["id"] = str(m.pop("_id"))
+        messages.append(m)
+    t["messages"] = messages
+    return t
+
+@api_router.get("/threads/{thread_id}/inbox")
+async def get_thread_inbox(thread_id: str, user: dict = Depends(get_current_user_allow_suspended)):
+    """Suspended-safe fetch of a direct thread the user participates in."""
+    try:
+        t = await db.threads.find_one({"_id": ObjectId(thread_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not t:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not t.get("is_direct"):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not _can_view_direct_thread(t, user):
         raise HTTPException(status_code=404, detail="Thread not found")
     t = _serialize_thread(t)
     messages = []
@@ -1585,14 +1749,22 @@ async def get_thread(thread_id: str):
     return t
 
 @api_router.post("/threads/{thread_id}/messages")
-async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user: dict = Depends(get_current_user)):
+async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user: dict = Depends(get_current_user_allow_suspended)):
     try:
         t = await db.threads.find_one({"_id": ObjectId(thread_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not t:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if t.get("status") == "closed" and user.get("role") not in ("moderator", "admin"):
+    is_direct = bool(t.get("is_direct"))
+    if is_direct:
+        if not _can_view_direct_thread(t, user):
+            raise HTTPException(status_code=404, detail="Thread not found")
+    else:
+        # public threads: suspended users cannot reply
+        if user.get("is_suspended"):
+            raise HTTPException(status_code=403, detail="Your account is suspended. You can only reply to moderator messages.")
+    if t.get("status") == "closed" and not _is_mod_role(user):
         raise HTTPException(status_code=403, detail="Thread is closed")
     now = datetime.now(timezone.utc).isoformat()
     doc = {
@@ -1601,7 +1773,7 @@ async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user
         "user_id": user["id"],
         "user_name": user.get("name"),
         "user_avatar": user.get("avatar_url", ""),
-        "user_role": user.get("role", "user"),
+        "user_role": user.get("effective_role", user.get("role", "user")),
         "created_at": now,
     }
     result = await db.thread_messages.insert_one(doc)
@@ -1611,6 +1783,30 @@ async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user
         {"_id": ObjectId(thread_id)},
         {"$set": {"last_activity_at": now}, "$inc": {"message_count": 1}},
     )
+    # Notifications: to the other party
+    recipients = set()
+    if is_direct:
+        for uid in (t.get("user_id"), t.get("target_user_id")):
+            if uid and uid != user["id"]:
+                recipients.add(uid)
+        n_title = f"New reply from {user.get('name')}"
+        n_type = "direct_thread_reply"
+    else:
+        owner_id = t.get("user_id")
+        if owner_id and owner_id != user["id"]:
+            recipients.add(owner_id)
+        n_title = f"{user.get('name')} replied to your thread"
+        n_type = "thread_reply"
+    for uid in recipients:
+        await _create_notification(
+            user_id=uid,
+            ntype=n_type,
+            title=n_title,
+            body=t.get("title", ""),
+            link=f"/threads/{thread_id}",
+            thread_id=thread_id,
+            from_user=user,
+        )
     return doc
 
 @api_router.patch("/threads/{thread_id}/status")
@@ -1623,7 +1819,6 @@ async def set_thread_status(thread_id: str, payload: ThreadStatusUpdate, mod: di
         "status_changed_by_name": mod.get("name"),
         "status_changed_at": datetime.now(timezone.utc).isoformat(),
     }})
-    # also log system message
     await db.thread_messages.insert_one({
         "thread_id": thread_id,
         "text": f"Thread {payload.status} by {mod.get('name')}",
@@ -1649,7 +1844,48 @@ async def delete_thread(thread_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Not allowed")
     await db.threads.delete_one({"_id": ObjectId(thread_id)})
     await db.thread_messages.delete_many({"thread_id": thread_id})
+    await db.notifications.delete_many({"thread_id": thread_id})
     return {"ok": True}
+
+# ----------- Notifications -----------
+def _serialize_notification(n: dict) -> dict:
+    n["id"] = str(n.pop("_id"))
+    return n
+
+@api_router.get("/notifications")
+async def list_notifications(user: dict = Depends(get_current_user_allow_suspended), limit: int = 50):
+    docs = []
+    async for n in db.notifications.find({"user_id": user["id"]}).sort("created_at", -1).limit(limit):
+        docs.append(_serialize_notification(n))
+    return docs
+
+@api_router.get("/notifications/unread-count")
+async def unread_notification_count(user: dict = Depends(get_current_user_allow_suspended)):
+    count = await db.notifications.count_documents({"user_id": user["id"], "read": False})
+    return {"count": count}
+
+@api_router.patch("/notifications/{nid}/read")
+async def mark_notification_read(nid: str, user: dict = Depends(get_current_user_allow_suspended)):
+    try:
+        res = await db.notifications.update_one(
+            {"_id": ObjectId(nid), "user_id": user["id"]},
+            {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"ok": True}
+
+@api_router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(user: dict = Depends(get_current_user_allow_suspended)):
+    now = datetime.now(timezone.utc).isoformat()
+    res = await db.notifications.update_many(
+        {"user_id": user["id"], "read": False},
+        {"$set": {"read": True, "read_at": now}},
+    )
+    return {"ok": True, "updated": res.modified_count}
+
 
 # ----------- IP overlap groups -----------
 @api_router.get("/moderation/ip-groups")

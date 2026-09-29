@@ -8,11 +8,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp } from "lucide-react";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
 import SeriesForm from "@/components/forms/SeriesForm";
+import MessageUserDialog from "@/components/MessageUserDialog";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -130,6 +131,7 @@ function UsersTab({ currentRole }) {
   const [duration, setDuration] = useState("7");
   const [customDays, setCustomDays] = useState("");
   const [reason, setReason] = useState("");
+  const [messageTarget, setMessageTarget] = useState(null);
   const [ipData, setIpData] = useState({});
   const [ipLoading, setIpLoading] = useState({});
   const [ipOpen, setIpOpen] = useState({});
@@ -270,6 +272,11 @@ function UsersTab({ currentRole }) {
                   </Select>
                 )}
                 {u.role !== "admin" && (
+                  <Button size="sm" variant="outline" onClick={() => setMessageTarget(u)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid={`message-user-${u.id}`}>
+                    <MessageSquare className="w-4 h-4 mr-1" /> Message
+                  </Button>
+                )}
+                {u.role !== "admin" && (
                   isSuspended(u) ? (
                     <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>
                       <CheckCircle className="w-4 h-4 mr-1" /> Unsuspend
@@ -373,6 +380,12 @@ function UsersTab({ currentRole }) {
           </div>
         )}
       </CardContent>
+      <MessageUserDialog
+        open={!!messageTarget}
+        onOpenChange={(v) => { if (!v) setMessageTarget(null); }}
+        targetUser={messageTarget}
+        onSent={() => { setMessageTarget(null); load(); }}
+      />
     </Card>
   );
 }
