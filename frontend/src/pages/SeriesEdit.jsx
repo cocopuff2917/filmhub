@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, ChevronDown, ChevronRight } from "lucide-react";
+import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import CastEditDialog from "@/components/CastEditDialog";
@@ -94,6 +94,7 @@ export default function SeriesEdit() {
   const [locked, setLocked] = useState([]);
   const [castDialog, setCastDialog] = useState({ open: false, index: null });
   const [guestDialog, setGuestDialog] = useState({ open: false, sIdx: null, eIdx: null, gIdx: null });
+  const [dragIdx, setDragIdx] = useState(null);
   const [openSeason, setOpenSeason] = useState(null);
   const sectionRefs = useRef({});
 
@@ -246,6 +247,15 @@ export default function SeriesEdit() {
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const remCast = (i) => setForm((f) => ({ ...f, main_cast: f.main_cast.filter((_, x) => x !== i) }));
   const openCastEdit = (i) => setCastDialog({ open: true, index: i });
+  const reorderCast = (from, to) => {
+    if (from === to || from == null || to == null) return;
+    const list = [...form.main_cast];
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    const nextForm = { ...form, main_cast: list };
+    setForm(nextForm);
+    save(nextForm);
+  };
   const handleCastSave = (row) => {
     const nextCast = castDialog.index == null
       ? [...form.main_cast, row]
@@ -418,8 +428,19 @@ export default function SeriesEdit() {
             <div className="space-y-2">
               {form.main_cast.map((c, i) => {
                 const actor = actors.find((a) => a.id === c.actor_id);
+                const dragging = dragIdx === i;
                 return (
-                  <div key={i} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2" data-testid={`cast-row-${i}`}>
+                  <div
+                    key={i}
+                    draggable={canEditField("main_cast")}
+                    onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                    onDrop={(e) => { e.preventDefault(); reorderCast(dragIdx, i); setDragIdx(null); }}
+                    onDragEnd={() => setDragIdx(null)}
+                    className={`flex items-center gap-3 rounded-md border bg-white px-3 py-2 transition ${dragging ? "opacity-40 border-cyan-400" : "border-slate-200 hover:border-slate-300"}`}
+                    data-testid={`cast-row-${i}`}
+                  >
+                    <GripVertical className={`w-4 h-4 text-slate-400 ${canEditField("main_cast") ? "cursor-grab active:cursor-grabbing" : "opacity-30"}`} data-testid={`cast-drag-${i}`} />
                     <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-xs text-slate-500 flex-shrink-0">
                       {actor?.photo_url ? <img src={fileUrl(actor.photo_url)} alt="" className="w-full h-full object-cover" /> : (actor?.name?.[0] || "?")}
                     </div>
@@ -427,6 +448,7 @@ export default function SeriesEdit() {
                       <div className="font-semibold text-sm text-slate-900 truncate">{actor?.name || "(unknown)"}</div>
                       <div className="text-xs text-slate-500 truncate">as {c.character_name || "—"}</div>
                     </div>
+                    <span className="text-[10px] text-slate-400 tabular-nums w-6 text-right">#{i + 1}</span>
                     <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!canEditField("main_cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
                     <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!canEditField("main_cast")} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
                   </div>
