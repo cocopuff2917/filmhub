@@ -15,6 +15,7 @@ import Register from "@/pages/Register";
 import Watchlist from "@/pages/Watchlist";
 import Admin from "@/pages/Admin";
 import MovieEdit from "@/pages/MovieEdit";
+import SeriesEdit from "@/pages/SeriesEdit";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
             <Route path="/movie/:id" element={<MovieDetail />} />
             <Route path="/movie/:id/edit" element={<MovieEdit />} />
             <Route path="/series/:id" element={<SeriesDetail />} />
+            <Route path="/series/:id/edit" element={<SeriesEdit />} />
             <Route path="/actor/:id" element={<ActorDetail />} />
             <Route path="/user/:id" element={<UserProfile />} />
             <Route path="/threads" element={<ThreadsList />} />

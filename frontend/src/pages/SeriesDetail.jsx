@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Calendar, Tv, Bookmark, BookmarkCheck, PlayCircle, Heart, Share2, Edit, Trash2, Flag, Lock,
-  Award, ChevronRight, TrendingUp, Star, MessageSquare, History as HistoryIcon,
+  Award, ChevronRight, ChevronDown, TrendingUp, Star, MessageSquare, History as HistoryIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
@@ -41,6 +41,57 @@ function ScoreCircle({ score, size = 68 }) {
     </div>
   );
 }
+
+function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const episodes = season.episodes || [];
+  return (
+    <div className="rounded-xl bg-[#14181f] border border-white/10 overflow-hidden" data-testid={`season-block-${season.season_number}`}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/5 transition">
+        <div className="w-16 flex-shrink-0 aspect-[2/3] rounded-md overflow-hidden bg-[#1e2430]">
+          {season.poster_url ? <img src={fileUrl(season.poster_url)} alt="" className="w-full h-full object-cover" /> : (fallbackPoster ? <img src={fallbackPoster} alt="" className="w-full h-full object-cover opacity-60" /> : null)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-heading text-lg font-bold">{season.name || `Season ${season.season_number}`}</div>
+          <div className="text-xs text-slate-400">{(season.air_date || "").slice(0, 4) || "No air date"} · {episodes.length} episode{episodes.length !== 1 && "s"}</div>
+          {season.overview && <p className="text-sm text-slate-300 line-clamp-2 mt-1">{season.overview}</p>}
+        </div>
+        {open ? <ChevronDown className="w-5 h-5 text-slate-400" /> : <ChevronRight className="w-5 h-5 text-slate-400" />}
+      </button>
+      {open && (
+        <div className="border-t border-white/10 divide-y divide-white/5">
+          {episodes.length === 0 ? (
+            <div className="p-4 text-sm text-slate-500 text-center italic">No episodes yet.</div>
+          ) : episodes.map((ep, i) => (
+            <div key={i} className="flex gap-4 p-4" data-testid={`episode-${season.season_number}-${ep.episode_number}`}>
+              <div className="w-32 flex-shrink-0 aspect-video rounded-md overflow-hidden bg-[#1e2430]">
+                {ep.still_url ? <img src={fileUrl(ep.still_url)} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs">No image</div>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-slate-500 text-sm font-mono">S{season.season_number}·E{ep.episode_number}</span>
+                  <span className="font-semibold text-white">{ep.title || "(untitled)"}</span>
+                  {ep.air_date && <span className="text-xs text-slate-500">· {ep.air_date}</span>}
+                </div>
+                {ep.overview && <p className="mt-1 text-sm text-slate-400 line-clamp-3">{ep.overview}</p>}
+                {(ep.guest_stars || []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(ep.guest_stars || []).map((g, gi) => (
+                      <span key={gi} className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300">
+                        {g.actor?.name || "?"}{g.character_name ? ` as ${g.character_name}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function Sparkline({ points = [], width = 220, height = 56 }) {
   if (!points.length) return <div className="h-14 text-xs text-slate-500 flex items-center">No trend yet</div>;
@@ -138,6 +189,17 @@ export default function SeriesDetail() {
                 {series.season_count ? <span className="flex items-center gap-1.5"><Tv className="w-3.5 h-3.5" /> {series.season_count} season{series.season_count !== 1 && "s"} · {series.episode_count || 0} ep</span> : null}
               </div>
 
+              {(series.first_air_date || series.last_air_date) && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400" data-testid="air-dates-row">
+                  {series.first_air_date && (
+                    <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-emerald-400" /> First aired <span className="text-slate-200 font-semibold">{fmtDate(series.first_air_date)}</span></span>
+                  )}
+                  {series.last_air_date && (
+                    <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-rose-400" /> Last aired <span className="text-slate-200 font-semibold">{fmtDate(series.last_air_date)}</span></span>
+                  )}
+                </div>
+              )}
+
               <div className="mt-6 flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-3">
                   <ScoreCircle score={score100} />
@@ -173,7 +235,7 @@ export default function SeriesDetail() {
               )}
 
               <div className="mt-6 flex flex-wrap gap-2">
-                {user && <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-series-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>}
+                {user && <Button size="sm" variant="outline" onClick={() => navigate(`/series/${id}/edit`)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-series-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>}
                 {user && <Button size="sm" variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-series-btn"><Flag className="w-4 h-4 mr-2" /> Report</Button>}
                 {canModerate && (
                   <>
@@ -247,21 +309,13 @@ export default function SeriesDetail() {
             </section>
           )}
 
-          {/* All Seasons */}
+          {/* All Seasons with expandable Episodes */}
           {sortedSeasons.length > 0 && (
             <section className="mt-12" data-testid="all-seasons">
-              <h2 className="font-heading text-2xl font-bold">All Seasons</h2>
-              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {sortedSeasons.map((s) => (
-                  <div key={s.season_number} className="rounded-lg overflow-hidden bg-[#14181f] border border-white/10">
-                    <div className="aspect-[2/3] bg-[#1e2430] overflow-hidden">
-                      {s.poster_url ? <img src={fileUrl(s.poster_url)} alt="" className="w-full h-full object-cover" /> : (poster ? <img src={poster} alt="" className="w-full h-full object-cover opacity-60" /> : null)}
-                    </div>
-                    <div className="p-2.5">
-                      <div className="font-semibold text-sm">{s.name || `Season ${s.season_number}`}</div>
-                      <div className="text-[11px] text-slate-500">{year(s.air_date)} · {(s.episodes || []).length} ep</div>
-                    </div>
-                  </div>
+              <h2 className="font-heading text-2xl font-bold">Seasons &amp; Episodes</h2>
+              <div className="mt-4 space-y-3">
+                {sortedSeasons.map((s, sIdx) => (
+                  <SeasonBlock key={s.season_number} season={s} fallbackPoster={poster} defaultOpen={sIdx === sortedSeasons.length - 1} />
                 ))}
               </div>
             </section>
@@ -395,7 +449,7 @@ export default function SeriesDetail() {
           </div>
 
           {user && (
-            <Button onClick={() => setEditOpen(true)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn"><Edit className="w-4 h-4 mr-2" /> Edit Page</Button>
+            <Button onClick={() => navigate(`/series/${id}/edit`)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn"><Edit className="w-4 h-4 mr-2" /> Edit Page</Button>
           )}
           {user && (
             <button onClick={() => setReportOpen(true)} className="w-full text-left text-sm text-slate-400 hover:text-rose-300 flex items-center gap-1.5"><Flag className="w-3.5 h-3.5" /> Report an Issue</button>
