@@ -764,6 +764,98 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
     })
     profile["week_starts_at"] = week_start.isoformat()
 
+    # ---------- rating stats ----------
+    uid_str = str(u["_id"])
+    ratings_agg = await db.reviews.aggregate([
+        {"$match": {"user_id": uid_str}},
+        {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "count": {"$sum": 1}}},
+    ]).to_list(1)
+    if ratings_agg:
+        profile["total_ratings"] = ratings_agg[0]["count"]
+        profile["avg_movie_rating"] = round(ratings_agg[0]["avg"] * 10)  # % out of 100
+    else:
+        profile["total_ratings"] = 0
+        profile["avg_movie_rating"] = None
+    # rating distribution buckets 1..10 (floor)
+    dist = [0] * 10
+    async for r in db.reviews.find({"user_id": uid_str}, {"rating": 1}):
+        b = max(1, min(10, int(round(r.get("rating", 0)))))
+        dist[b - 1] += 1
+    profile["rating_distribution"] = dist
+    # Currently no series reviews collection — placeholder
+    profile["avg_series_rating"] = None
+
+    # ---------- top genres from rated movies ----------
+    genre_counts = {}
+    async for r in db.reviews.find({"user_id": uid_str}, {"movie_id": 1}):
+        try:
+            m = await db.movies.find_one({"_id": ObjectId(r["movie_id"])}, {"genres": 1})
+        except Exception:
+            m = None
+        for g in (m.get("genres") if m else []) or []:
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+    profile["top_genres"] = sorted(
+        [{"name": g, "count": c} for g, c in genre_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )[:5]
+
+    # ---------- recent edited entities (grouped) ----------
+    seen = {}
+    order = []
+    async for e in db.edits.find({"user_id": uid_str}).sort("created_at", -1).limit(80):
+        key = f"{e.get('entity_type')}::{e.get('entity_id')}"
+        if key not in seen:
+            seen[key] = {
+                "entity_type": e.get("entity_type"),
+                "entity_id": e.get("entity_id"),
+                "entity_title": e.get("entity_title"),
+                "last_at": e.get("created_at"),
+                "edit_count": 1,
+                "poster_url": "",
+            }
+            order.append(key)
+        else:
+            seen[key]["edit_count"] += 1
+    # fetch posters for movies/series
+    recent_entities = []
+    for key in order[:8]:
+        item = seen[key]
+        try:
+            if item["entity_type"] == "movie":
+                doc = await db.movies.find_one({"_id": ObjectId(item["entity_id"])}, {"backdrop_url": 1, "poster_url": 1})
+                if doc:
+                    item["poster_url"] = doc.get("backdrop_url") or doc.get("poster_url") or ""
+            elif item["entity_type"] == "series":
+                doc = await db.series.find_one({"_id": ObjectId(item["entity_id"])}, {"backdrop_url": 1, "poster_url": 1})
+                if doc:
+                    item["poster_url"] = doc.get("backdrop_url") or doc.get("poster_url") or ""
+            elif item["entity_type"] == "actor":
+                doc = await db.actors.find_one({"_id": ObjectId(item["entity_id"])}, {"photo_url": 1})
+                if doc:
+                    item["poster_url"] = doc.get("photo_url") or ""
+        except Exception:
+            pass
+        recent_entities.append(item)
+    profile["recent_entities"] = recent_entities
+
+    # ---------- 30-day activity by entity type ----------
+    day_start = (now - timedelta(days=29)).replace(hour=0, minute=0, second=0, microsecond=0)
+    days = [(day_start + timedelta(days=i)).date().isoformat() for i in range(30)]
+    daily = {d: {"movie": 0, "series": 0, "actor": 0} for d in days}
+    async for e in db.edits.find({
+        "user_id": uid_str,
+        "created_at": {"$gte": day_start.isoformat()},
+    }, {"created_at": 1, "entity_type": 1}):
+        try:
+            d = e["created_at"][:10]
+            if d in daily:
+                et = e.get("entity_type") or "movie"
+                if et in daily[d]:
+                    daily[d][et] += 1
+        except Exception:
+            pass
+    profile["daily_activity_30d"] = [{"date": d, **daily[d]} for d in days]
+
     return profile
 
 # ----------- Leaderboard -----------
