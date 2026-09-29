@@ -23,7 +23,7 @@ const roleTint = {
   moderator: "bg-sky-500/15 text-sky-300 border-sky-500/40",
 };
 
-export default function DiscussionSection({ entityType, entityId }) {
+export default function DiscussionSection({ entityType, entityId, embedded = false }) {
   const { user } = useAuth();
   const [comments, setComments] = useState([]);
   const [text, setText] = useState("");
@@ -58,18 +58,22 @@ export default function DiscussionSection({ entityType, entityId }) {
 
   const canDelete = (c) => user && (c.user_id === user.id || ["moderator", "admin"].includes(user.role));
 
-  return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="discussion-section">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
-        <MessageSquare className="w-4 h-4" /> Community
-      </div>
-      <div className="mt-2 flex items-baseline gap-3">
-        <h2 className="font-heading text-3xl sm:text-4xl font-bold text-white">Discussion</h2>
-        <span className="text-sm text-slate-500">{comments.length} comment{comments.length !== 1 && "s"}</span>
-      </div>
+  const inner = (
+    <>
+      {!embedded && (
+        <>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
+            <MessageSquare className="w-4 h-4" /> Community
+          </div>
+          <div className="mt-2 flex items-baseline gap-3">
+            <h2 className="font-heading text-3xl sm:text-4xl font-bold text-white">Discussion</h2>
+            <span className="text-sm text-slate-500">{comments.length} comment{comments.length !== 1 && "s"}</span>
+          </div>
+        </>
+      )}
 
       {user ? (
-        <form onSubmit={submit} className="mt-6 rounded-xl bg-[#14181f] border border-white/10 p-4">
+        <form onSubmit={submit} className={`${embedded ? "" : "mt-6"} rounded-xl bg-[#14181f] border border-white/10 p-4`}>
           <div className="flex items-start gap-3">
             <div className="w-9 h-9 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400 flex-shrink-0">
               {user.avatar_url ? <img src={fileUrl(user.avatar_url)} alt="" className="w-full h-full object-cover" /> : (user.name?.[0] || "?")}
@@ -93,12 +97,12 @@ export default function DiscussionSection({ entityType, entityId }) {
           </div>
         </form>
       ) : (
-        <div className="mt-6 rounded-xl bg-[#14181f] border border-white/10 p-6 text-slate-400 text-sm">
+        <div className={`${embedded ? "" : "mt-6"} rounded-xl bg-[#14181f] border border-white/10 p-6 text-slate-400 text-sm`}>
           <Link to="/login" className="text-amber-400 hover:text-amber-300 font-medium">Sign in</Link> to join the discussion.
         </div>
       )}
 
-      <div className="mt-8 space-y-4">
+      <div className={`${embedded ? "mt-4" : "mt-8"} space-y-4`}>
         {comments.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-10 text-center text-slate-500 text-sm">
             No comments yet. Be the first to start the conversation.
@@ -130,6 +134,15 @@ export default function DiscussionSection({ entityType, entityId }) {
           </div>
         ))}
       </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div data-testid="discussion-section">{inner}</div>;
+  }
+  return (
+    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="discussion-section">
+      {inner}
     </section>
   );
 }

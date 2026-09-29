@@ -208,17 +208,31 @@ class CastMember(BaseModel):
     actor_id: str
     character_name: str
 
+class CrewMember(BaseModel):
+    name: str
+    role: str = "Director"  # Director | Writer | Producer, etc.
+
 class MovieCreate(BaseModel):
     title: str
     release_date: str  # YYYY-MM-DD
     genres: List[str] = []
     synopsis: str = ""
+    tagline: str = ""
     poster_url: str = ""
     backdrop_url: str = ""
     trailer_url: str = ""
+    video_urls: List[str] = []
     runtime: Optional[int] = None
     gallery: List[str] = []
     cast: List[CastMember] = []
+    crew: List[CrewMember] = []
+    keywords: List[str] = []
+    status: str = "Released"  # Released | In Production | Post Production | Rumored | Canceled
+    original_language: str = "English"
+    budget: Optional[int] = None
+    revenue: Optional[int] = None
+    awards_wins: Optional[int] = None
+    awards_nominations: Optional[int] = None
     is_trending: bool = False
 
 class MovieUpdate(BaseModel):
@@ -226,12 +240,22 @@ class MovieUpdate(BaseModel):
     release_date: Optional[str] = None
     genres: Optional[List[str]] = None
     synopsis: Optional[str] = None
+    tagline: Optional[str] = None
     poster_url: Optional[str] = None
     backdrop_url: Optional[str] = None
     trailer_url: Optional[str] = None
+    video_urls: Optional[List[str]] = None
     runtime: Optional[int] = None
     gallery: Optional[List[str]] = None
     cast: Optional[List[CastMember]] = None
+    crew: Optional[List[CrewMember]] = None
+    keywords: Optional[List[str]] = None
+    status: Optional[str] = None
+    original_language: Optional[str] = None
+    budget: Optional[int] = None
+    revenue: Optional[int] = None
+    awards_wins: Optional[int] = None
+    awards_nominations: Optional[int] = None
     is_trending: Optional[bool] = None
 
 class ActorCreate(BaseModel):
@@ -1299,6 +1323,7 @@ async def ip_overlap_groups(mod: dict = Depends(get_current_moderator)):
 async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_user)):
     doc = payload.model_dump()
     doc["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in doc.get("cast", [])]
+    doc["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in doc.get("crew", [])]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
     result = await db.movies.insert_one(doc)
@@ -1386,7 +1411,85 @@ async def get_movie(movie_id: str):
         raise HTTPException(status_code=404, detail="Movie not found")
     if not doc:
         raise HTTPException(status_code=404, detail="Movie not found")
+    # Track a view (bucketed by UTC date)
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        await db.movie_views.update_one(
+            {"movie_id": movie_id, "date": today},
+            {"$inc": {"count": 1}},
+            upsert=True,
+        )
+    except Exception:
+        pass
     return await enrich_movie(doc)
+
+
+# ----------- Movie stats: 7-day trend, contributors, content score -----------
+_CONTENT_SCORE_FIELDS = [
+    "title", "release_date", "synopsis", "tagline", "poster_url", "backdrop_url",
+    "trailer_url", "runtime", "genres", "cast", "crew", "keywords",
+    "status", "original_language", "budget", "revenue",
+]
+
+def _field_filled(v) -> bool:
+    if v is None:
+        return False
+    if isinstance(v, (list, str)):
+        return len(v) > 0
+    if isinstance(v, (int, float)):
+        return v > 0
+    return True
+
+@api_router.get("/movies/{movie_id}/stats")
+async def movie_stats(movie_id: str):
+    try:
+        doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    # 7-day view trend (oldest → newest)
+    today = datetime.now(timezone.utc).date()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    counts_map = {}
+    async for row in db.movie_views.find({"movie_id": movie_id, "date": {"$in": days}}):
+        counts_map[row["date"]] = row.get("count", 0)
+    trend = [{"date": d, "count": counts_map.get(d, 0)} for d in days]
+    total_views = 0
+    async for v in db.movie_views.find({"movie_id": movie_id}):
+        total_views += v.get("count", 0)
+
+    # Top contributors from edits collection
+    pipeline = [
+        {"$match": {"entity_type": "movie", "entity_id": movie_id,
+                    "action": {"$in": ["create", "update", "revert"]}}},
+        {"$group": {"_id": "$user_id",
+                    "count": {"$sum": 1},
+                    "name": {"$last": "$user_name"},
+                    "avatar": {"$last": "$user_avatar"}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5},
+    ]
+    contributors = []
+    async for row in db.edits.aggregate(pipeline):
+        contributors.append({
+            "user_id": row["_id"],
+            "name": row.get("name"),
+            "avatar_url": row.get("avatar"),
+            "count": row.get("count", 0),
+        })
+
+    # Content score (percent of key fields filled)
+    filled = sum(1 for f in _CONTENT_SCORE_FIELDS if _field_filled(doc.get(f)))
+    content_score = round(100 * filled / len(_CONTENT_SCORE_FIELDS))
+
+    return {
+        "trend": trend,
+        "total_views": total_views,
+        "contributors": contributors,
+        "content_score": content_score,
+    }
 
 def _year_from(s: Optional[str]) -> Optional[int]:
     if not s or not isinstance(s, str) or len(s) < 4:
@@ -1498,6 +1601,8 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "cast" in update_data:
         update_data["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["cast"]]
+    if "crew" in update_data:
+        update_data["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["crew"]]
     old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
     _check_locks(old_doc, update_data, user)
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
