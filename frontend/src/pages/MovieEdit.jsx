@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard } from "lucide-react";
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
+import CastEditDialog from "@/components/CastEditDialog";
 
 const SECTIONS = [
   { id: "primary-facts", label: "Primary Facts" },
@@ -105,6 +106,7 @@ export default function MovieEdit() {
   const [activeSection, setActiveSection] = useState("primary-facts");
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
+  const [castDialog, setCastDialog] = useState({ open: false, index: null });
   const sectionRefs = useRef({});
 
   const isMod = user && ["moderator", "admin"].includes(user.effective_role || user.role);
@@ -237,9 +239,19 @@ export default function MovieEdit() {
   }
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const updCast = (i, k, v) => setForm((f) => ({ ...f, cast: f.cast.map((c, x) => x === i ? { ...c, [k]: v } : c) }));
   const remCast = (i) => setForm((f) => ({ ...f, cast: f.cast.filter((_, x) => x !== i) }));
-  const addCast = () => setForm((f) => ({ ...f, cast: [...f.cast, { actor_id: "", character_name: "" }] }));
+  const addCast = () => setCastDialog({ open: true, index: null });
+  const openCastEdit = (i) => setCastDialog({ open: true, index: i });
+  const handleCastSave = (row) => {
+    if (castDialog.index == null) {
+      setForm((f) => ({ ...f, cast: [...f.cast, row] }));
+    } else {
+      setForm((f) => ({ ...f, cast: f.cast.map((c, x) => x === castDialog.index ? row : c) }));
+    }
+  };
+  const handleActorCreated = (actor) => {
+    setActors((prev) => [...prev, { id: actor.id, name: actor.name, photo_url: actor.photo_url || "" }]);
+  };
   const updCrew = (i, k, v) => setForm((f) => ({ ...f, crew: f.crew.map((c, x) => x === i ? { ...c, [k]: v } : c) }));
   const remCrew = (i) => setForm((f) => ({ ...f, crew: f.crew.filter((_, x) => x !== i) }));
   const addCrew = () => setForm((f) => ({ ...f, crew: [...f.crew, { name: "", role: "Director" }] }));
@@ -353,16 +365,25 @@ export default function MovieEdit() {
               <LockIcon locked={isFieldLocked("cast")} canToggle={isMod} onToggle={() => toggleLock("cast")} />
             </div>
             <div className="space-y-2">
-              {form.cast.map((c, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Select value={c.actor_id} onValueChange={(v) => updCast(i, "actor_id", v)} disabled={!canEditField("cast")}>
-                    <SelectTrigger className="flex-1 bg-white border-slate-300 text-slate-900" data-testid={`edit-cast-actor-${i}`}><SelectValue placeholder="Select actor" /></SelectTrigger>
-                    <SelectContent className="max-h-64">{actors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Input placeholder="Character" value={c.character_name} onChange={(e) => updCast(i, "character_name", e.target.value)} disabled={!canEditField("cast")} className="flex-1 bg-white border-slate-300 text-slate-900" data-testid={`edit-cast-char-${i}`} />
-                  <Button type="button" variant="ghost" onClick={() => remCast(i)} disabled={!canEditField("cast")} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
-                </div>
-              ))}
+              {form.cast.map((c, i) => {
+                const actor = actors.find((a) => a.id === c.actor_id);
+                return (
+                  <div key={i} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2" data-testid={`cast-row-${i}`}>
+                    <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-xs text-slate-500 flex-shrink-0">
+                      {actor?.photo_url ? <img src={fileUrl(actor.photo_url)} alt="" className="w-full h-full object-cover" /> : (actor?.name?.[0] || "?")}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-slate-900 truncate">{actor?.name || "(unknown)"}</div>
+                      <div className="text-xs text-slate-500 truncate">as {c.character_name || "—"}</div>
+                    </div>
+                    <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!canEditField("cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!canEditField("cast")} className="text-slate-400 hover:text-rose-500" data-testid={`cast-remove-${i}`}><X className="w-4 h-4" /></Button>
+                  </div>
+                );
+              })}
+              {form.cast.length === 0 && (
+                <div className="rounded-md border border-dashed border-slate-200 py-6 text-center text-slate-400 text-sm">No cast yet. Click "Add cast" to link an actor.</div>
+              )}
             </div>
             <Button type="button" variant="outline" onClick={addCast} disabled={!canEditField("cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="edit-add-cast"><Plus className="w-4 h-4 mr-1" /> Add cast</Button>
           </section>
@@ -442,6 +463,15 @@ export default function MovieEdit() {
           </div>
         </div>
       </div>
+
+      <CastEditDialog
+        open={castDialog.open}
+        onOpenChange={(v) => setCastDialog((s) => ({ ...s, open: v }))}
+        actors={actors}
+        value={castDialog.index != null ? form.cast[castDialog.index] : null}
+        onSave={handleCastSave}
+        onActorCreated={handleActorCreated}
+      />
     </div>
   );
 }
