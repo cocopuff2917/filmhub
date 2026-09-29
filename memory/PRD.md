@@ -1,7 +1,7 @@
 # CineVerse — Movie & TV Series Database (PRD)
 
 ## Original Problem Statement
-Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie/series/actor detail pages, global search, admin panel with moderation (IP tracking, suspensions, per-field locking), custom granular roles, discussions, reports, edit history, user profiles, similar-content, leaderboard, TMDB-style edit pages, inline actor creation.
+Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie/series/actor detail pages, global search, admin panel with moderation (IP tracking, suspensions, per-field locking), custom granular roles, discussions, reports, edit history, user profiles, similar-content, leaderboard, TMDB-style edit pages, inline actor creation, and auto-save on cast changes.
 
 ## Tech Stack
 - Backend: FastAPI + MongoDB
@@ -15,17 +15,14 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 - Discussions, forum threads, reports
 - Edit history + revert
 - Cross-type similar content
-- TMDB-style pages: Movie Detail, Movie Edit, User Profile, Series Detail (expandable seasons + episodes), Series Edit (with per-episode guest star editor)
+- TMDB-style pages: Movie Detail, Movie Edit, User Profile, Series Detail (expandable seasons + episodes), Series Edit (per-episode guest star editor)
 - Cast dialog with inline actor creation — reused for main cast AND per-episode guest stars
+- **Auto-save on cast changes** (new 2026-09-29)
 
 ## Changelog 2026-09-29
 - Everything previously listed.
-- **Per-episode guest star editor** in SeriesEdit:
-  - Each expanded episode now has a "Guest Stars (N)" panel with an "Add guest star" button.
-  - Button opens the existing `CastEditDialog` (typeahead + inline actor creation).
-  - Chips show actor avatar + name; click to edit, X to remove.
-  - Save maps `title → name` for the backend `EpisodeItem` schema and keeps guest stars nested inside their episodes.
-- Fixed the schema mismatch where the frontend used `ep.title` but the backend model stores `ep.name`. Now the edit form maps both directions and the detail page falls back to `ep.name`.
+- **Auto-save on cast dialog submit**: `MovieEdit.handleCastSave`, `SeriesEdit.handleCastSave`, and `SeriesEdit.handleGuestSave` now compute the next form synchronously (outside the `setForm` callback) and immediately call `save(nextForm)`. The refactored `save()` accepts an optional form override so the PATCH uses the just-updated cast without waiting for React state to flush.
+- Result: adding/updating a cast member or guest star fires "Changes saved" instantly — no need to click the top Save button afterward.
 
 ## Backlog (P1/P2)
 - P1: Actor detail redesign (parity)

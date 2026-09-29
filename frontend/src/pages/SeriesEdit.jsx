@@ -184,8 +184,9 @@ export default function SeriesEdit() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const save = async () => {
-    if (!form) return;
+  const save = async (overrideForm) => {
+    const src = overrideForm || form;
+    if (!src) return;
     setSaving(true);
     try {
       const payload = {};
@@ -195,13 +196,13 @@ export default function SeriesEdit() {
         "genres", "keywords", "main_cast", "creators", "gallery", "seasons"];
       for (const f of fields) {
         if (!isMod && locked.includes(f)) continue;
-        let v = form[f];
+        let v = src[f];
         if (["awards_wins", "awards_nominations"].includes(f)) v = v === "" || v == null ? null : Number(v);
         payload[f] = v;
       }
-      payload.main_cast = form.main_cast.filter((c) => c.actor_id && c.character_name);
-      payload.creators = form.creators.filter((c) => c.name && c.role);
-      payload.seasons = form.seasons.map((sn) => ({
+      payload.main_cast = src.main_cast.filter((c) => c.actor_id && c.character_name);
+      payload.creators = src.creators.filter((c) => c.name && c.role);
+      payload.seasons = src.seasons.map((sn) => ({
         ...sn,
         episodes: sn.episodes.map((ep) => ({
           episode_number: ep.episode_number,
@@ -246,8 +247,12 @@ export default function SeriesEdit() {
   const remCast = (i) => setForm((f) => ({ ...f, main_cast: f.main_cast.filter((_, x) => x !== i) }));
   const openCastEdit = (i) => setCastDialog({ open: true, index: i });
   const handleCastSave = (row) => {
-    if (castDialog.index == null) setForm((f) => ({ ...f, main_cast: [...f.main_cast, row] }));
-    else setForm((f) => ({ ...f, main_cast: f.main_cast.map((c, x) => x === castDialog.index ? row : c) }));
+    const nextCast = castDialog.index == null
+      ? [...form.main_cast, row]
+      : form.main_cast.map((c, x) => x === castDialog.index ? row : c);
+    const nextForm = { ...form, main_cast: nextCast };
+    setForm(nextForm);
+    save(nextForm);
   };
   const handleActorCreated = (a) => setActors((prev) => [...prev, { id: a.id, name: a.name, photo_url: a.photo_url || "" }]);
   const updCreator = (i, k, v) => setForm((f) => ({ ...f, creators: f.creators.map((c, x) => x === i ? { ...c, [k]: v } : c) }));
@@ -289,9 +294,9 @@ export default function SeriesEdit() {
   }));
   const handleGuestSave = (row) => {
     const { sIdx, eIdx, gIdx } = guestDialog;
-    setForm((f) => ({
-      ...f,
-      seasons: f.seasons.map((s, x) => x === sIdx ? {
+    const nextForm = {
+      ...form,
+      seasons: form.seasons.map((s, x) => x === sIdx ? {
         ...s,
         episodes: s.episodes.map((e, y) => y === eIdx ? {
           ...e,
@@ -300,7 +305,9 @@ export default function SeriesEdit() {
             : (e.guest_stars || []).map((g, z) => z === gIdx ? row : g),
         } : e),
       } : s),
-    }));
+    };
+    setForm(nextForm);
+    save(nextForm);
   };
   const currentGuestValue = guestDialog.gIdx != null && form?.seasons?.[guestDialog.sIdx]?.episodes?.[guestDialog.eIdx]?.guest_stars?.[guestDialog.gIdx];
 

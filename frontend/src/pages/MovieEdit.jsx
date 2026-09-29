@@ -181,8 +181,9 @@ export default function MovieEdit() {
     }
   };
 
-  const save = async () => {
-    if (!form) return;
+  const save = async (overrideForm) => {
+    const src = overrideForm || form;
+    if (!src) return;
     setSaving(true);
     try {
       const payload = {};
@@ -192,18 +193,17 @@ export default function MovieEdit() {
       for (const f of fields) {
         // Skip locked fields for non-mods (server would 403 anyway)
         if (!isMod && locked.includes(f)) continue;
-        let v = form[f];
+        let v = src[f];
         if (["runtime", "budget", "revenue", "awards_wins", "awards_nominations"].includes(f)) {
           v = v === "" || v == null ? null : Number(v);
         }
         payload[f] = v;
       }
-      payload.cast = form.cast.filter((c) => c.actor_id && c.character_name);
-      payload.crew = form.crew.filter((c) => c.name && c.role);
+      payload.cast = src.cast.filter((c) => c.actor_id && c.character_name);
+      payload.crew = src.crew.filter((c) => c.name && c.role);
       const r = await api.patch(`/movies/${id}`, payload);
       toast.success("Changes saved");
       setMovie(r.data);
-      // refresh content score
       try { const s = await api.get(`/movies/${id}/stats`); setStats(s.data); } catch {}
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
@@ -243,11 +243,12 @@ export default function MovieEdit() {
   const addCast = () => setCastDialog({ open: true, index: null });
   const openCastEdit = (i) => setCastDialog({ open: true, index: i });
   const handleCastSave = (row) => {
-    if (castDialog.index == null) {
-      setForm((f) => ({ ...f, cast: [...f.cast, row] }));
-    } else {
-      setForm((f) => ({ ...f, cast: f.cast.map((c, x) => x === castDialog.index ? row : c) }));
-    }
+    const nextCast = castDialog.index == null
+      ? [...form.cast, row]
+      : form.cast.map((c, x) => x === castDialog.index ? row : c);
+    const nextForm = { ...form, cast: nextCast };
+    setForm(nextForm);
+    save(nextForm);
   };
   const handleActorCreated = (actor) => {
     setActors((prev) => [...prev, { id: actor.id, name: actor.name, photo_url: actor.photo_url || "" }]);
