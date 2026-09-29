@@ -5,9 +5,8 @@ import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Ban, Shield, Star, Edit as EditIcon, User as UserIcon, Upload, History } from "lucide-react";
-import { toast } from "sonner";
-import ImageUpload from "@/components/ImageUpload";
+import { Ban, Shield, Star, Edit as EditIcon, User as UserIcon, Settings, History } from "lucide-react";
+import EditProfileDialog from "@/components/EditProfileDialog";
 
 // ---------- helpers ----------
 function timeAgo(iso) {
@@ -167,10 +166,9 @@ function Activity30d({ points = [] }) {
 // ---------- Main component ----------
 export default function UserProfile() {
   const { id } = useParams();
-  const { user: current, refresh } = useAuth();
+  const { user: current } = useAuth();
   const [profile, setProfile] = useState(null);
-  const [avatarEdit, setAvatarEdit] = useState(false);
-  const [newAvatar, setNewAvatar] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
 
   const load = async () => {
     try { const r = await api.get(`/users/${id}`); setProfile(r.data); }
@@ -179,16 +177,6 @@ export default function UserProfile() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
   const isSelf = current && current.id === id;
-
-  const saveAvatar = async () => {
-    try {
-      await api.patch("/auth/me/avatar", { avatar_url: newAvatar });
-      toast.success("Avatar updated");
-      setAvatarEdit(false);
-      await refresh();
-      load();
-    } catch { toast.error("Failed to update avatar"); }
-  };
 
   if (!profile) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">Loading...</div>;
   if (profile.notFound) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">User not found.</div>;
@@ -245,8 +233,8 @@ export default function UserProfile() {
                 <div className="w-px h-8 bg-white/15" />
                 <ScoreCircle score={profile.avg_series_rating} label="TV Score" />
                 {isSelf && (
-                  <Button size="sm" variant="outline" onClick={() => { setNewAvatar(profile.avatar_url || ""); setAvatarEdit(true); }} className="ml-auto border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white h-8" data-testid="edit-avatar-btn">
-                    <Upload className="w-3.5 h-3.5 mr-1.5" /> Change Avatar
+                  <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="ml-auto border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white h-8" data-testid="edit-profile-btn">
+                    <Settings className="w-3.5 h-3.5 mr-1.5" /> Edit Profile
                   </Button>
                 )}
               </div>
@@ -266,15 +254,8 @@ export default function UserProfile() {
             </div>
           )}
 
-          {avatarEdit && (
-            <div className="mt-4 rounded-xl border border-white/10 bg-slate-900 p-5 max-w-md">
-              <label className="text-sm text-slate-300 block mb-2">Upload new avatar</label>
-              <ImageUpload value={newAvatar} onChange={setNewAvatar} shape="circle" testid="avatar-upload" />
-              <div className="mt-3 flex gap-2">
-                <Button onClick={saveAvatar} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="save-avatar-btn">Save</Button>
-                <Button variant="outline" onClick={() => setAvatarEdit(false)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
-              </div>
-            </div>
+          {profile.bio && (
+            <div className="mt-4 text-white/80 text-sm max-w-2xl leading-relaxed" data-testid="user-bio">{profile.bio}</div>
           )}
         </div>
       </section>
@@ -401,6 +382,13 @@ export default function UserProfile() {
           </Tabs>
         </div>
       </div>
+
+      <EditProfileDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        profile={profile}
+        onSaved={load}
+      />
     </div>
   );
 }

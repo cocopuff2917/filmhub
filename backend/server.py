@@ -345,6 +345,14 @@ class RoleUpdate(BaseModel):
 class AvatarUpdate(BaseModel):
     avatar_url: str
 
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=40)
+    bio: Optional[str] = Field(default=None, max_length=500)
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6, max_length=200)
+
 class CommentCreate(BaseModel):
     entity_type: str  # movie | series
     entity_id: str
@@ -646,6 +654,7 @@ async def me(user: dict = Depends(get_current_user)):
         "id": user["id"],
         "email": user.get("email"),
         "name": user.get("name"),
+        "bio": user.get("bio", ""),
         "role": user.get("role", "user"),
         "effective_role": user.get("effective_role", user.get("role", "user")),
         "custom_role": user.get("custom_role"),
@@ -657,6 +666,34 @@ async def me(user: dict = Depends(get_current_user)):
 async def update_avatar(payload: AvatarUpdate, user: dict = Depends(get_current_user)):
     await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": {"avatar_url": payload.avatar_url}})
     return {"ok": True, "avatar_url": payload.avatar_url}
+
+@api_router.patch("/auth/me")
+async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_current_user)):
+    update = {}
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if len(new_name) < 2:
+            raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
+        update["name"] = new_name
+    if payload.bio is not None:
+        update["bio"] = payload.bio.strip()
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": update})
+    return {"ok": True, **update}
+
+@api_router.post("/auth/me/password")
+async def change_password(payload: PasswordChange, user: dict = Depends(get_current_user)):
+    doc = await db.users.find_one({"_id": ObjectId(user["id"])})
+    if not doc or not verify_password(payload.current_password, doc.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current one")
+    await db.users.update_one(
+        {"_id": ObjectId(user["id"])},
+        {"$set": {"password_hash": hash_password(payload.new_password)}},
+    )
+    return {"ok": True}
 
 # ----------- Users (Public) -----------
 @api_router.get("/users/{user_id}")
@@ -701,6 +738,7 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
         "id": str(u["_id"]),
         "name": u.get("name"),
         "avatar_url": u.get("avatar_url", ""),
+        "bio": u.get("bio", ""),
         "role": u.get("role", "user"),
         "custom_role": custom_role,
         "created_at": u.get("created_at"),
