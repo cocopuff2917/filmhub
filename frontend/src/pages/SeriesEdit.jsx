@@ -93,6 +93,7 @@ export default function SeriesEdit() {
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
   const [castDialog, setCastDialog] = useState({ open: false, index: null });
+  const [guestDialog, setGuestDialog] = useState({ open: false, sIdx: null, eIdx: null, gIdx: null });
   const [openSeason, setOpenSeason] = useState(null);
   const sectionRefs = useRef({});
 
@@ -140,7 +141,7 @@ export default function SeriesEdit() {
             poster_url: sn.poster_url || "",
             episodes: (sn.episodes || []).map((ep) => ({
               episode_number: ep.episode_number,
-              title: ep.title || "",
+              title: ep.name || "",
               air_date: ep.air_date || "",
               overview: ep.overview || "",
               still_url: ep.still_url || "",
@@ -203,7 +204,12 @@ export default function SeriesEdit() {
       payload.seasons = form.seasons.map((sn) => ({
         ...sn,
         episodes: sn.episodes.map((ep) => ({
-          ...ep,
+          episode_number: ep.episode_number,
+          name: ep.title || "",  // backend model uses `name`
+          air_date: ep.air_date || null,
+          overview: ep.overview || "",
+          still_url: ep.still_url || "",
+          stills: ep.stills || [],
           guest_stars: (ep.guest_stars || []).filter((g) => g.actor_id && g.character_name),
         })),
       }));
@@ -267,6 +273,36 @@ export default function SeriesEdit() {
     ...f,
     seasons: f.seasons.map((s, x) => x === sIdx ? { ...s, episodes: s.episodes.map((e, y) => y === eIdx ? { ...e, [k]: v } : e) } : s),
   }));
+
+  // Guest star helpers
+  const openGuestAdd = (sIdx, eIdx) => setGuestDialog({ open: true, sIdx, eIdx, gIdx: null });
+  const openGuestEdit = (sIdx, eIdx, gIdx) => setGuestDialog({ open: true, sIdx, eIdx, gIdx });
+  const remGuest = (sIdx, eIdx, gIdx) => setForm((f) => ({
+    ...f,
+    seasons: f.seasons.map((s, x) => x === sIdx ? {
+      ...s,
+      episodes: s.episodes.map((e, y) => y === eIdx ? {
+        ...e,
+        guest_stars: (e.guest_stars || []).filter((_, z) => z !== gIdx),
+      } : e),
+    } : s),
+  }));
+  const handleGuestSave = (row) => {
+    const { sIdx, eIdx, gIdx } = guestDialog;
+    setForm((f) => ({
+      ...f,
+      seasons: f.seasons.map((s, x) => x === sIdx ? {
+        ...s,
+        episodes: s.episodes.map((e, y) => y === eIdx ? {
+          ...e,
+          guest_stars: gIdx == null
+            ? [...(e.guest_stars || []), row]
+            : (e.guest_stars || []).map((g, z) => z === gIdx ? row : g),
+        } : e),
+      } : s),
+    }));
+  };
+  const currentGuestValue = guestDialog.gIdx != null && form?.seasons?.[guestDialog.sIdx]?.episodes?.[guestDialog.eIdx]?.guest_stars?.[guestDialog.gIdx];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900" data-testid="series-edit-page">
@@ -499,12 +535,44 @@ export default function SeriesEdit() {
                               <div key={eIdx} className="rounded-md border border-slate-200 bg-slate-50 p-3" data-testid={`episode-${sIdx}-${eIdx}`}>
                                 <div className="grid grid-cols-1 md:grid-cols-[80px_1fr_180px_40px] gap-2 items-start">
                                   <Input type="number" placeholder="#" value={ep.episode_number} onChange={(e) => updEpisode(sIdx, eIdx, "episode_number", Number(e.target.value))} disabled={!canEditField("seasons")} className="bg-white border-slate-300" />
-                                  <Input placeholder="Episode title" value={ep.title} onChange={(e) => updEpisode(sIdx, eIdx, "title", e.target.value)} disabled={!canEditField("seasons")} className="bg-white border-slate-300" />
+                                  <Input placeholder="Episode title" value={ep.title} onChange={(e) => updEpisode(sIdx, eIdx, "title", e.target.value)} disabled={!canEditField("seasons")} className="bg-white border-slate-300" data-testid={`episode-title-${sIdx}-${eIdx}`} />
                                   <Input type="date" value={ep.air_date} onChange={(e) => updEpisode(sIdx, eIdx, "air_date", e.target.value)} disabled={!canEditField("seasons")} className="bg-white border-slate-300" />
                                   <Button type="button" variant="ghost" size="sm" onClick={() => remEpisode(sIdx, eIdx)} disabled={!canEditField("seasons")} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
                                 </div>
                                 <Textarea placeholder="Overview" rows={2} value={ep.overview} onChange={(e) => updEpisode(sIdx, eIdx, "overview", e.target.value)} disabled={!canEditField("seasons")} className="mt-2 bg-white border-slate-300 text-sm" />
                                 <div className="mt-2"><Label className="text-xs text-slate-600 block mb-1">Still image</Label><ImageUpload value={ep.still_url} onChange={(v) => updEpisode(sIdx, eIdx, "still_url", v)} /></div>
+
+                                <div className="mt-3 pt-3 border-t border-slate-200">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <Label className="text-xs text-slate-600 uppercase tracking-widest font-semibold">Guest Stars ({(ep.guest_stars || []).length})</Label>
+                                    <Button type="button" size="sm" variant="outline" onClick={() => openGuestAdd(sIdx, eIdx)} disabled={!canEditField("seasons")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-7 text-xs" data-testid={`add-guest-${sIdx}-${eIdx}`}>
+                                      <Plus className="w-3 h-3 mr-1" /> Add guest star
+                                    </Button>
+                                  </div>
+                                  {(ep.guest_stars || []).length === 0 ? (
+                                    <div className="text-xs text-slate-400 italic">No guest stars yet.</div>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                      {(ep.guest_stars || []).map((g, gIdx) => {
+                                        const actor = actors.find((a) => a.id === g.actor_id);
+                                        return (
+                                          <div key={gIdx} className="flex items-center gap-1.5 rounded-full bg-white border border-slate-300 pl-1 pr-1 py-0.5 text-xs" data-testid={`guest-chip-${sIdx}-${eIdx}-${gIdx}`}>
+                                            <div className="w-5 h-5 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-[10px] text-slate-500 flex-shrink-0">
+                                              {actor?.photo_url ? <img src={fileUrl(actor.photo_url)} alt="" className="w-full h-full object-cover" /> : (actor?.name?.[0] || "?")}
+                                            </div>
+                                            <button type="button" onClick={() => openGuestEdit(sIdx, eIdx, gIdx)} disabled={!canEditField("seasons")} className="text-slate-700 hover:text-cyan-600 font-medium">
+                                              {actor?.name || "(unknown)"}
+                                            </button>
+                                            {g.character_name && <span className="text-slate-400">as {g.character_name}</span>}
+                                            <button type="button" onClick={() => remGuest(sIdx, eIdx, gIdx)} disabled={!canEditField("seasons")} className="text-slate-400 hover:text-rose-500 ml-0.5" data-testid={`remove-guest-${sIdx}-${eIdx}-${gIdx}`}>
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             ))}
                             {sn.episodes.length === 0 && <div className="text-xs text-slate-500 italic">No episodes yet.</div>}
@@ -538,6 +606,14 @@ export default function SeriesEdit() {
         actors={actors}
         value={castDialog.index != null ? form.main_cast[castDialog.index] : null}
         onSave={handleCastSave}
+        onActorCreated={handleActorCreated}
+      />
+      <CastEditDialog
+        open={guestDialog.open}
+        onOpenChange={(v) => setGuestDialog((s) => ({ ...s, open: v }))}
+        actors={actors}
+        value={currentGuestValue || null}
+        onSave={handleGuestSave}
         onActorCreated={handleActorCreated}
       />
     </div>

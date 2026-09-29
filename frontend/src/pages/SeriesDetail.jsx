@@ -70,7 +70,7 @@ function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 flex-wrap">
                   <span className="text-slate-500 text-sm font-mono">S{season.season_number}·E{ep.episode_number}</span>
-                  <span className="font-semibold text-white">{ep.title || "(untitled)"}</span>
+                  <span className="font-semibold text-white">{ep.title || ep.name || "(untitled)"}</span>
                   {ep.air_date && <span className="text-xs text-slate-500">· {ep.air_date}</span>}
                 </div>
                 {ep.overview && <p className="mt-1 text-sm text-slate-400 line-clamp-3">{ep.overview}</p>}

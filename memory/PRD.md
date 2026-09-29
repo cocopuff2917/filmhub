@@ -15,16 +15,19 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 - Discussions, forum threads, reports
 - Edit history + revert
 - Cross-type similar content
-- TMDB-style pages: Movie Detail, Movie Edit, User Profile, Series Detail (with expandable seasons + episodes), Series Edit
-- Cast dialog with inline actor creation
-- **Guest stars rendered per episode** (new 2026-09-29)
+- TMDB-style pages: Movie Detail, Movie Edit, User Profile, Series Detail (expandable seasons + episodes), Series Edit (with per-episode guest star editor)
+- Cast dialog with inline actor creation — reused for main cast AND per-episode guest stars
 
 ## Changelog 2026-09-29
-- All previously listed features.
-- **Guest stars display**: Under each episode in the expandable season blocks, show a "Guest Stars" heading followed by pill-shaped chips containing the actor's avatar, name, and "as Character". Each chip links to the actor detail page. Backend already enriches `guest_stars` with actor data via `enrich_series(deep=True)` — this change only improves the UI rendering.
+- Everything previously listed.
+- **Per-episode guest star editor** in SeriesEdit:
+  - Each expanded episode now has a "Guest Stars (N)" panel with an "Add guest star" button.
+  - Button opens the existing `CastEditDialog` (typeahead + inline actor creation).
+  - Chips show actor avatar + name; click to edit, X to remove.
+  - Save maps `title → name` for the backend `EpisodeItem` schema and keeps guest stars nested inside their episodes.
+- Fixed the schema mismatch where the frontend used `ep.title` but the backend model stores `ep.name`. Now the edit form maps both directions and the detail page falls back to `ep.name`.
 
 ## Backlog (P1/P2)
-- P1: Per-episode "Add guest star" button inside SeriesEdit reusing CastEditDialog
 - P1: Actor detail redesign (parity)
 - P1: TV Series reviews (unlock TV Score on user profile)
 - P1: Browse filters (genre, year, rating)
