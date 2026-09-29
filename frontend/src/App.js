@@ -12,6 +12,8 @@ import ThreadDetail from "@/pages/ThreadDetail";
 import Browse from "@/pages/Browse";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import Watchlist from "@/pages/Watchlist";
 import Admin from "@/pages/Admin";
 import MovieEdit from "@/pages/MovieEdit";
@@ -37,6 +39,8 @@ function App() {
             <Route path="/threads/:id" element={<ThreadDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/admin" element={<Admin />} />
           </Routes>

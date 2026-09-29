@@ -10,6 +10,13 @@ import logging
 import bcrypt
 import jwt
 import requests
+import secrets
+import re
+import ipaddress
+import httpx
+from html import escape
+from html.parser import HTMLParser
+from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Annotated
 
@@ -80,6 +87,99 @@ def get_object(path: str):
         resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": storage_key}, timeout=60)
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+# ----------- Email (Emergent Managed) -----------
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "CineVerse")
+
+_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+_CRED_ASK = (
+    "reply with your password", "reply with the code", "send your password", "cvv",
+    "send us your password", "enter your password below", "confirm your card number",
+    "your full card number", "seed phrase", "recovery phrase", "verify your card",
+    "social security number", "confirm your bank details",
+)
+_HOSTISH = re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
+
+def _host_ok(host: str) -> bool:
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == s or host.endswith("." + s) for s in _SHORTENERS)
+
+def _same_site(shown: str, real: str) -> bool:
+    return shown == real or real.endswith("." + shown) or shown.endswith("." + real)
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags, self.urls, self.anchors = set(), [], []
+        self._href, self._text = None, []
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k, v in attrs if k.lower() in ("href", "src") and v]
+        if tag.lower() == "a":
+            self._href = dict((k.lower(), v) for k, v in attrs).get("href")
+            self._text = []
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.anchors.append((self._href, "".join(self._text)))
+            self._href, self._text = None, []
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan(); scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("No forms or input fields in email (G2)")
+    body = f"{subject}\n{html}".lower()
+    for p in _CRED_ASK:
+        if p in body:
+            raise ValueError(f"Email asks the recipient for credentials: {p!r} (G2)")
+    for url in scan.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        if not low.startswith("https://"):
+            raise ValueError(f"Email links/assets must be absolute https: {url!r} (G3)")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError(f"Shortened, numeric-host or credential-bearing URL: {url!r} (G3)")
+    for href, text in scan.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real:
+            continue
+        for m in _HOSTISH.finditer(text):
+            if not _same_site(m.group(1).lower(), real):
+                raise ValueError(f"Anchor text {m.group(1)!r} ≠ real link host {real!r} (G3)")
+
+async def send_email(*, to: str, subject: str, html: str) -> Optional[str]:
+    _assert_safe_email(subject, html)
+    if not EMAIL_KEY:
+        logger.error("EMERGENT_EMAIL_KEY not configured")
+        raise HTTPException(status_code=500, detail="Email service not configured")
+    payload = {"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client_http:
+            resp = await client_http.post(
+                f"{EMAIL_BASE_URL}/api/v1/email/send",
+                headers={"X-Email-Key": EMAIL_KEY},
+                json=payload,
+            )
+        resp.raise_for_status()
+        return resp.json().get("id")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Email send failed: {e.response.status_code} {e.response.text}")
+        raise HTTPException(status_code=502, detail="Failed to send email")
+    except Exception as e:
+        logger.error(f"Email send error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
 
 # ----------- Auth Helpers -----------
 def hash_password(password: str) -> str:
@@ -371,6 +471,13 @@ class ProfileUpdate(BaseModel):
 
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6, max_length=200)
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
     new_password: str = Field(min_length=6, max_length=200)
 
 class CommentCreate(BaseModel):
@@ -714,6 +821,109 @@ async def change_password(payload: PasswordChange, user: dict = Depends(get_curr
         {"$set": {"password_hash": hash_password(payload.new_password)}},
     )
     return {"ok": True}
+
+# ----------- Password Reset (Email) -----------
+def _reset_email_html(name: str, reset_url: str) -> str:
+    safe_name = escape(name or "there")
+    safe_url = escape(reset_url, quote=True)
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:#0d0f12;padding:0;margin:0"><tr><td align="center" '
+        f'style="padding:32px 16px"><table role="presentation" width="560" cellpadding="0" '
+        f'cellspacing="0" style="max-width:560px;background:#14181f;border:1px solid #2a2f3a;'
+        f'border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#e5e7eb">'
+        f'<tr><td style="padding:28px 32px;background:linear-gradient(135deg,#f59e0b,#d97706);'
+        f'color:#111;font-weight:700;font-size:20px;letter-spacing:2px">{escape(EMAIL_FROM_NAME).upper()}</td></tr>'
+        f'<tr><td style="padding:32px">'
+        f'<h1 style="margin:0 0 12px;font-size:22px;color:#fff">Reset your password</h1>'
+        f'<p style="margin:0 0 16px;line-height:1.6;color:#cbd5e1">Hi {safe_name}, we received a request to reset the password for your {escape(EMAIL_FROM_NAME)} account.</p>'
+        f'<p style="margin:0 0 24px;line-height:1.6;color:#cbd5e1">Click the button below to choose a new password. This link expires in 60 minutes and can only be used once.</p>'
+        f'<p style="margin:0 0 24px"><a href="{safe_url}" style="display:inline-block;padding:12px 24px;background:#f59e0b;color:#111;font-weight:700;text-decoration:none;border-radius:8px">Reset password</a></p>'
+        f'<p style="margin:0 0 8px;line-height:1.6;color:#94a3b8;font-size:13px">If the button does not work, open this link in your browser:</p>'
+        f'<p style="margin:0 0 24px;line-height:1.6;color:#94a3b8;font-size:13px;word-break:break-all"><a href="{safe_url}" style="color:#f59e0b;text-decoration:underline">{safe_url}</a></p>'
+        f'<p style="margin:0;line-height:1.6;color:#64748b;font-size:12px">If you did not ask to reset your password, you can safely ignore this email. Your current password will keep working. {escape(EMAIL_FROM_NAME)} will never ask you for your password by email.</p>'
+        f'</td></tr>'
+        f'<tr><td style="padding:16px 32px;background:#0d0f12;color:#64748b;font-family:Arial,Helvetica,sans-serif;font-size:12px;text-align:center">Sent by {escape(EMAIL_FROM_NAME)}</td></tr>'
+        f'</table></td></tr></table>'
+    )
+
+def _frontend_url() -> str:
+    url = (os.environ.get("FRONTEND_URL") or "").strip().rstrip("/")
+    if not url or not url.startswith("https://"):
+        raise HTTPException(status_code=500, detail="Frontend URL not configured")
+    return url
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest):
+    generic = {"ok": True, "message": "If an account exists for that email, a reset link has been sent."}
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    if not user:
+        # Silent to prevent email enumeration
+        return generic
+    # Invalidate any existing tokens for this user
+    await db.password_resets.update_many(
+        {"user_id": user["_id"], "used": False},
+        {"$set": {"used": True, "invalidated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_password(token)
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=60)
+    await db.password_resets.insert_one({
+        "user_id": user["_id"],
+        "token_hash": token_hash,
+        "created_at": now.isoformat(),
+        "expires_at": expires.isoformat(),
+        "used": False,
+    })
+    reset_url = f"{_frontend_url()}/reset-password?token={token}"
+    try:
+        await send_email(
+            to=email,
+            subject=f"Reset your {EMAIL_FROM_NAME} password",
+            html=_reset_email_html(user.get("name", ""), reset_url),
+        )
+    except HTTPException:
+        # Do not leak email delivery status to the caller
+        logger.exception("Password reset email delivery failed")
+    return generic
+
+@api_router.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordRequest):
+    now = datetime.now(timezone.utc)
+    # We can't look up by token (only hashes stored), so scan unused, unexpired entries
+    cursor = db.password_resets.find({"used": False})
+    match = None
+    async for entry in cursor:
+        try:
+            expires = datetime.fromisoformat(entry.get("expires_at"))
+        except Exception:
+            continue
+        if expires <= now:
+            continue
+        if verify_password(payload.token, entry.get("token_hash", "")):
+            match = entry
+            break
+    if not match:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired. Please request a new one.")
+    user = await db.users.find_one({"_id": match["user_id"]})
+    if not user:
+        raise HTTPException(status_code=400, detail="Account no longer exists")
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password)}},
+    )
+    await db.password_resets.update_one(
+        {"_id": match["_id"]},
+        {"$set": {"used": True, "used_at": now.isoformat()}},
+    )
+    # Invalidate any other outstanding tokens for this user
+    await db.password_resets.update_many(
+        {"user_id": user["_id"], "used": False},
+        {"$set": {"used": True, "invalidated_at": now.isoformat()}},
+    )
+    return {"ok": True, "message": "Password has been reset. You can now sign in."}
 
 # ----------- Users (Public) -----------
 @api_router.get("/users/{user_id}")

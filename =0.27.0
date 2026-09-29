@@ -1,0 +1,8 @@
+Looking in indexes: https://pypi.org/simple, https://d33sy5i8bnduwe.cloudfront.net/simple/
+Requirement already satisfied: httpx in /root/.venv/lib/python3.11/site-packages (0.28.1)
+Requirement already satisfied: anyio in /root/.venv/lib/python3.11/site-packages (from httpx) (4.15.1)
+Requirement already satisfied: certifi in /root/.venv/lib/python3.11/site-packages (from httpx) (2026.7.22)
+Requirement already satisfied: httpcore==1.* in /root/.venv/lib/python3.11/site-packages (from httpx) (1.0.9)
+Requirement already satisfied: idna in /root/.venv/lib/python3.11/site-packages (from httpx) (3.20)
+Requirement already satisfied: h11>=0.16 in /root/.venv/lib/python3.11/site-packages (from httpcore==1.*->httpx) (0.16.0)
+Requirement already satisfied: typing_extensions>=4.16.0 in /root/.venv/lib/python3.11/site-packages (from anyio->httpx) (4.16.0)
