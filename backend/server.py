@@ -560,6 +560,13 @@ class AssignRole(BaseModel):
     custom_role_id: Optional[str] = None
 
 # ----------- Utility -----------
+def _alive(q: Optional[dict] = None) -> dict:
+    """Filter that excludes soft-deleted docs. Merges with an existing query."""
+    base = {"deleted": {"$ne": True}}
+    if not q:
+        return base
+    return {"$and": [base, q]}
+
 def doc_to_dict(doc, id_key="id"):
     if not doc:
         return doc
@@ -1940,7 +1947,7 @@ async def list_movies(
     if q:
         # search title/genre/actor names
         actor_ids = []
-        actor_cursor = db.actors.find({"name": {"$regex": q, "$options": "i"}}, {"_id": 1})
+        actor_cursor = db.actors.find(_alive({"name": {"$regex": q, "$options": "i"}}), {"_id": 1})
         async for a in actor_cursor:
             actor_ids.append(str(a["_id"]))
         or_filters = [
@@ -1954,7 +1961,7 @@ async def list_movies(
         filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
     if year:
         filter_query["release_date"] = {"$regex": f"^{year}"}
-    cursor = db.movies.find(filter_query).limit(limit)
+    cursor = db.movies.find(_alive(filter_query)).limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
@@ -1968,13 +1975,13 @@ async def list_movies(
 
 @api_router.get("/movies/trending")
 async def trending_movies(limit: int = 12):
-    cursor = db.movies.find({"is_trending": True}).limit(limit)
+    cursor = db.movies.find(_alive({"is_trending": True})).limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
     if not docs:
         # fallback: top rated
-        all_cursor = db.movies.find({}).limit(30)
+        all_cursor = db.movies.find(_alive()).limit(30)
         async for d in all_cursor:
             docs.append(await enrich_movie(d))
         docs.sort(key=lambda x: (x.get("avg_rating") or 0), reverse=True)
@@ -1984,7 +1991,7 @@ async def trending_movies(limit: int = 12):
 @api_router.get("/movies/recent")
 async def recent_movies(limit: int = 12):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cursor = db.movies.find({"release_date": {"$lte": today}}).sort("created_at", -1).limit(limit)
+    cursor = db.movies.find(_alive({"release_date": {"$lte": today}})).sort("created_at", -1).limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
@@ -1993,19 +2000,21 @@ async def recent_movies(limit: int = 12):
 @api_router.get("/movies/upcoming")
 async def upcoming_movies(limit: int = 12):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cursor = db.movies.find({"release_date": {"$gt": today}}).sort("release_date", 1).limit(limit)
+    cursor = db.movies.find(_alive({"release_date": {"$gt": today}})).sort("release_date", 1).limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
     return docs
 
 @api_router.get("/movies/{movie_id}")
-async def get_movie(movie_id: str):
+async def get_movie(movie_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     try:
         doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Movie not found")
     if not doc:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    if doc.get("deleted") and not (viewer and viewer.get("effective_role") in ("moderator", "admin")):
         raise HTTPException(status_code=404, detail="Movie not found")
     # Track a view (bucketed by UTC date)
     today = datetime.now(timezone.utc).date().isoformat()
@@ -2138,14 +2147,14 @@ async def _collect_related(base_genres: list, base_actors: list, base_year: Opti
         s_filter = {"$and": [{"_id": {"$ne": exclude_series_id}}, s_filter]}
 
     scored = []
-    async for d in db.movies.find(m_filter).limit(80):
+    async for d in db.movies.find(_alive(m_filter)).limit(80):
         d_genres = set(d.get("genres") or [])
         d_actors = {c.get("actor_id") for c in (d.get("cast") or []) if c.get("actor_id")}
         d_year = _year_from(d.get("release_date"))
         score = _score_related(genre_set, actor_set, base_year, d_genres, d_actors, d_year)
         if score > 0:
             scored.append((score, "movie", d))
-    async for d in db.series.find(s_filter).limit(80):
+    async for d in db.series.find(_alive(s_filter)).limit(80):
         d_genres = set(d.get("genres") or [])
         d_actors = {c.get("actor_id") for c in (d.get("main_cast") or []) if c.get("actor_id")}
         for season in (d.get("seasons") or []):
@@ -2228,9 +2237,20 @@ async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depe
 @api_router.delete("/movies/{movie_id}")
 async def delete_movie(movie_id: str, user: dict = Depends(get_current_moderator)):
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
-    title = doc.get("title", "") if doc else ""
-    await db.movies.delete_one({"_id": ObjectId(movie_id)})
-    await db.reviews.delete_many({"movie_id": movie_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    title = doc.get("title", "")
+    if doc.get("deleted"):
+        return {"ok": True, "already_deleted": True}
+    await db.movies.update_one(
+        {"_id": ObjectId(movie_id)},
+        {"$set": {
+            "deleted": True,
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_by": user["id"],
+            "deleted_by_name": user.get("name"),
+        }},
+    )
     await log_edit(user, "movie", movie_id, "delete", title, f"Deleted movie \"{title}\"")
     return {"ok": True}
 
@@ -2277,7 +2297,7 @@ async def list_series(
     filter_query: dict = {}
     if q:
         actor_ids = []
-        async for a in db.actors.find({"name": {"$regex": q, "$options": "i"}}, {"_id": 1}):
+        async for a in db.actors.find(_alive({"name": {"$regex": q, "$options": "i"}}), {"_id": 1}):
             actor_ids.append(str(a["_id"]))
         or_filters = [
             {"title": {"$regex": q, "$options": "i"}},
@@ -2291,7 +2311,7 @@ async def list_series(
         filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
     if year:
         filter_query["first_air_date"] = {"$regex": f"^{year}"}
-    cursor = db.series.find(filter_query).limit(limit)
+    cursor = db.series.find(_alive(filter_query)).limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_series(d, deep=False))
@@ -2304,27 +2324,29 @@ async def list_series(
 @api_router.get("/series/trending")
 async def trending_series(limit: int = 12):
     docs = []
-    async for d in db.series.find({"is_trending": True}).limit(limit):
+    async for d in db.series.find(_alive({"is_trending": True})).limit(limit):
         docs.append(await enrich_series(d, deep=False))
     if not docs:
-        async for d in db.series.find({}).sort("created_at", -1).limit(limit):
+        async for d in db.series.find(_alive()).sort("created_at", -1).limit(limit):
             docs.append(await enrich_series(d, deep=False))
     return docs
 
 @api_router.get("/series/recent")
 async def recent_series(limit: int = 12):
     docs = []
-    async for d in db.series.find({}).sort("created_at", -1).limit(limit):
+    async for d in db.series.find(_alive()).sort("created_at", -1).limit(limit):
         docs.append(await enrich_series(d, deep=False))
     return docs
 
 @api_router.get("/series/{series_id}")
-async def get_series(series_id: str):
+async def get_series(series_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     try:
         doc = await db.series.find_one({"_id": ObjectId(series_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Series not found")
     if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if doc.get("deleted") and not (viewer and viewer.get("effective_role") in ("moderator", "admin")):
         raise HTTPException(status_code=404, detail="Series not found")
     # Track view
     today = datetime.now(timezone.utc).date().isoformat()
@@ -2449,8 +2471,20 @@ async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = De
 @api_router.delete("/series/{series_id}")
 async def delete_series(series_id: str, user: dict = Depends(get_current_moderator)):
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
-    title = doc.get("title", "") if doc else ""
-    await db.series.delete_one({"_id": ObjectId(series_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+    title = doc.get("title", "")
+    if doc.get("deleted"):
+        return {"ok": True, "already_deleted": True}
+    await db.series.update_one(
+        {"_id": ObjectId(series_id)},
+        {"$set": {
+            "deleted": True,
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_by": user["id"],
+            "deleted_by_name": user.get("name"),
+        }},
+    )
     await log_edit(user, "series", series_id, "delete", title, f"Deleted series \"{title}\"")
     return {"ok": True}
 
@@ -2463,7 +2497,7 @@ async def global_search(q: str, limit: int = 20):
     # actors
     actor_docs = []
     actor_ids_str = []
-    async for a in db.actors.find({"name": {"$regex": q, "$options": "i"}}).limit(limit):
+    async for a in db.actors.find(_alive({"name": {"$regex": q, "$options": "i"}})).limit(limit):
         actor_ids_str.append(str(a["_id"]))
         actor_docs.append(doc_to_dict(a))
     # movies: title, genre, or cast actor
@@ -2474,7 +2508,7 @@ async def global_search(q: str, limit: int = 20):
     if actor_ids_str:
         m_or.append({"cast.actor_id": {"$in": actor_ids_str}})
     movies = []
-    async for d in db.movies.find({"$or": m_or}).limit(limit):
+    async for d in db.movies.find(_alive({"$or": m_or})).limit(limit):
         movies.append(await enrich_movie(d))
     # series
     s_or = [
@@ -2485,7 +2519,7 @@ async def global_search(q: str, limit: int = 20):
         s_or.append({"main_cast.actor_id": {"$in": actor_ids_str}})
         s_or.append({"seasons.episodes.guest_stars.actor_id": {"$in": actor_ids_str}})
     series_docs = []
-    async for d in db.series.find({"$or": s_or}).limit(limit):
+    async for d in db.series.find(_alive({"$or": s_or})).limit(limit):
         series_docs.append(await enrich_series(d, deep=False))
     return {"movies": movies, "series": series_docs, "actors": actor_docs}
 
@@ -2507,20 +2541,22 @@ async def list_actors(q: Optional[str] = None, limit: int = 100):
     filter_query = {}
     if q:
         filter_query["name"] = {"$regex": q, "$options": "i"}
-    cursor = db.actors.find(filter_query).limit(limit)
+    cursor = db.actors.find(_alive(filter_query)).limit(limit)
     return [doc_to_dict(d) async for d in cursor]
 
 @api_router.get("/actors/{actor_id}")
-async def get_actor(actor_id: str):
+async def get_actor(actor_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     try:
         doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Actor not found")
     if not doc:
         raise HTTPException(status_code=404, detail="Actor not found")
+    if doc.get("deleted") and not (viewer and viewer.get("effective_role") in ("moderator", "admin")):
+        raise HTTPException(status_code=404, detail="Actor not found")
     actor = doc_to_dict(doc)
     # find movies with this actor in cast
-    movies_cursor = db.movies.find({"cast.actor_id": actor_id})
+    movies_cursor = db.movies.find(_alive({"cast.actor_id": actor_id}))
     movies = []
     async for m in movies_cursor:
         m_dict = await enrich_movie(m)
@@ -2533,7 +2569,7 @@ async def get_actor(actor_id: str):
 
     # find series where actor is in main_cast
     series_main = []
-    async for s in db.series.find({"main_cast.actor_id": actor_id}):
+    async for s in db.series.find(_alive({"main_cast.actor_id": actor_id})):
         s_dict = await enrich_series(s, deep=False)
         for c in s_dict.get("main_cast", []):
             if c.get("actor_id") == actor_id:
@@ -2544,7 +2580,7 @@ async def get_actor(actor_id: str):
 
     # find guest star episodes
     guest_episodes = []
-    async for s in db.series.find({"seasons.episodes.guest_stars.actor_id": actor_id}):
+    async for s in db.series.find(_alive({"seasons.episodes.guest_stars.actor_id": actor_id})):
         sid = str(s["_id"])
         for season in s.get("seasons", []) or []:
             for ep in season.get("episodes", []) or []:
@@ -2592,9 +2628,86 @@ async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depe
 @api_router.delete("/actors/{actor_id}")
 async def delete_actor(actor_id: str, user: dict = Depends(get_current_moderator)):
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
-    name = doc.get("name", "") if doc else ""
-    await db.actors.delete_one({"_id": ObjectId(actor_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Actor not found")
+    name = doc.get("name", "")
+    if doc.get("deleted"):
+        return {"ok": True, "already_deleted": True}
+    await db.actors.update_one(
+        {"_id": ObjectId(actor_id)},
+        {"$set": {
+            "deleted": True,
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_by": user["id"],
+            "deleted_by_name": user.get("name"),
+        }},
+    )
     await log_edit(user, "actor", actor_id, "delete", name, f"Deleted actor \"{name}\"")
+    return {"ok": True}
+
+# ----------- Trash / Restore (Moderator) -----------
+def _serialize_deleted(kind: str, d: dict) -> dict:
+    return {
+        "id": str(d["_id"]),
+        "type": kind,
+        "title": d.get("title") or d.get("name") or "",
+        "poster_url": d.get("poster_url") or d.get("photo_url") or "",
+        "deleted_at": d.get("deleted_at"),
+        "deleted_by": d.get("deleted_by"),
+        "deleted_by_name": d.get("deleted_by_name"),
+        "release_date": d.get("release_date") or d.get("first_air_date"),
+    }
+
+@api_router.get("/moderation/trash")
+async def list_trash(mod: dict = Depends(get_current_moderator)):
+    movies = [_serialize_deleted("movie", d) async for d in db.movies.find({"deleted": True}).sort("deleted_at", -1)]
+    series = [_serialize_deleted("series", d) async for d in db.series.find({"deleted": True}).sort("deleted_at", -1)]
+    actors = [_serialize_deleted("actor", d) async for d in db.actors.find({"deleted": True}).sort("deleted_at", -1)]
+    return {"movies": movies, "series": series, "actors": actors}
+
+@api_router.post("/moderation/{kind}/{entity_id}/restore")
+async def restore_entity(kind: str, entity_id: str, mod: dict = Depends(get_current_moderator)):
+    coll = {"movie": db.movies, "series": db.series, "actor": db.actors}.get(kind)
+    if coll is None:
+        raise HTTPException(status_code=400, detail="Invalid entity kind")
+    try:
+        doc = await coll.find_one({"_id": ObjectId(entity_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not doc.get("deleted"):
+        return {"ok": True, "already_restored": True}
+    await coll.update_one(
+        {"_id": ObjectId(entity_id)},
+        {
+            "$set": {"deleted": False, "restored_at": datetime.now(timezone.utc).isoformat(), "restored_by": mod["id"], "restored_by_name": mod.get("name")},
+            "$unset": {"deleted_at": "", "deleted_by": "", "deleted_by_name": ""},
+        },
+    )
+    label = doc.get("title") or doc.get("name") or ""
+    await log_edit(mod, kind, entity_id, "restore", label, f"Restored {kind} \"{label}\"")
+    return {"ok": True}
+
+@api_router.delete("/moderation/{kind}/{entity_id}/purge")
+async def purge_entity(kind: str, entity_id: str, admin: dict = Depends(get_current_admin)):
+    """Permanently delete a soft-deleted entity. Admin only."""
+    coll = {"movie": db.movies, "series": db.series, "actor": db.actors}.get(kind)
+    if coll is None:
+        raise HTTPException(status_code=400, detail="Invalid entity kind")
+    try:
+        doc = await coll.find_one({"_id": ObjectId(entity_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not doc.get("deleted"):
+        raise HTTPException(status_code=400, detail="Entity is not in trash. Delete it first.")
+    label = doc.get("title") or doc.get("name") or ""
+    await coll.delete_one({"_id": ObjectId(entity_id)})
+    if kind == "movie":
+        await db.reviews.delete_many({"movie_id": entity_id})
+    await log_edit(admin, kind, entity_id, "purge", label, f"Permanently deleted {kind} \"{label}\"")
     return {"ok": True}
 
 # ----------- Reviews -----------
@@ -2651,7 +2764,7 @@ async def get_watchlist(user: dict = Depends(get_current_user)):
         except Exception:
             pass
     movies = []
-    cur = db.movies.find({"_id": {"$in": object_ids}})
+    cur = db.movies.find(_alive({"_id": {"$in": object_ids}}))
     async for m in cur:
         movies.append(await enrich_movie(m))
     return movies

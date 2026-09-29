@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash } from "lucide-react";
 import { toast } from "sonner";
 import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
@@ -43,6 +43,7 @@ export default function Admin() {
           <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
           <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
           <TabsTrigger value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
+          <TabsTrigger value="trash" data-testid="tab-trash">Trash</TabsTrigger>
           {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
         </TabsList>
         <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
@@ -50,6 +51,7 @@ export default function Admin() {
         <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
         <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
         <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
+        <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
         {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
       </Tabs>
     </div>
@@ -576,3 +578,143 @@ function RolesTab() {
     </div>
   );
 }
+
+function TrashTab({ currentRole }) {
+  const [trash, setTrash] = useState({ movies: [], series: [], actors: [] });
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const isAdmin = currentRole === "admin";
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get("/moderation/trash");
+      setTrash(r.data || { movies: [], series: [], actors: [] });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load trash");
+    }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const restore = async (kind, id) => {
+    setBusyId(id);
+    try {
+      await api.post(`/moderation/${kind}/${id}/restore`);
+      toast.success("Restored");
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Restore failed");
+    }
+    setBusyId(null);
+  };
+
+  const purge = async (kind, id, title) => {
+    if (!window.confirm(`Permanently delete "${title}"? This cannot be undone.`)) return;
+    setBusyId(id);
+    try {
+      await api.delete(`/moderation/${kind}/${id}/purge`);
+      toast.success("Permanently deleted");
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Delete failed");
+    }
+    setBusyId(null);
+  };
+
+  const totalCount =
+    (trash.movies?.length || 0) + (trash.series?.length || 0) + (trash.actors?.length || 0);
+
+  const renderRow = (item) => (
+    <div
+      key={`${item.type}-${item.id}`}
+      className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3"
+      data-testid={`trash-row-${item.type}-${item.id}`}
+    >
+      <div className="w-12 h-16 rounded overflow-hidden bg-[#1e2430] border border-white/10 flex-shrink-0">
+        {item.poster_url ? (
+          <img src={fileUrl(item.poster_url)} alt="" className="w-full h-full object-cover" />
+        ) : null}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge className="bg-white/5 text-slate-300 border-white/10 uppercase">{item.type}</Badge>
+          {item.release_date && (
+            <span className="text-xs text-slate-500">{item.release_date.slice(0, 4)}</span>
+          )}
+        </div>
+        <div className="mt-1 font-semibold text-white truncate">{item.title}</div>
+        <div className="text-xs text-slate-500 mt-0.5">
+          Deleted{item.deleted_by_name ? ` by ${item.deleted_by_name}` : ""}
+          {item.deleted_at ? ` • ${item.deleted_at.slice(0, 19).replace("T", " ")}` : ""}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => restore(item.type, item.id)}
+          disabled={busyId === item.id}
+          className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200"
+          data-testid={`trash-restore-${item.type}-${item.id}`}
+        >
+          <RotateCcw className="w-4 h-4 mr-1" /> Restore
+        </Button>
+        {isAdmin && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => purge(item.type, item.id, item.title)}
+            disabled={busyId === item.id}
+            className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+            data-testid={`trash-purge-${item.type}-${item.id}`}
+          >
+            <Trash className="w-4 h-4 mr-1" /> Delete forever
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  const Section = ({ label, items }) =>
+    items.length === 0 ? null : (
+      <div className="space-y-2">
+        <div className="text-xs uppercase tracking-widest text-slate-400 font-semibold pt-2">
+          {label} ({items.length})
+        </div>
+        {items.map(renderRow)}
+      </div>
+    );
+
+  return (
+    <Card className="bg-[#14181f] border-white/10 text-white" data-testid="trash-tab">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2">
+          <Trash2 className="w-5 h-5" /> Trash ({totalCount})
+        </CardTitle>
+        <div className="text-xs text-slate-500">
+          {isAdmin
+            ? "Restore any deleted item, or permanently delete it."
+            : "Restore any deleted item. Only admins can permanently delete."}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="text-slate-500 text-sm">Loading…</div>
+        ) : totalCount === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/10 bg-[#0d0f12]/50 py-16 text-center" data-testid="trash-empty">
+            <Trash2 className="w-8 h-8 text-slate-600 mx-auto" />
+            <div className="mt-3 text-slate-400 text-sm">Trash is empty. Deleted movies, series and actors show up here.</div>
+          </div>
+        ) : (
+          <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
+            <Section label="Movies" items={trash.movies || []} />
+            <Section label="TV Series" items={trash.series || []} />
+            <Section label="Actors" items={trash.actors || []} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
