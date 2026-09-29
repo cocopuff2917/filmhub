@@ -310,12 +310,22 @@ class SeriesCreate(BaseModel):
     last_air_date: Optional[str] = None
     genres: List[str] = []
     synopsis: str = ""
+    tagline: str = ""
     poster_url: str = ""
     backdrop_url: str = ""
     trailer_url: str = ""
+    video_urls: List[str] = []
     status: str = "Ongoing"
     gallery: List[str] = []
     main_cast: List[CastMember] = []
+    creators: List[CrewMember] = []
+    keywords: List[str] = []
+    network: str = ""
+    network_logo_url: str = ""
+    type: str = "Scripted"  # Scripted | Reality | Animated | Documentary | Miniseries | News | Talk Show
+    original_language: str = "English"
+    awards_wins: Optional[int] = None
+    awards_nominations: Optional[int] = None
     seasons: List[SeasonItem] = []
     is_trending: bool = False
 
@@ -325,12 +335,22 @@ class SeriesUpdate(BaseModel):
     last_air_date: Optional[str] = None
     genres: Optional[List[str]] = None
     synopsis: Optional[str] = None
+    tagline: Optional[str] = None
     poster_url: Optional[str] = None
     backdrop_url: Optional[str] = None
     trailer_url: Optional[str] = None
+    video_urls: Optional[List[str]] = None
     status: Optional[str] = None
     gallery: Optional[List[str]] = None
     main_cast: Optional[List[CastMember]] = None
+    creators: Optional[List[CrewMember]] = None
+    keywords: Optional[List[str]] = None
+    network: Optional[str] = None
+    network_logo_url: Optional[str] = None
+    type: Optional[str] = None
+    original_language: Optional[str] = None
+    awards_wins: Optional[int] = None
+    awards_nominations: Optional[int] = None
     seasons: Optional[List[SeasonItem]] = None
     is_trending: Optional[bool] = None
 
@@ -1772,6 +1792,8 @@ async def delete_movie(movie_id: str, user: dict = Depends(get_current_moderator
 def _serialize_series_payload(data: dict) -> dict:
     if "main_cast" in data and data["main_cast"] is not None:
         data["main_cast"] = [c if isinstance(c, dict) else c.model_dump() for c in data["main_cast"]]
+    if "creators" in data and data["creators"] is not None:
+        data["creators"] = [c if isinstance(c, dict) else c.model_dump() for c in data["creators"]]
     if "seasons" in data and data["seasons"] is not None:
         out_seasons = []
         for s in data["seasons"]:
@@ -1858,7 +1880,71 @@ async def get_series(series_id: str):
         raise HTTPException(status_code=404, detail="Series not found")
     if not doc:
         raise HTTPException(status_code=404, detail="Series not found")
+    # Track view
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        await db.series_views.update_one(
+            {"series_id": series_id, "date": today},
+            {"$inc": {"count": 1}},
+            upsert=True,
+        )
+    except Exception:
+        pass
     return await enrich_series(doc)
+
+_SERIES_SCORE_FIELDS = [
+    "title", "first_air_date", "synopsis", "tagline", "poster_url", "backdrop_url",
+    "trailer_url", "genres", "main_cast", "creators", "keywords",
+    "status", "original_language", "network", "type", "seasons",
+]
+
+@api_router.get("/series/{series_id}/stats")
+async def series_stats(series_id: str):
+    try:
+        doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    today = datetime.now(timezone.utc).date()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    counts_map = {}
+    async for row in db.series_views.find({"series_id": series_id, "date": {"$in": days}}):
+        counts_map[row["date"]] = row.get("count", 0)
+    trend = [{"date": d, "count": counts_map.get(d, 0)} for d in days]
+    total_views = 0
+    async for v in db.series_views.find({"series_id": series_id}):
+        total_views += v.get("count", 0)
+
+    pipeline = [
+        {"$match": {"entity_type": "series", "entity_id": series_id,
+                    "action": {"$in": ["create", "update", "revert"]}}},
+        {"$group": {"_id": "$user_id",
+                    "count": {"$sum": 1},
+                    "name": {"$last": "$user_name"},
+                    "avatar": {"$last": "$user_avatar"}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5},
+    ]
+    contributors = []
+    async for row in db.edits.aggregate(pipeline):
+        contributors.append({
+            "user_id": row["_id"],
+            "name": row.get("name"),
+            "avatar_url": row.get("avatar"),
+            "count": row.get("count", 0),
+        })
+
+    filled = sum(1 for f in _SERIES_SCORE_FIELDS if _field_filled(doc.get(f)))
+    content_score = round(100 * filled / len(_SERIES_SCORE_FIELDS))
+
+    return {
+        "trend": trend,
+        "total_views": total_views,
+        "contributors": contributors,
+        "content_score": content_score,
+    }
 
 @api_router.get("/series/{series_id}/similar")
 async def similar_series(series_id: str, limit: int = 12):
