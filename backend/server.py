@@ -2547,6 +2547,63 @@ async def global_search(q: str, limit: int = 20):
     return {"movies": movies, "series": series_docs, "actors": actor_docs}
 
 
+@api_router.get("/search/suggest")
+async def search_suggest(q: str, limit: int = 6):
+    """Lightweight typeahead: returns compact rows (id, title/name, kind, poster/photo, year). Title-prefix bias."""
+    q = q.strip()
+    if not q or len(q) < 1:
+        return {"movies": [], "series": [], "actors": []}
+    # Escape regex special chars, then anchor with case-insensitive contains
+    esc = re.escape(q)
+    rx = {"$regex": esc, "$options": "i"}
+    # Movies (title only for speed)
+    movies = []
+    async for d in db.movies.find(
+        _alive({"title": rx}),
+        {"title": 1, "poster_url": 1, "release_date": 1},
+    ).limit(limit):
+        movies.append({
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "poster_url": d.get("poster_url", ""),
+            "year": (d.get("release_date") or "")[:4],
+            "kind": "movie",
+        })
+    # Series
+    series_out = []
+    async for d in db.series.find(
+        _alive({"title": rx}),
+        {"title": 1, "poster_url": 1, "first_air_date": 1},
+    ).limit(limit):
+        series_out.append({
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "poster_url": d.get("poster_url", ""),
+            "year": (d.get("first_air_date") or "")[:4],
+            "kind": "series",
+        })
+    # Actors
+    actors_out = []
+    async for a in db.actors.find(
+        _alive({"name": rx}),
+        {"name": 1, "photo_url": 1},
+    ).limit(limit):
+        actors_out.append({
+            "id": str(a["_id"]),
+            "title": a.get("name", ""),
+            "poster_url": a.get("photo_url", ""),
+            "year": "",
+            "kind": "actor",
+        })
+    # Simple prefix bias: items whose title starts with the query float to the top of each list
+    def bias(items):
+        low = q.lower()
+        starts = [x for x in items if x["title"].lower().startswith(low)]
+        rest = [x for x in items if not x["title"].lower().startswith(low)]
+        return starts + rest
+    return {"movies": bias(movies), "series": bias(series_out), "actors": bias(actors_out)}
+
+
 # ----------- Actors -----------
 @api_router.post("/actors")
 async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_user)):
