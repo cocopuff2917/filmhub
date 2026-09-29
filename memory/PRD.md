@@ -17,8 +17,9 @@ Build a modern movie database web app (IMDb/TMDB style, dark mode) with Home, Mo
 - Edit history with field diffs, image galleries, similar content, leaderboard
 - Suspended users hidden from public profile & leaderboard
 
-## Fixed 2026-09-29
+## Fixed / Enhanced 2026-09-29
 - IP Overlap tab crashed with "Link is not defined" — added missing `Link` import in `Admin.jsx`.
+- Related content upgraded: `/movies/{id}/similar` and `/series/{id}/similar` now return a **mixed list of movies AND TV series** scored by shared genres, shared actors (main cast + guest stars for series), and release-year proximity (same year +3, ≤2 yrs +2, ≤5 yrs +1). Frontend `SimilarSection` renders both card types.
 
 ## Backlog (P1/P2)
 - P1: Watchlist & Favorites end-to-end verification

@@ -14,7 +14,7 @@ export default function SimilarSection({ kind, entityId }) {
       try {
         const endpoint = kind === "movie" ? `/movies/${entityId}/similar` : `/series/${entityId}/similar`;
         const r = await api.get(endpoint);
-        setItems(r.data);
+        setItems(r.data || []);
       } catch {}
       setLoading(false);
     })();
@@ -29,12 +29,16 @@ export default function SimilarSection({ kind, entityId }) {
         <Sparkles className="w-4 h-4" /> You Might Also Enjoy
       </div>
       <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">
-        Similar {kind === "movie" ? "Movies" : "TV Series"}
+        Related Movies &amp; TV Series
       </h2>
+      <p className="mt-1 text-sm text-slate-500">Matched by genre, cast, and release year.</p>
       <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
-        {items.map((it) => (
-          kind === "movie" ? <MovieCard key={it.id} movie={it} /> : <SeriesCard key={it.id} series={it} />
-        ))}
+        {items.map((it) => {
+          const type = it.type || (it.first_air_date || it.seasons ? "series" : "movie");
+          return type === "series"
+            ? <SeriesCard key={`s-${it.id}`} series={it} />
+            : <MovieCard key={`m-${it.id}`} movie={it} />;
+        })}
       </div>
     </section>
   );

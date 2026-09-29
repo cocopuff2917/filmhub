@@ -1313,6 +1313,79 @@ async def get_movie(movie_id: str):
         raise HTTPException(status_code=404, detail="Movie not found")
     return await enrich_movie(doc)
 
+def _year_from(s: Optional[str]) -> Optional[int]:
+    if not s or not isinstance(s, str) or len(s) < 4:
+        return None
+    try:
+        return int(s[:4])
+    except Exception:
+        return None
+
+def _score_related(base_genres: set, base_actors: set, base_year: Optional[int],
+                   d_genres: set, d_actors: set, d_year: Optional[int]) -> int:
+    score = len(d_genres & base_genres) * 2 + len(d_actors & base_actors) * 3
+    if base_year is not None and d_year is not None:
+        diff = abs(base_year - d_year)
+        if diff == 0:
+            score += 3
+        elif diff <= 2:
+            score += 2
+        elif diff <= 5:
+            score += 1
+    return score
+
+async def _collect_related(base_genres: list, base_actors: list, base_year: Optional[int],
+                           exclude_movie_id=None, exclude_series_id=None):
+    """Search both movies and series for items sharing genres/actors, score and return sorted list."""
+    genre_set = set(base_genres or [])
+    actor_set = set(base_actors or [])
+    if not genre_set and not actor_set:
+        return []
+
+    # Movies candidates
+    m_or = []
+    if genre_set:
+        m_or.append({"genres": {"$in": list(genre_set)}})
+    if actor_set:
+        m_or.append({"cast.actor_id": {"$in": list(actor_set)}})
+    m_filter = {"$or": m_or}
+    if exclude_movie_id is not None:
+        m_filter = {"$and": [{"_id": {"$ne": exclude_movie_id}}, m_filter]}
+
+    # Series candidates
+    s_or = []
+    if genre_set:
+        s_or.append({"genres": {"$in": list(genre_set)}})
+    if actor_set:
+        s_or.append({"main_cast.actor_id": {"$in": list(actor_set)}})
+        s_or.append({"seasons.episodes.guest_stars.actor_id": {"$in": list(actor_set)}})
+    s_filter = {"$or": s_or}
+    if exclude_series_id is not None:
+        s_filter = {"$and": [{"_id": {"$ne": exclude_series_id}}, s_filter]}
+
+    scored = []
+    async for d in db.movies.find(m_filter).limit(80):
+        d_genres = set(d.get("genres") or [])
+        d_actors = {c.get("actor_id") for c in (d.get("cast") or []) if c.get("actor_id")}
+        d_year = _year_from(d.get("release_date"))
+        score = _score_related(genre_set, actor_set, base_year, d_genres, d_actors, d_year)
+        if score > 0:
+            scored.append((score, "movie", d))
+    async for d in db.series.find(s_filter).limit(80):
+        d_genres = set(d.get("genres") or [])
+        d_actors = {c.get("actor_id") for c in (d.get("main_cast") or []) if c.get("actor_id")}
+        for season in (d.get("seasons") or []):
+            for ep in (season.get("episodes") or []):
+                for g in (ep.get("guest_stars") or []):
+                    if g.get("actor_id"):
+                        d_actors.add(g.get("actor_id"))
+        d_year = _year_from(d.get("first_air_date"))
+        score = _score_related(genre_set, actor_set, base_year, d_genres, d_actors, d_year)
+        if score > 0:
+            scored.append((score, "series", d))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
 @api_router.get("/movies/{movie_id}/similar")
 async def similar_movies(movie_id: str, limit: int = 12):
     try:
@@ -1323,25 +1396,18 @@ async def similar_movies(movie_id: str, limit: int = 12):
         raise HTTPException(status_code=404, detail="Movie not found")
     genres = base.get("genres") or []
     cast_actor_ids = [c.get("actor_id") for c in (base.get("cast") or []) if c.get("actor_id")]
-    or_conds = []
-    if genres:
-        or_conds.append({"genres": {"$in": genres}})
-    if cast_actor_ids:
-        or_conds.append({"cast.actor_id": {"$in": cast_actor_ids}})
-    if not or_conds:
-        return []
-    docs = []
-    async for d in db.movies.find({"$and": [{"_id": {"$ne": base["_id"]}}, {"$or": or_conds}]}).limit(50):
-        docs.append(d)
-    # score
-    genre_set = set(genres)
-    actor_set = set(cast_actor_ids)
-    def score(d):
-        d_genres = set(d.get("genres") or [])
-        d_actors = set(c.get("actor_id") for c in (d.get("cast") or []) if c.get("actor_id"))
-        return len(d_genres & genre_set) * 2 + len(d_actors & actor_set) * 3
-    docs.sort(key=score, reverse=True)
-    return [await enrich_movie(d) for d in docs[:limit]]
+    base_year = _year_from(base.get("release_date"))
+    scored = await _collect_related(genres, cast_actor_ids, base_year, exclude_movie_id=base["_id"])
+    out = []
+    for _s, kind, d in scored[:limit]:
+        if kind == "movie":
+            item = await enrich_movie(d)
+            item["type"] = "movie"
+        else:
+            item = await enrich_series(d, deep=False)
+            item["type"] = "series"
+        out.append(item)
+    return out
 
 def _check_locks(old_doc: dict, update_data: dict, user: dict, action: str = "edit"):
     """Raise 403 if any locked field is being modified by a non-moderator."""
@@ -1494,24 +1560,24 @@ async def similar_series(series_id: str, limit: int = 12):
         raise HTTPException(status_code=404, detail="Series not found")
     genres = base.get("genres") or []
     main_cast_ids = [c.get("actor_id") for c in (base.get("main_cast") or []) if c.get("actor_id")]
-    or_conds = []
-    if genres:
-        or_conds.append({"genres": {"$in": genres}})
-    if main_cast_ids:
-        or_conds.append({"main_cast.actor_id": {"$in": main_cast_ids}})
-    if not or_conds:
-        return []
-    docs = []
-    async for d in db.series.find({"$and": [{"_id": {"$ne": base["_id"]}}, {"$or": or_conds}]}).limit(50):
-        docs.append(d)
-    genre_set = set(genres)
-    actor_set = set(main_cast_ids)
-    def score(d):
-        d_genres = set(d.get("genres") or [])
-        d_actors = set(c.get("actor_id") for c in (d.get("main_cast") or []) if c.get("actor_id"))
-        return len(d_genres & genre_set) * 2 + len(d_actors & actor_set) * 3
-    docs.sort(key=score, reverse=True)
-    return [await enrich_series(d, deep=False) for d in docs[:limit]]
+    # also include guest stars from all episodes
+    for season in (base.get("seasons") or []):
+        for ep in (season.get("episodes") or []):
+            for g in (ep.get("guest_stars") or []):
+                if g.get("actor_id"):
+                    main_cast_ids.append(g.get("actor_id"))
+    base_year = _year_from(base.get("first_air_date"))
+    scored = await _collect_related(genres, main_cast_ids, base_year, exclude_series_id=base["_id"])
+    out = []
+    for _s, kind, d in scored[:limit]:
+        if kind == "movie":
+            item = await enrich_movie(d)
+            item["type"] = "movie"
+        else:
+            item = await enrich_series(d, deep=False)
+            item["type"] = "series"
+        out.append(item)
+    return out
 
 @api_router.patch("/series/{series_id}")
 async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depends(get_current_user)):
