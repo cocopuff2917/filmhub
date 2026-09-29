@@ -498,7 +498,7 @@ def _values_equal(a, b):
     return a == b
 
 def compute_field_changes(old: dict, new: dict) -> list:
-    """Return list of {field, before, after} for fields that actually differ."""
+    """Return list of {field, before, after, before_raw, after_raw} for fields that actually differ."""
     changes = []
     for k, new_val in new.items():
         old_val = old.get(k) if old else None
@@ -508,6 +508,8 @@ def compute_field_changes(old: dict, new: dict) -> list:
             "field": k,
             "before": _summarize_value(old_val),
             "after": _summarize_value(new_val),
+            "before_raw": old_val,
+            "after_raw": new_val,
         })
     return changes
 
@@ -898,8 +900,81 @@ async def list_edits(entity_type: Optional[str] = None, entity_id: Optional[str]
     async for e in db.edits.find(q).sort("created_at", -1).limit(limit):
         e_id = str(e.pop("_id"))
         e["id"] = e_id
+        # strip raw values from listing (used only for revert)
+        stripped_changes = []
+        for c in e.get("changes", []) or []:
+            stripped_changes.append({k: v for k, v in c.items() if k not in ("before_raw", "after_raw")})
+        e["changes"] = stripped_changes
+        e["revertible"] = (
+            e.get("action") == "update"
+            and e.get("entity_type") in ("movie", "series", "actor")
+            and bool(e.get("changes"))
+        )
         edits.append(e)
     return edits
+
+
+# ----- Revert an edit -----
+_ENTITY_COLLECTIONS = {"movie": "movies", "series": "series", "actor": "actors"}
+
+async def _entity_title(entity_type: str, doc: dict) -> str:
+    if entity_type == "actor":
+        return doc.get("name", "")
+    return doc.get("title", "")
+
+@api_router.post("/edits/{edit_id}/revert")
+async def revert_edit(edit_id: str, mod: dict = Depends(get_current_moderator)):
+    try:
+        edit = await db.edits.find_one({"_id": ObjectId(edit_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    if not edit:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    if edit.get("action") != "update":
+        raise HTTPException(status_code=400, detail="Only update edits can be reverted")
+    entity_type = edit.get("entity_type")
+    coll_name = _ENTITY_COLLECTIONS.get(entity_type)
+    if not coll_name:
+        raise HTTPException(status_code=400, detail="This edit is not revertible")
+    coll = db[coll_name]
+    try:
+        target = await coll.find_one({"_id": ObjectId(edit["entity_id"])})
+    except Exception:
+        target = None
+    if not target:
+        raise HTTPException(status_code=404, detail="Target no longer exists")
+
+    changes = edit.get("changes", []) or []
+    revertible_changes = [c for c in changes if "before_raw" in c]
+    if not revertible_changes:
+        raise HTTPException(status_code=400, detail="This edit has no raw snapshot to revert to")
+
+    # Build $set with the raw before values
+    revert_set = {c["field"]: c.get("before_raw") for c in revertible_changes}
+    await coll.update_one({"_id": target["_id"]}, {"$set": revert_set})
+    new_doc = await coll.find_one({"_id": target["_id"]})
+
+    # Log a new edit describing the revert (with raw snapshots so it too can be reverted)
+    revert_changes = compute_field_changes(target, revert_set)
+    title = await _entity_title(entity_type, new_doc or target)
+    field_names = ", ".join(c["field"] for c in revertible_changes)
+    await log_edit(
+        mod,
+        entity_type,
+        edit["entity_id"],
+        "revert",
+        title,
+        f"Reverted edit by {edit.get('user_name','?')} — restored {field_names}",
+        revert_changes,
+    )
+    # Return the fresh entity, enriched
+    if entity_type == "movie":
+        return await enrich_movie(new_doc)
+    if entity_type == "series":
+        return await enrich_series(new_doc)
+    if entity_type == "actor":
+        return doc_to_dict(new_doc)
+    return {"ok": True}
 
 # ----------- Moderation -----------
 @api_router.post("/moderation/users/{user_id}/suspend")

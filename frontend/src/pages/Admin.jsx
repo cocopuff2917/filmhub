@@ -251,6 +251,24 @@ function UsersTab({ currentRole }) {
                     </SelectContent>
                   </Select>
                 )}
+                {currentRole === "admin" && u.role !== "admin" && (
+                  <Select
+                    value={u.custom_role?.id || "__none__"}
+                    onValueChange={(v) => setCustomRole(u.id, v === "__none__" ? null : v)}
+                  >
+                    <SelectTrigger className="w-[160px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs" data-testid={`custom-role-select-${u.id}`}>
+                      <SelectValue placeholder="Custom role…" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#14181f] text-white border-white/10">
+                      <SelectItem value="__none__">No custom role</SelectItem>
+                      {customRoles.map((cr) => (
+                        <SelectItem key={cr.id} value={cr.id}>
+                          <span style={{ color: cr.color }}>●</span> <span className="ml-1">{cr.name}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 {u.role !== "admin" && (
                   isSuspended(u) ? (
                     <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>

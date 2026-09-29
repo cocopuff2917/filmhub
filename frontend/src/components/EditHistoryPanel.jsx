@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
-import { History, Plus, Edit as EditIcon, Trash2, ChevronDown, ChevronUp, Ban, CheckCircle, UserCog } from "lucide-react";
+import { History, Plus, Edit as EditIcon, Trash2, ChevronDown, ChevronUp, Ban, CheckCircle, UserCog, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/AuthContext";
+import { toast } from "sonner";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -27,6 +29,7 @@ const actionColor = {
   suspend: "text-rose-400",
   unsuspend: "text-emerald-400",
   role: "text-sky-400",
+  revert: "text-fuchsia-400",
 };
 const actionIcon = {
   create: <Plus className="w-3.5 h-3.5" />,
@@ -35,6 +38,7 @@ const actionIcon = {
   suspend: <Ban className="w-3.5 h-3.5" />,
   unsuspend: <CheckCircle className="w-3.5 h-3.5" />,
   role: <UserCog className="w-3.5 h-3.5" />,
+  revert: <Undo2 className="w-3.5 h-3.5" />,
 };
 const roleTint = {
   admin: "bg-rose-500/15 text-rose-300 border-rose-500/40",
@@ -42,9 +46,25 @@ const roleTint = {
   user: "bg-white/5 text-slate-300 border-white/10",
 };
 
-function EditRow({ e }) {
+function EditRow({ e, canRevert, onRevert }) {
   const [expanded, setExpanded] = useState(false);
+  const [reverting, setReverting] = useState(false);
   const hasChanges = e.changes && e.changes.length > 0;
+  const showRevert = canRevert && e.revertible;
+
+  const handleRevert = async () => {
+    if (!window.confirm(`Revert this edit by ${e.user_name || "Someone"}? The fields will be restored to their previous values.`)) return;
+    setReverting(true);
+    try {
+      await api.post(`/edits/${e.id}/revert`);
+      toast.success("Edit reverted");
+      onRevert?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to revert");
+    }
+    setReverting(false);
+  };
+
   return (
     <li className="pl-6 relative" data-testid={`edit-log-${e.id}`}>
       <span className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-[#0d0f12] border border-white/20 flex items-center justify-center ${actionColor[e.action] || "text-slate-400"}`}>
@@ -64,6 +84,18 @@ function EditRow({ e }) {
             )}
             <span className={`text-xs uppercase tracking-widest ${actionColor[e.action] || "text-slate-400"}`}>{e.action}</span>
             <span className="text-xs text-slate-500" title={fullTs(e.created_at)}>{timeAgo(e.created_at)}</span>
+            {showRevert && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRevert}
+                disabled={reverting}
+                className="ml-auto h-7 px-2 border-fuchsia-500/40 text-fuchsia-300 hover:bg-fuchsia-500/10 hover:text-fuchsia-200 text-xs"
+                data-testid={`revert-edit-${e.id}`}
+              >
+                <Undo2 className="w-3 h-3 mr-1" /> {reverting ? "Reverting…" : "Revert"}
+              </Button>
+            )}
           </div>
           {e.summary && <div className="text-sm text-slate-400 mt-1">{e.summary}</div>}
 
@@ -105,21 +137,34 @@ function EditRow({ e }) {
   );
 }
 
-export default function EditHistoryPanel({ entityType, entityId, limit = 25 }) {
+export default function EditHistoryPanel({ entityType, entityId, limit = 25, onReverted }) {
+  const { user } = useAuth();
   const [edits, setEdits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
 
+  const canRevert = ["moderator", "admin"].includes(user?.effective_role || user?.role);
+
+  const reload = async () => {
+    try {
+      const r = await api.get("/edits", { params: { entity_type: entityType, entity_id: entityId, limit } });
+      setEdits(r.data);
+    } catch {}
+  };
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      try {
-        const r = await api.get("/edits", { params: { entity_type: entityType, entity_id: entityId, limit } });
-        setEdits(r.data);
-      } catch {}
+      await reload();
       setLoading(false);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityType, entityId, limit]);
+
+  const handleReverted = async () => {
+    await reload();
+    onReverted?.();
+  };
 
   const visible = showAll ? edits : edits.slice(0, 5);
 
@@ -145,7 +190,7 @@ export default function EditHistoryPanel({ entityType, entityId, limit = 25 }) {
           </div>
         ) : (
           <ol className="relative border-l border-white/10 ml-2 space-y-6">
-            {visible.map((e) => <EditRow key={e.id} e={e} />)}
+            {visible.map((e) => <EditRow key={e.id} e={e} canRevert={canRevert} onRevert={handleReverted} />)}
           </ol>
         )}
       </div>

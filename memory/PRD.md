@@ -19,7 +19,9 @@ Build a modern movie database web app (IMDb/TMDB style, dark mode) with Home, Mo
 
 ## Fixed / Enhanced 2026-09-29
 - IP Overlap tab crashed with "Link is not defined" — added missing `Link` import in `Admin.jsx`.
-- Related content upgraded: `/movies/{id}/similar` and `/series/{id}/similar` now return a **mixed list of movies AND TV series** scored by shared genres, shared actors (main cast + guest stars for series), and release-year proximity (same year +3, ≤2 yrs +2, ≤5 yrs +1). Frontend `SimilarSection` renders both card types.
+- Related content upgraded: `/movies/{id}/similar` and `/series/{id}/similar` now return a mixed list of movies AND TV series scored by shared genres, shared actors (main cast + guest stars for series), and release-year proximity. Frontend `SimilarSection` renders both card types.
+- Edit revert: edit log now stores raw before/after values (`before_raw`, `after_raw`). New endpoint `POST /api/edits/{edit_id}/revert` (mod/admin) restores an entity's fields to the pre-edit state and logs the revert as its own change. `EditHistoryPanel` shows a "Revert" button next to eligible update entries for mods/admins.
+- Custom-role assignment UI: added a "Custom role" Select in the Admin → Users list next to the base-role Select (admin-only). Backend endpoint `PATCH /api/moderation/users/{id}/custom-role` already existed; the UI was previously missing.
 
 ## Backlog (P1/P2)
 - P1: Watchlist & Favorites end-to-end verification
