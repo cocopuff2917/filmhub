@@ -24,7 +24,9 @@ export default function Admin() {
     if (!["moderator", "admin"].includes(user.role)) { navigate("/"); }
   }, [user, initializing, navigate]);
 
-  if (initializing || !user || !["moderator", "admin"].includes(user.role)) return null;
+  if (initializing || !user || !["moderator", "admin"].includes(user.role) && !["moderator", "admin"].includes(user.effective_role)) return null;
+
+  const canManageRoles = user.role === "admin" || user.effective_role === "admin";
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -39,11 +41,15 @@ export default function Admin() {
           <TabsTrigger value="series" data-testid="tab-series">TV Series</TabsTrigger>
           <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
           <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
+          <TabsTrigger value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
+          {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
         </TabsList>
         <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
         <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" /></TabsContent>
         <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
-        <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.role} /></TabsContent>
+        <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
+        <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
+        {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
       </Tabs>
     </div>
   );
@@ -118,16 +124,20 @@ function EntityAdmin({ kind }) {
 
 function UsersTab({ currentRole }) {
   const [users, setUsers] = useState([]);
+  const [customRoles, setCustomRoles] = useState([]);
   const [query, setQuery] = useState("");
   const [suspendTarget, setSuspendTarget] = useState(null);
   const [duration, setDuration] = useState("7");
   const [customDays, setCustomDays] = useState("");
   const [reason, setReason] = useState("");
-  const [ipData, setIpData] = useState({}); // userId -> ips response
+  const [ipData, setIpData] = useState({});
   const [ipLoading, setIpLoading] = useState({});
   const [ipOpen, setIpOpen] = useState({});
 
-  const load = async () => { const r = await api.get("/moderation/users"); setUsers(r.data); };
+  const load = async () => {
+    const [u, r] = await Promise.all([api.get("/moderation/users"), api.get("/roles")]);
+    setUsers(u.data); setCustomRoles(r.data);
+  };
   useEffect(() => { load(); }, []);
 
   const filtered = users.filter((u) => {
@@ -184,6 +194,14 @@ function UsersTab({ currentRole }) {
     setIpLoading((s) => ({ ...s, [uid]: false }));
   };
 
+  const setCustomRole = async (uid, crid) => {
+    try {
+      await api.patch(`/moderation/users/${uid}/custom-role`, { custom_role_id: crid || null });
+      toast.success(crid ? "Custom role assigned" : "Custom role removed");
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
   return (
     <Card className="bg-[#14181f] border-white/10 text-white">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -207,6 +225,11 @@ function UsersTab({ currentRole }) {
                     u.role === "moderator" ? "bg-sky-500/15 text-sky-300 border-sky-500/40" :
                     "bg-white/5 text-slate-300 border-white/10"
                   }>{u.role}</Badge>
+                  {u.custom_role && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest font-semibold" style={{ color: u.custom_role.color, borderColor: u.custom_role.color + "66", background: u.custom_role.color + "22" }}>
+                      {u.custom_role.name}
+                    </span>
+                  )}
                   {u.ip_count > 0 && (
                     <span className="text-[10px] text-slate-500 uppercase tracking-widest">{u.ip_count} IP{u.ip_count !== 1 && "s"}</span>
                   )}
@@ -333,5 +356,192 @@ function UsersTab({ currentRole }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+
+function IpOverlapTab() {
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => { try { const r = await api.get("/moderation/ip-groups"); setGroups(r.data); } catch {} setLoading(false); })();
+  }, []);
+  return (
+    <Card className="bg-[#14181f] border-white/10 text-white">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Network className="w-5 h-5" /> Shared IP Addresses ({groups.length})</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? <div className="text-slate-500 text-sm">Loading...</div> : groups.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/10 bg-[#0d0f12] py-16 text-center text-slate-500 text-sm">
+            No IPs are shared by multiple accounts yet.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {groups.map((g) => (
+              <div key={g.ip} className="rounded-lg border border-white/10 bg-[#0d0f12] p-4" data-testid={`ip-group-${g.ip}`}>
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <div className="font-mono text-amber-400 text-lg">{g.ip}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{g.count} accounts sharing this address</div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {g.users.map((u) => (
+                    <Link to={`/user/${u.id}`} key={u.id} className="flex items-center gap-2 rounded-full bg-[#14181f] border border-white/10 pl-1 pr-3 py-1 hover:border-amber-500/40 hover:bg-amber-500/5 transition">
+                      <div className="w-6 h-6 rounded-full bg-[#1e2430] overflow-hidden flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
+                        {u.avatar_url ? <img src={fileUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" /> : (u.name?.[0] || "?")}
+                      </div>
+                      <span className="text-xs text-white">{u.name}</span>
+                      <span className="text-[10px] text-slate-500">{u.role}</span>
+                      {u.suspended_until && <Ban className="w-3 h-3 text-rose-400" />}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RolesTab() {
+  const [roles, setRoles] = useState([]);
+  const [permGroups, setPermGroups] = useState({});
+  const [editing, setEditing] = useState(null);
+  const empty = { name: "", color: "#f59e0b", description: "", permissions: [] };
+  const [form, setForm] = useState(empty);
+
+  const load = async () => {
+    const [r, p] = await Promise.all([api.get("/roles"), api.get("/roles/permissions")]);
+    setRoles(r.data); setPermGroups(p.data);
+  };
+  useEffect(() => { load(); }, []);
+
+  const togglePerm = (key) => {
+    setForm((f) => {
+      const has = f.permissions.includes(key);
+      return { ...f, permissions: has ? f.permissions.filter((p) => p !== key) : [...f.permissions, key] };
+    });
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editing) { await api.patch(`/roles/${editing.id}`, form); toast.success("Role updated"); }
+      else { await api.post("/roles", form); toast.success("Role created"); }
+      setEditing(null); setForm(empty); load();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this role? Users assigned to it will lose the badge.")) return;
+    try { await api.delete(`/roles/${id}`); toast.success("Deleted"); load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const derivedBase = (() => {
+    const perms = new Set(form.permissions);
+    if ([...perms].some((p) => ["user.assign_role", "user.assign_custom_role", "roles.manage"].includes(p))) return "admin";
+    if ([...perms].some((p) => ["content.delete","content.lock","user.suspend","user.view_ips","thread.moderate","comment.moderate","content.edit_locked"].includes(p))) return "moderator";
+    return "user";
+  })();
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Card className="bg-[#14181f] border-white/10 text-white">
+        <CardHeader><CardTitle>{editing ? "Edit Role" : "New Custom Role"}</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-4">
+            <div>
+              <label className="text-sm text-slate-300">Name</label>
+              <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Trusted Editor" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="role-name-input" />
+            </div>
+            <div>
+              <label className="text-sm text-slate-300">Badge color</label>
+              <div className="mt-1.5 flex items-center gap-2">
+                <input type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} className="w-12 h-10 rounded border border-white/10 bg-[#0d0f12] cursor-pointer" data-testid="role-color-input" />
+                <Input value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} className="bg-[#0d0f12] border-white/10 text-white font-mono text-xs" />
+                <span className="ml-auto text-[10px] px-2 py-1 rounded border uppercase tracking-widest font-semibold" style={{ color: form.color, borderColor: form.color + "66", background: form.color + "22" }}>
+                  {form.name || "Preview"}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm text-slate-300">Description</label>
+              <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional description" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" />
+            </div>
+
+            <div className="pt-2 border-t border-white/10">
+              <div className="flex items-baseline justify-between mb-2">
+                <label className="text-sm text-slate-300 font-semibold">Permissions</label>
+                <span className="text-[10px] uppercase tracking-widest text-slate-500">Derived tier: <span className={derivedBase === "admin" ? "text-rose-400" : derivedBase === "moderator" ? "text-sky-400" : "text-slate-400"}>{derivedBase}</span></span>
+              </div>
+              <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                {Object.entries(permGroups).map(([group, items]) => (
+                  items.length === 0 ? null : (
+                    <div key={group}>
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400 font-semibold mb-2">{group}</div>
+                      <div className="space-y-1.5">
+                        {items.map((p) => (
+                          <label key={p.key} className="flex items-start gap-3 rounded border border-white/10 bg-[#0d0f12] px-3 py-2 cursor-pointer hover:border-amber-500/40 transition">
+                            <input type="checkbox" checked={form.permissions.includes(p.key)} onChange={() => togglePerm(p.key)} className="mt-0.5 w-4 h-4 accent-amber-500" data-testid={`perm-${p.key}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-white">{p.label}</div>
+                              <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2">
+                                <span>{p.key}</span>
+                                <span className={p.tier === "admin" ? "text-rose-400" : "text-sky-400"}>{p.tier}</span>
+                              </div>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-white/10">
+              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="role-submit-btn">{editing ? "Update role" : "Create role"}</Button>
+              {editing && <Button type="button" variant="outline" onClick={() => { setEditing(null); setForm(empty); }} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-[#14181f] border-white/10 text-white">
+        <CardHeader><CardTitle>All Custom Roles ({roles.length})</CardTitle></CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {roles.map((r) => (
+              <div key={r.id} className="rounded-lg bg-[#0d0f12] border border-white/10 p-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] px-2 py-1 rounded border uppercase tracking-widest font-semibold" style={{ color: r.color, borderColor: r.color + "66", background: r.color + "22" }}>{r.name}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-slate-300 truncate">{r.description || <span className="text-slate-600">No description</span>}</div>
+                    <div className="text-xs text-slate-500">Tier: <span className={r.base === "admin" ? "text-rose-400" : r.base === "moderator" ? "text-sky-400" : ""}>{r.base}</span> • {r.permissions.length} permission{r.permissions.length !== 1 && "s"}</div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => { setEditing(r); setForm({ name: r.name, color: r.color, description: r.description || "", permissions: r.permissions || [] }); }} className="border-white/20 text-white hover:bg-white/10 hover:text-white">
+                    <Edit className="w-4 h-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => del(r.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"><Trash2 className="w-4 h-4" /></Button>
+                </div>
+                {r.permissions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {r.permissions.map((p) => (
+                      <span key={p} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-400">{p}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {roles.length === 0 && <div className="text-slate-500 text-sm">No custom roles yet.</div>}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

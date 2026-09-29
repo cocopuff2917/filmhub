@@ -128,7 +128,6 @@ async def get_current_user(request: Request) -> dict:
                 if until > datetime.now(timezone.utc):
                     raise HTTPException(status_code=403, detail=f"Account suspended until {sus}: {user.get('suspension_reason','')}")
                 else:
-                    # expired suspension, clear it
                     await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
                     user.pop("suspended_until", None)
                     user.pop("suspension_reason", None)
@@ -139,6 +138,40 @@ async def get_current_user(request: Request) -> dict:
         user["id"] = str(user["_id"])
         user.pop("_id", None)
         user.pop("password_hash", None)
+        # resolve custom role
+        custom_role = None
+        crid = user.get("custom_role_id")
+        if crid:
+            try:
+                cr = await db.custom_roles.find_one({"_id": ObjectId(crid)})
+                if cr:
+                    perms = cr.get("permissions", []) or []
+                    custom_role = {
+                        "id": str(cr["_id"]),
+                        "name": cr.get("name"),
+                        "color": cr.get("color", "#f59e0b"),
+                        "base": _derive_base(perms),
+                        "permissions": perms,
+                        "description": cr.get("description", ""),
+                    }
+            except Exception:
+                pass
+        user["custom_role"] = custom_role
+        # effective role = highest of system role + custom_role base
+        rank = {"user": 0, "moderator": 1, "admin": 2}
+        eff = user.get("role", "user")
+        if custom_role and rank.get(custom_role["base"], 0) > rank.get(eff, 0):
+            eff = custom_role["base"]
+        user["effective_role"] = eff
+        # effective permissions
+        eff_perms = set()
+        if user.get("role") == "admin" or eff == "admin":
+            eff_perms = set(PERMISSIONS_ALL)
+        elif user.get("role") == "moderator" or eff == "moderator":
+            eff_perms = set(PERMS_MODERATOR)
+        if custom_role:
+            eff_perms.update(custom_role.get("permissions") or [])
+        user["permissions"] = sorted(eff_perms)
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -146,12 +179,12 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_current_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
+    if user.get("effective_role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
 async def get_current_moderator(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") not in ("moderator", "admin"):
+    if user.get("effective_role") not in ("moderator", "admin"):
         raise HTTPException(status_code=403, detail="Moderator access required")
     return user
 
@@ -312,6 +345,45 @@ class ThreadStatusUpdate(BaseModel):
 # ----------- Locks -----------
 class LockUpdate(BaseModel):
     locked_fields: List[str]
+
+# ----------- Custom Roles -----------
+PERMISSIONS_ALL = [
+    "content.edit_locked",
+    "content.delete",
+    "content.lock",
+    "user.suspend",
+    "user.view_ips",
+    "user.assign_role",
+    "user.assign_custom_role",
+    "thread.moderate",
+    "comment.moderate",
+    "roles.manage",
+]
+PERMS_MODERATOR = {"content.delete", "content.lock", "user.suspend", "user.view_ips", "thread.moderate", "comment.moderate", "content.edit_locked"}
+PERMS_ADMIN = {"user.assign_role", "user.assign_custom_role", "roles.manage"}
+
+def _derive_base(permissions: List[str]) -> str:
+    perms = set(permissions or [])
+    if perms & PERMS_ADMIN:
+        return "admin"
+    if perms & PERMS_MODERATOR:
+        return "moderator"
+    return "user"
+
+class RoleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    color: str = "#f59e0b"
+    description: str = ""
+    permissions: List[str] = []
+
+class RolePatch(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    description: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+class AssignRole(BaseModel):
+    custom_role_id: Optional[str] = None
 
 # ----------- Utility -----------
 def doc_to_dict(doc, id_key="id"):
@@ -549,6 +621,8 @@ async def me(user: dict = Depends(get_current_user)):
         "email": user.get("email"),
         "name": user.get("name"),
         "role": user.get("role", "user"),
+        "effective_role": user.get("effective_role", user.get("role", "user")),
+        "custom_role": user.get("custom_role"),
         "avatar_url": user.get("avatar_url", ""),
         "created_at": user.get("created_at"),
     }
@@ -560,36 +634,57 @@ async def update_avatar(payload: AvatarUpdate, user: dict = Depends(get_current_
 
 # ----------- Users (Public) -----------
 @api_router.get("/users/{user_id}")
-async def get_user_profile(user_id: str):
+async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     try:
         u = await db.users.find_one({"_id": ObjectId(user_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="User not found")
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
+    # Determine active suspension
+    sus = u.get("suspended_until")
+    active_sus = False
+    if sus == "permanent":
+        active_sus = True
+    elif sus:
+        try:
+            if datetime.fromisoformat(sus) > datetime.now(timezone.utc):
+                active_sus = True
+        except Exception:
+            pass
+
+    viewer_is_mod = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
+    viewer_is_self = bool(viewer and viewer.get("id") == str(u["_id"]))
+
+    # Hide suspended profiles from non-mods (and non-self)
+    if active_sus and not viewer_is_mod and not viewer_is_self:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # resolve custom role
+    custom_role = None
+    crid = u.get("custom_role_id")
+    if crid:
+        try:
+            cr = await db.custom_roles.find_one({"_id": ObjectId(crid)})
+            if cr:
+                _perms = cr.get("permissions", []) or []
+                custom_role = {"id": str(cr["_id"]), "name": cr.get("name"), "color": cr.get("color", "#f59e0b"), "base": _derive_base(_perms)}
+        except Exception:
+            pass
     profile = {
         "id": str(u["_id"]),
         "name": u.get("name"),
         "avatar_url": u.get("avatar_url", ""),
         "role": u.get("role", "user"),
+        "custom_role": custom_role,
         "created_at": u.get("created_at"),
+        "is_suspended": False,
     }
-    sus = u.get("suspended_until")
-    if sus:
+    # Only expose suspension details to moderators (or self)
+    if active_sus and (viewer_is_mod or viewer_is_self):
+        profile["is_suspended"] = True
         profile["suspended_until"] = sus
         profile["suspension_reason"] = u.get("suspension_reason", "")
-        active_suspension = False
-        if sus == "permanent":
-            active_suspension = True
-        else:
-            try:
-                if datetime.fromisoformat(sus) > datetime.now(timezone.utc):
-                    active_suspension = True
-            except Exception:
-                pass
-        profile["is_suspended"] = active_suspension
-    else:
-        profile["is_suspended"] = False
 
     # recent edits (last 30)
     edits = []
@@ -614,7 +709,182 @@ async def get_user_profile(user_id: str):
             pass
         reviews.append(r)
     profile["reviews"] = reviews
+
+    # edit stats
+    total = await db.edits.count_documents({"user_id": str(u["_id"])})
+    profile["edit_count"] = total
+    # by action
+    breakdown = {}
+    async for row in db.edits.aggregate([
+        {"$match": {"user_id": str(u["_id"])}},
+        {"$group": {"_id": "$action", "count": {"$sum": 1}}},
+    ]):
+        breakdown[row["_id"]] = row["count"]
+    profile["edit_breakdown"] = breakdown
+    # by entity type
+    by_type = {}
+    async for row in db.edits.aggregate([
+        {"$match": {"user_id": str(u["_id"])}},
+        {"$group": {"_id": "$entity_type", "count": {"$sum": 1}}},
+    ]):
+        by_type[row["_id"]] = row["count"]
+    profile["edit_by_type"] = by_type
+    # weekly (current week Monday 00:00 UTC)
+    now = datetime.now(timezone.utc)
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    profile["weekly_edit_count"] = await db.edits.count_documents({
+        "user_id": str(u["_id"]),
+        "created_at": {"$gte": week_start.isoformat()},
+    })
+    profile["week_starts_at"] = week_start.isoformat()
+
     return profile
+
+# ----------- Leaderboard -----------
+@api_router.get("/leaderboard")
+async def leaderboard(limit: int = 10):
+    """Top contributors this week (Monday 00:00 UTC to now)."""
+    now = datetime.now(timezone.utc)
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    pipeline = [
+        {"$match": {"created_at": {"$gte": week_start.isoformat()}}},
+        {"$group": {
+            "_id": "$user_id",
+            "count": {"$sum": 1},
+            "user_name": {"$last": "$user_name"},
+            "user_avatar": {"$last": "$user_avatar"},
+            "user_role": {"$last": "$user_role"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]
+    top = []
+    async for row in db.edits.aggregate(pipeline):
+        top.append({
+            "user_id": row["_id"],
+            "user_name": row.get("user_name"),
+            "user_avatar": row.get("user_avatar", ""),
+            "user_role": row.get("user_role", "user"),
+            "count": row["count"],
+        })
+    # attach custom_role for each user and filter out suspended
+    now_dt = datetime.now(timezone.utc)
+    def _is_active_sus(u):
+        s = u.get("suspended_until")
+        if not s: return False
+        if s == "permanent": return True
+        try: return datetime.fromisoformat(s) > now_dt
+        except Exception: return False
+    if top:
+        ids = []
+        for t in top:
+            if t["user_id"]:
+                try: ids.append(ObjectId(t["user_id"]))
+                except Exception: pass
+        users_map = {}
+        async for u in db.users.find({"_id": {"$in": ids}}):
+            users_map[str(u["_id"])] = u
+        filtered = []
+        for t in top:
+            u = users_map.get(t["user_id"])
+            if u and _is_active_sus(u):
+                continue  # hide suspended users from public leaderboard
+            if u and u.get("custom_role_id"):
+                try:
+                    cr = await db.custom_roles.find_one({"_id": ObjectId(u["custom_role_id"])})
+                    if cr:
+                        t["custom_role"] = {"name": cr.get("name"), "color": cr.get("color", "#f59e0b")}
+                except Exception:
+                    pass
+            filtered.append(t)
+        top = filtered
+    return {
+        "week_starts_at": week_start.isoformat(),
+        "next_reset_at": (week_start + timedelta(days=7)).isoformat(),
+        "top": top,
+    }
+
+# ----------- Custom Roles -----------
+@api_router.get("/roles/permissions")
+async def list_permissions():
+    """Return available permission keys with human labels."""
+    labels = {
+        "content.edit_locked": "Edit fields locked by moderators",
+        "content.delete": "Delete movies / series / actors",
+        "content.lock": "Lock / unlock fields on content",
+        "user.suspend": "Suspend and unsuspend accounts",
+        "user.view_ips": "View user IPs and shared accounts",
+        "user.assign_role": "Change users' system roles",
+        "user.assign_custom_role": "Assign custom roles to users",
+        "thread.moderate": "Close / reopen / delete threads",
+        "comment.moderate": "Delete any comment on content",
+        "roles.manage": "Create, edit and delete custom roles",
+    }
+    # group by category for UI
+    groups = {"Content": [], "Users": [], "Community": [], "Admin": []}
+    for k in PERMISSIONS_ALL:
+        item = {"key": k, "label": labels.get(k, k), "tier": "admin" if k in PERMS_ADMIN else "moderator" if k in PERMS_MODERATOR else "user"}
+        if k.startswith("content."): groups["Content"].append(item)
+        elif k.startswith("user."): groups["Users"].append(item)
+        elif k.startswith("thread.") or k.startswith("comment."): groups["Community"].append(item)
+        else: groups["Admin"].append(item)
+    return groups
+
+@api_router.get("/roles")
+async def list_roles():
+    roles = []
+    async for r in db.custom_roles.find({}).sort("name", 1):
+        perms = r.get("permissions", []) or []
+        roles.append({
+            "id": str(r["_id"]),
+            "name": r.get("name"),
+            "base": _derive_base(perms),
+            "permissions": perms,
+            "color": r.get("color", "#f59e0b"),
+            "description": r.get("description", ""),
+        })
+    return roles
+
+@api_router.post("/roles")
+async def create_role(payload: RoleCreate, admin: dict = Depends(get_current_admin)):
+    perms = [p for p in payload.permissions if p in PERMISSIONS_ALL]
+    doc = {"name": payload.name, "permissions": perms, "color": payload.color, "description": payload.description, "created_at": datetime.now(timezone.utc).isoformat()}
+    r = await db.custom_roles.insert_one(doc)
+    return {"id": str(r.inserted_id), "name": payload.name, "permissions": perms, "base": _derive_base(perms), "color": payload.color, "description": payload.description}
+
+@api_router.patch("/roles/{role_id}")
+async def update_role(role_id: str, payload: RolePatch, admin: dict = Depends(get_current_admin)):
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "permissions" in data:
+        data["permissions"] = [p for p in data["permissions"] if p in PERMISSIONS_ALL]
+    await db.custom_roles.update_one({"_id": ObjectId(role_id)}, {"$set": data})
+    r = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
+    perms = r.get("permissions", []) or []
+    return {"id": str(r["_id"]), "name": r.get("name"), "permissions": perms, "base": _derive_base(perms), "color": r.get("color"), "description": r.get("description", "")}
+
+@api_router.delete("/roles/{role_id}")
+async def delete_role(role_id: str, admin: dict = Depends(get_current_admin)):
+    await db.custom_roles.delete_one({"_id": ObjectId(role_id)})
+    await db.users.update_many({"custom_role_id": role_id}, {"$unset": {"custom_role_id": ""}})
+    return {"ok": True}
+
+@api_router.patch("/moderation/users/{user_id}/custom-role")
+async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = Depends(get_current_admin)):
+    if payload.custom_role_id:
+        try:
+            cr = await db.custom_roles.find_one({"_id": ObjectId(payload.custom_role_id)})
+        except Exception:
+            cr = None
+        if not cr:
+            raise HTTPException(status_code=404, detail="Custom role not found")
+        await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"custom_role_id": payload.custom_role_id}})
+        label = cr.get("name")
+    else:
+        await db.users.update_one({"_id": ObjectId(user_id)}, {"$unset": {"custom_role_id": ""}})
+        label = "(none)"
+    target = await db.users.find_one({"_id": ObjectId(user_id)})
+    await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Custom role: {label}")
+    return {"ok": True}
 
 # ----------- Edits Feed -----------
 @api_router.get("/edits")
@@ -727,11 +997,21 @@ async def get_user_ips(user_id: str, mod: dict = Depends(get_current_moderator))
 async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int = 200):
     users = []
     async for u in db.users.find({}).sort("created_at", -1).limit(limit):
+        cr = None
+        if u.get("custom_role_id"):
+            try:
+                _cr = await db.custom_roles.find_one({"_id": ObjectId(u["custom_role_id"])})
+                if _cr:
+                    _perms = _cr.get("permissions", []) or []
+                    cr = {"id": str(_cr["_id"]), "name": _cr.get("name"), "color": _cr.get("color", "#f59e0b"), "base": _derive_base(_perms), "permissions": _perms}
+            except Exception:
+                pass
         users.append({
             "id": str(u["_id"]),
             "email": u.get("email"),
             "name": u.get("name"),
             "role": u.get("role", "user"),
+            "custom_role": cr,
             "avatar_url": u.get("avatar_url", ""),
             "created_at": u.get("created_at"),
             "suspended_until": u.get("suspended_until"),

@@ -28,7 +28,10 @@ export default function UserProfile() {
 
   const load = async () => {
     try { const r = await api.get(`/users/${id}`); setProfile(r.data); }
-    catch { setProfile({ notFound: true }); }
+    catch (e) {
+      if (e.response?.status === 404) setProfile({ notFound: true });
+      else setProfile({ notFound: true });
+    }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
@@ -68,25 +71,51 @@ export default function UserProfile() {
               <div className="text-xs uppercase tracking-widest text-amber-400 font-semibold">Member Profile</div>
               <h1 className="mt-2 font-display text-5xl sm:text-6xl tracking-tight text-white" data-testid="user-name">{profile.name}</h1>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Badge className={roleColor} data-testid="user-role">
-                  {profile.role === "admin" && <Shield className="w-3 h-3 mr-1" />}
-                  {profile.role === "moderator" && <Shield className="w-3 h-3 mr-1" />}
-                  {profile.role}
-                </Badge>
+                {profile.custom_role ? (
+                  <span
+                    className="text-xs px-2 py-1 rounded border uppercase tracking-widest font-semibold"
+                    style={{ color: profile.custom_role.color, borderColor: profile.custom_role.color + "66", background: profile.custom_role.color + "22" }}
+                    data-testid="user-custom-role"
+                  >
+                    {profile.custom_role.name}
+                  </span>
+                ) : (
+                  <Badge className={roleColor} data-testid="user-role">
+                    {profile.role === "admin" && <Shield className="w-3 h-3 mr-1" />}
+                    {profile.role === "moderator" && <Shield className="w-3 h-3 mr-1" />}
+                    {profile.role}
+                  </Badge>
+                )}
+                {profile.edit_count > 0 && (
+                  <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/40" data-testid="user-edit-count">
+                    <EditIcon className="w-3 h-3 mr-1" /> {profile.edit_count} edit{profile.edit_count !== 1 && "s"}
+                  </Badge>
+                )}
+                {profile.weekly_edit_count > 0 && (
+                  <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/40" data-testid="user-weekly-count">
+                    {profile.weekly_edit_count} this week
+                  </Badge>
+                )}
                 {profile.is_suspended && (
                   <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/40" data-testid="user-suspended-badge">
                     <Ban className="w-3 h-3 mr-1" /> Suspended
-                    {profile.suspended_until !== "permanent" && profile.suspended_until && ` until ${profile.suspended_until.slice(0, 10)}`}
-                    {profile.suspended_until === "permanent" && " (permanent)"}
                   </Badge>
                 )}
                 <span className="text-xs text-slate-500">Joined {timeAgo(profile.created_at)}</span>
               </div>
 
               {profile.is_suspended && (
-                <div className="mt-4 rounded-lg bg-rose-500/10 border border-rose-500/30 p-4 text-sm text-rose-200">
+                <div className="mt-4 rounded-lg bg-rose-500/10 border border-rose-500/30 p-4 text-sm text-rose-200" data-testid="user-suspended-panel">
                   <div className="font-semibold mb-1">This account is currently suspended.</div>
-                  {profile.suspension_reason && <div className="text-rose-300/80">Reason: {profile.suspension_reason}</div>}
+                  {profile.suspension_reason && (
+                    <div className="text-rose-300/80">Reason: {profile.suspension_reason}</div>
+                  )}
+                  {profile.suspended_until === "permanent"
+                    ? <div className="text-rose-300/80 text-xs mt-1">Duration: permanent</div>
+                    : profile.suspended_until
+                    ? <div className="text-rose-300/80 text-xs mt-1">Until: {profile.suspended_until.slice(0, 19).replace("T", " ")}</div>
+                    : null}
+                  <div className="mt-2 text-xs text-slate-400">Only moderators and the user themselves can see this panel.</div>
                 </div>
               )}
 
@@ -139,6 +168,39 @@ export default function UserProfile() {
           </div>
         )}
       </section>
+
+      {/* Edit stats */}
+      {profile.edit_count > 0 && (
+        <section className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6" data-testid="user-edit-stats">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
+              <div className="text-xs uppercase tracking-widest text-slate-500">Total edits</div>
+              <div className="mt-1 font-display text-3xl text-amber-400">{profile.edit_count}</div>
+            </div>
+            <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
+              <div className="text-xs uppercase tracking-widest text-slate-500">This week</div>
+              <div className="mt-1 font-display text-3xl text-emerald-400">{profile.weekly_edit_count || 0}</div>
+            </div>
+            <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
+              <div className="text-xs uppercase tracking-widest text-slate-500">Created</div>
+              <div className="mt-1 font-display text-3xl text-sky-400">{profile.edit_breakdown?.create || 0}</div>
+            </div>
+            <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
+              <div className="text-xs uppercase tracking-widest text-slate-500">Updated</div>
+              <div className="mt-1 font-display text-3xl text-white">{profile.edit_breakdown?.update || 0}</div>
+            </div>
+          </div>
+          {profile.edit_by_type && Object.keys(profile.edit_by_type).length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(profile.edit_by_type).map(([k, v]) => (
+                <div key={k} className="rounded-full bg-[#14181f] border border-white/10 px-3 py-1 text-xs text-slate-300">
+                  <span className="text-slate-500 uppercase tracking-widest">{k}s</span> <span className="text-white font-semibold ml-1">{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Edit history */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">

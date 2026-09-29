@@ -6,6 +6,7 @@ import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Sparkles, TrendingUp, Clock, Tv, Rocket } from "lucide-react";
+import Leaderboard from "@/components/Leaderboard";
 
 export default function Home() {
   const [trending, setTrending] = useState([]);
@@ -93,6 +94,9 @@ export default function Home() {
         emptyText="No trending movies yet. Mark movies as trending to feature them."
         testid="trending-section"
       />
+
+      {/* Weekly leaderboard */}
+      <Leaderboard />
 
       {/* Upcoming */}
       {upcoming.length > 0 && (
