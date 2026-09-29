@@ -1,36 +1,30 @@
-# CineVerse — Movie Database
+# CineVerse — Movie & TV Series Database (PRD)
 
-## Original Problem
-Build a movie database web app: hero + search, Trending & Recently Added grids, Movie Detail page (title, release, rating, genres, synopsis, Cast & Crew, media gallery), Actor Detail page with filmography, dark IMDb/TMDB aesthetic.
+## Original Problem Statement
+Build a modern movie database web app (IMDb/TMDB style, dark mode) with Home, Movie Detail, Actor Detail, global search, and admin panel. Extended with TV Series (seasons/episodes/guest stars), granular custom roles, moderation (IP tracking, suspensions, field locking), discussions, reports, edit history, image galleries, user profiles, similar-content suggestions, leaderboard.
 
-## User Choices
-- Empty DB with admin panel (no seeds)
-- IMDb/TMDB style dark UI, warm amber accents
-- Auth for rating/reviews
-- Watchlist + Filter/sort included
+## Tech Stack
+- Backend: FastAPI + MongoDB (`server.py` monolith, PyObjectId models)
+- Frontend: React + Tailwind + Shadcn UI (dark theme)
+- Auth: JWT cookie-based (httpOnly, SameSite=None)
 
-## Architecture
-- Backend: FastAPI + MongoDB (motor), JWT httpOnly cookies, bcrypt, Emergent Object Storage
-- Frontend: React 19 + react-router, shadcn/ui, Tailwind, sonner
-- Admin auto-seeded from ADMIN_EMAIL/ADMIN_PASSWORD
+## Implemented
+- Auth (register/login/me/logout), custom roles with granular permissions
+- Movies, TV Series (seasons/episodes/guest stars), Actors — full CRUD
+- Admin panel: Users, Roles, IP Overlap, Movies, Series, Actors tabs
+- Moderation: IP tracking, account suspensions (hidden from public), field locking
+- Discussions, forum threads, Report a Problem
+- Edit history with field diffs, image galleries, similar content, leaderboard
+- Suspended users hidden from public profile & leaderboard
 
-## Implemented (2026-02-28)
-- Auth: register, login, logout, /me with cookie sessions
-- Movies CRUD (admin), search (title/genre/actor), filter (genre/year/sort), trending, recent, genres list
-- Actors CRUD (admin), actor detail with linked filmography (character names shown)
-- Reviews (upsert per user/movie), avg_rating aggregation
-- Watchlist add/remove/list
-- Image upload via Emergent Object Storage → /api/files/{path}
-- Admin panel UI with poster/headshot upload, cast picker
-- Pages: Home, Browse, MovieDetail, ActorDetail, Login, Register, Watchlist, Admin
-- Actor page shows Born date + computed age
+## Fixed 2026-09-29
+- IP Overlap tab crashed with "Link is not defined" — added missing `Link` import in `Admin.jsx`.
 
-## Backlog
-- P1: Nested review edit/delete UI; reply/thread
-- P1: TMDB import-by-ID helper for admin
-- P2: Real trailer embed (YouTube iframe)
-- P2: Bulk poster upload / drag&drop
-- P2: Public user profile page
+## Backlog (P1/P2)
+- P1: Watchlist & Favorites end-to-end verification
+- P1: Advanced filtering/sorting on Browse (genre, year, rating)
+- P2: Actor `place_of_birth` / `place_of_death` fields + UI
+- P2: Refactor `server.py` into APIRouter modules once it exceeds current size
 
 ## Credentials
-See /app/memory/test_credentials.md
+- Admin: admin@cineverse.com / Admin@123
