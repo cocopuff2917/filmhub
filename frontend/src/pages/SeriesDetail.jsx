@@ -75,12 +75,23 @@ function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
                 </div>
                 {ep.overview && <p className="mt-1 text-sm text-slate-400 line-clamp-3">{ep.overview}</p>}
                 {(ep.guest_stars || []).length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {(ep.guest_stars || []).map((g, gi) => (
-                      <span key={gi} className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300">
-                        {g.actor?.name || "?"}{g.character_name ? ` as ${g.character_name}` : ""}
-                      </span>
-                    ))}
+                  <div className="mt-3" data-testid={`guest-stars-${season.season_number}-${ep.episode_number}`}>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-400 font-semibold mb-1.5">Guest Stars</div>
+                    <div className="flex flex-wrap gap-2">
+                      {(ep.guest_stars || []).map((g, gi) => (
+                        <Link
+                          to={g.actor?.id ? `/actor/${g.actor.id}` : "#"}
+                          key={gi}
+                          className="flex items-center gap-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 pl-1 pr-2.5 py-1 transition group"
+                        >
+                          <div className="w-6 h-6 rounded-full overflow-hidden bg-[#1e2430] flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
+                            {g.actor?.photo_url ? <img src={fileUrl(g.actor.photo_url)} alt="" className="w-full h-full object-cover" /> : (g.actor?.name?.[0] || "?")}
+                          </div>
+                          <span className="text-xs text-slate-200 group-hover:text-amber-400 font-medium">{g.actor?.name || "Unknown"}</span>
+                          {g.character_name && <span className="text-xs text-slate-500">as {g.character_name}</span>}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
