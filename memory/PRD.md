@@ -36,6 +36,10 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - Public list/detail/search endpoints (movies, series, actors, similar, watchlist, actor-page cross-refs) now filter via helper `_alive(q)` which merges `{"deleted": {"$ne": True}}` into any query. Detail endpoints return 404 for anonymous / regular users; moderators & admins still see the deleted doc via `Optional[dict] = Depends(get_optional_user)`.
   - New endpoints: `GET /api/moderation/trash` (grouped movies/series/actors), `POST /api/moderation/{kind}/{id}/restore` (moderator+), `DELETE /api/moderation/{kind}/{id}/purge` (admin only — hard delete + review cascade for movies).
   - Admin panel now has a **Trash** tab with poster thumbnails, deletion metadata, "Restore" (green) and admin-only "Delete forever" (rose). Verified end-to-end via curl (soft-delete hides from list, 404 for anon, 200 for admin, trash entry present, restore returns to list) + UI walkthrough (delete → Trash shows 1 → Restore → toast + empty state).
+- **Auto-lift expired suspensions via platform cron** (2026-09-29 last-last):
+  - New scheduled task `.emergent/crons.yml` runs `POST /api/cron/lift-suspensions` every 15 minutes.
+  - Endpoint requires `Authorization: Bearer $WEBHOOK_CRON_SECRET` (constant-time compare via `hmac.compare_digest`), idempotent via `X-Webhook-Id` stored in `cron_runs`. Kicks off `asyncio.create_task(_lift_expired_suspensions())` which runs `db.users.update_many({"suspended_until": {"$ne": "permanent", "$lt": now_iso}}, $unset)` and immediately returns 200.
+  - Verified: expired temporary suspension lifted, permanent + future suspensions preserved, 401 without/wrong auth, duplicate replay returns `{duplicate: true}`, previously suspended user now `is_suspended:False` on next login.
 
 ## Backlog (P1/P2)
 - P1: Drag-to-reorder for crew, creators, and season/episode lists

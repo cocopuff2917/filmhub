@@ -1,0 +1,8 @@
+crons:
+  - name: lift-suspensions
+    description: "Auto-lifts expired user suspensions every 15 minutes"
+    cron: "*/15 * * * *"
+    endpoint: "{{BASE_URL}}/api/cron/lift-suspensions"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

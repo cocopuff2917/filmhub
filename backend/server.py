@@ -11,6 +11,7 @@ import bcrypt
 import jwt
 import requests
 import secrets
+import hmac
 import re
 import ipaddress
 import httpx
@@ -2709,6 +2710,50 @@ async def purge_entity(kind: str, entity_id: str, admin: dict = Depends(get_curr
         await db.reviews.delete_many({"movie_id": entity_id})
     await log_edit(admin, kind, entity_id, "purge", label, f"Permanently deleted {kind} \"{label}\"")
     return {"ok": True}
+
+# ----------- Scheduled: auto-lift expired suspensions -----------
+async def _lift_expired_suspensions() -> int:
+    """Unset suspension fields for any user whose temporary suspension has elapsed."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    res = await db.users.update_many(
+        {
+            "suspended_until": {"$exists": True, "$ne": "permanent", "$lt": now_iso},
+        },
+        {"$unset": {"suspended_until": "", "suspension_reason": "", "suspended_by": "", "suspended_by_name": "", "suspended_at": ""}},
+    )
+    return res.modified_count
+
+def _verify_cron_auth(authorization: Optional[str]) -> None:
+    secret = os.environ.get("WEBHOOK_CRON_SECRET") or ""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization[7:]
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+@api_router.post("/cron/lift-suspensions")
+async def cron_lift_suspensions(request: Request, authorization: Optional[str] = Header(default=None)):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    _verify_cron_auth(authorization)
+    run_id = request.headers.get("X-Webhook-Id") or ""
+    if run_id:
+        try:
+            already = await db.cron_runs.find_one({"run_id": run_id, "job": "lift-suspensions"})
+        except Exception:
+            already = None
+        if already:
+            return {"ok": True, "duplicate": True}
+        try:
+            await db.cron_runs.insert_one({
+                "run_id": run_id,
+                "job": "lift-suspensions",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+    import asyncio
+    asyncio.create_task(_lift_expired_suspensions())
+    return {"ok": True, "queued": True}
 
 # ----------- Reviews -----------
 @api_router.post("/movies/{movie_id}/reviews")
