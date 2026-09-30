@@ -568,6 +568,27 @@ def _alive(q: Optional[dict] = None) -> dict:
         return base
     return {"$and": [base, q]}
 
+def _dedupe_cast(rows):
+    """Keep the first occurrence of each actor_id in a cast/main_cast/guest_stars list.
+    Rejects duplicates so an actor can't appear twice in the same movie/series/episode."""
+    if not rows:
+        return rows
+    seen = set()
+    out = []
+    for r in rows:
+        d = r if isinstance(r, dict) else r.model_dump()
+        aid = d.get("actor_id")
+        if not aid:
+            continue
+        if aid in seen:
+            continue
+        seen.add(aid)
+        out.append(d)
+    return out
+
+def _norm_title(s: str) -> str:
+    return (s or "").strip().lower()
+
 def doc_to_dict(doc, id_key="id"):
     if not doc:
         return doc
@@ -1948,7 +1969,20 @@ async def ip_overlap_groups(mod: dict = Depends(get_current_moderator)):
 @api_router.post("/movies")
 async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_user)):
     doc = payload.model_dump()
-    doc["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in doc.get("cast", [])]
+    # Duplicate guard: same normalized title + same release date (case + whitespace insensitive)
+    title_clean = (doc.get("title") or "").strip()
+    if title_clean:
+        existing = await db.movies.find_one(_alive({
+            "title": {"$regex": f"^\\s*{re.escape(title_clean)}\\s*$", "$options": "i"},
+            "release_date": doc.get("release_date") or "",
+        }))
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A movie with the same title and release date already exists (id={str(existing['_id'])}).",
+            )
+    doc["title"] = title_clean
+    doc["cast"] = _dedupe_cast(doc.get("cast", []))
     doc["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in doc.get("crew", [])]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
@@ -2228,7 +2262,7 @@ def _check_locks(old_doc: dict, update_data: dict, user: dict, action: str = "ed
 async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "cast" in update_data:
-        update_data["cast"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["cast"]]
+        update_data["cast"] = _dedupe_cast(update_data["cast"])
     if "crew" in update_data:
         update_data["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["crew"]]
     old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
@@ -2280,7 +2314,7 @@ async def delete_movie(movie_id: str, user: dict = Depends(get_current_moderator
 # ----------- Series -----------
 def _serialize_series_payload(data: dict) -> dict:
     if "main_cast" in data and data["main_cast"] is not None:
-        data["main_cast"] = [c if isinstance(c, dict) else c.model_dump() for c in data["main_cast"]]
+        data["main_cast"] = _dedupe_cast(data["main_cast"])
     if "creators" in data and data["creators"] is not None:
         data["creators"] = [c if isinstance(c, dict) else c.model_dump() for c in data["creators"]]
     if "seasons" in data and data["seasons"] is not None:
@@ -2290,8 +2324,7 @@ def _serialize_series_payload(data: dict) -> dict:
             eps = []
             for ep in s.get("episodes", []) or []:
                 ep = ep if isinstance(ep, dict) else ep.model_dump()
-                gs = [(g if isinstance(g, dict) else g.model_dump()) for g in ep.get("guest_stars", []) or []]
-                ep["guest_stars"] = gs
+                ep["guest_stars"] = _dedupe_cast(ep.get("guest_stars", []) or [])
                 eps.append(ep)
             s["episodes"] = eps
             out_seasons.append(s)
@@ -2301,6 +2334,19 @@ def _serialize_series_payload(data: dict) -> dict:
 @api_router.post("/series")
 async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_user)):
     doc = _serialize_series_payload(payload.model_dump())
+    # Duplicate guard: same normalized title + same first_air_date (case + whitespace insensitive)
+    title_clean = (doc.get("title") or "").strip()
+    if title_clean:
+        existing = await db.series.find_one(_alive({
+            "title": {"$regex": f"^\\s*{re.escape(title_clean)}\\s*$", "$options": "i"},
+            "first_air_date": doc.get("first_air_date") or "",
+        }))
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A TV series with the same title and first-air date already exists (id={str(existing['_id'])}).",
+            )
+    doc["title"] = title_clean
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
     result = await db.series.insert_one(doc)
@@ -2608,6 +2654,17 @@ async def search_suggest(q: str, limit: int = 6):
 @api_router.post("/actors")
 async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_user)):
     doc = payload.model_dump()
+    name = (doc.get("name") or "").strip()
+    if name:
+        existing = await db.actors.find_one(_alive({
+            "name": {"$regex": f"^\\s*{re.escape(name)}\\s*$", "$options": "i"},
+        }))
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"An actor named \"{existing.get('name')}\" already exists (id={str(existing['_id'])}).",
+            )
+    doc["name"] = name
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
     result = await db.actors.insert_one(doc)

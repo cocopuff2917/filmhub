@@ -290,6 +290,16 @@ export default function MovieEdit() {
     save(nextForm);
   };
   const handleCastSave = (row) => {
+    // Prevent duplicates: if adding (index==null) and this actor is already in the list, error out.
+    if (castDialog.index == null && (form.cast || []).some((c) => c.actor_id === row.actor_id)) {
+      toast.error("This actor is already in the cast.");
+      return;
+    }
+    // When editing, allow the row but block collisions with other rows.
+    if (castDialog.index != null && (form.cast || []).some((c, x) => x !== castDialog.index && c.actor_id === row.actor_id)) {
+      toast.error("Another cast row is already using this actor.");
+      return;
+    }
     const nextCast = castDialog.index == null
       ? [...form.cast, row]
       : form.cast.map((c, x) => x === castDialog.index ? row : c);

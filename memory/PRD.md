@@ -57,6 +57,21 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - Purge cascade extended: hard-delete of a series now clears `db.reviews.delete_many({"series_id": id})` too.
   - User profile split: `avg_movie_rating` / `total_movie_ratings` + new `avg_series_rating` / `total_series_ratings` (both scaled 0–100), plus combined `total_ratings`. Verified via curl (mixed movie+series ratings tally correctly).
   - Frontend: `SeriesDetail.jsx` now has a "Reviews" tab (default) alongside "Discussions", identical UX to MovieDetail — rating slider + optional text + Submit → toast + list re-render + `avg_rating` on the score pill.
+- **De-duplication guards** (2026-09-29 evening):
+  - `POST /api/movies`: 409 conflict if `(title, release_date)` matches an existing non-deleted movie. Title compared case + whitespace insensitively via `^\s*{escaped}\s*$` regex. Response includes the existing id.
+  - `POST /api/series`: same for `(title, first_air_date)`.
+  - `POST /api/actors`: 409 conflict if a same-name (case + whitespace insensitive) actor already exists.
+  - Titles are stored trimmed on create; also ran a one-time sweep to trim existing rows.
+  - `_dedupe_cast(rows)` helper keeps the first occurrence of each `actor_id` in a cast/main_cast/guest_stars list. Applied on:
+    - `POST /api/movies` and `PATCH /api/movies/{id}` (cast)
+    - `POST /api/series` and `PATCH /api/series/{id}` (main_cast + each episode's guest_stars)
+  - Frontend `MovieEdit.handleCastSave` / `SeriesEdit.handleCastSave` / `SeriesEdit.handleGuestSave` now show a friendly `toast.error` when the user tries to add an actor who's already in the list, instead of silently dropping the row.
+  - Verified: all four duplicate paths return 409; PATCH with `[{actor_id:X},{actor_id:X}]` collapses to a single cast row; whitespace/case variants blocked.
+- **Known open items** (from search-bar iteration_4 test report):
+  - Suspended user still sees the global search input — Navbar guard needs verifying.
+  - Frontend receives 0 rows for a query where curl returns rows — likely 401 on `/api/search/suggest` from the browser; response shape parity or `withCredentials` timing.
+  - Empty-state copy shows "Searching…" for a beat instead of "No results…"; `loading` state not reset in a finally.
+  - Clear (X) button hidden when in the buggy loading state — will reappear once loading fix lands.
 
 ## Backlog (P1/P2)
 - P1: Drag-to-reorder for crew, creators, and season/episode lists

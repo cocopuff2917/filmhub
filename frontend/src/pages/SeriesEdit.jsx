@@ -289,6 +289,14 @@ export default function SeriesEdit() {
     save(nextForm);
   };
   const handleCastSave = (row) => {
+    if (castDialog.index == null && (form.main_cast || []).some((c) => c.actor_id === row.actor_id)) {
+      toast.error("This actor is already in the main cast.");
+      return;
+    }
+    if (castDialog.index != null && (form.main_cast || []).some((c, x) => x !== castDialog.index && c.actor_id === row.actor_id)) {
+      toast.error("Another main-cast row is already using this actor.");
+      return;
+    }
     const nextCast = castDialog.index == null
       ? [...form.main_cast, row]
       : form.main_cast.map((c, x) => x === castDialog.index ? row : c);
@@ -336,6 +344,15 @@ export default function SeriesEdit() {
   }));
   const handleGuestSave = (row) => {
     const { sIdx, eIdx, gIdx } = guestDialog;
+    const currentGuests = form?.seasons?.[sIdx]?.episodes?.[eIdx]?.guest_stars || [];
+    if (gIdx == null && currentGuests.some((g) => g.actor_id === row.actor_id)) {
+      toast.error("This actor is already a guest star on this episode.");
+      return;
+    }
+    if (gIdx != null && currentGuests.some((g, z) => z !== gIdx && g.actor_id === row.actor_id)) {
+      toast.error("Another guest-star row is already using this actor on this episode.");
+      return;
+    }
     const nextForm = {
       ...form,
       seasons: form.seasons.map((s, x) => x === sIdx ? {
