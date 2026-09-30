@@ -66,12 +66,16 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
     - `POST /api/movies` and `PATCH /api/movies/{id}` (cast)
     - `POST /api/series` and `PATCH /api/series/{id}` (main_cast + each episode's guest_stars)
   - Frontend `MovieEdit.handleCastSave` / `SeriesEdit.handleCastSave` / `SeriesEdit.handleGuestSave` now show a friendly `toast.error` when the user tries to add an actor who's already in the list, instead of silently dropping the row.
-  - Verified: all four duplicate paths return 409; PATCH with `[{actor_id:X},{actor_id:X}]` collapses to a single cast row; whitespace/case variants blocked.
+- **Forum TMDB-style redesign** (2026-09-30):
+  - New `ForumSidebar.jsx` navy-sidebar shared by `/threads` and `/threads/:id`: "Back to CineVerse", Your Account, New Discussion button, Categories list, plus a slot for page-specific extras (Actions + Users In This Discussion on the detail page).
+  - `ThreadsList.jsx` rewritten with two-column layout: search input + Category filter + Status filter + Search button on top; threads grouped by category with a "Support › {Category}" header; each row = avatar + title + "user replied · time ago" + body preview + green **OPEN** / strikethrough **~~CLOSED~~** + reply count.
+  - `ThreadDetail.jsx` rewritten with the same sidebar + breadcrumb + big title. First post + replies both use the new `Post` card with a Like / Quote / Translate action bar on the left and Report / Ignore on the right, MOD badge next to moderator/admin names, "N Replies" divider, system-log line for close/reopen events.
+  - `DiscussionSection.jsx` (embedded on movie & series pages) — same post visual: user row, MOD badge, and the same action bar underneath each comment.
 - **Known open items** (from search-bar iteration_4 test report):
   - Suspended user still sees the global search input — Navbar guard needs verifying.
-  - Frontend receives 0 rows for a query where curl returns rows — likely 401 on `/api/search/suggest` from the browser; response shape parity or `withCredentials` timing.
-  - Empty-state copy shows "Searching…" for a beat instead of "No results…"; `loading` state not reset in a finally.
-  - Clear (X) button hidden when in the buggy loading state — will reappear once loading fix lands.
+  - Frontend receives 0 rows for a query where curl returns rows — likely 401 on `/api/search/suggest` from the browser.
+  - Empty-state copy shows "Searching…" for a beat instead of "No results…".
+  - Clear (X) button hidden while in the buggy loading state.
 
 ## Backlog (P1/P2)
 - P1: Drag-to-reorder for crew, creators, and season/episode lists

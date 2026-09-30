@@ -4,7 +4,7 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageSquare, Trash2, Send } from "lucide-react";
+import { MessageSquare, Trash2, Send, ThumbsUp, Quote as QuoteIcon, Languages, Flag, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 function timeAgo(iso) {
@@ -108,8 +108,8 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
             No comments yet. Be the first to start the conversation.
           </div>
         ) : comments.map((c) => (
-          <div key={c.id} className="rounded-xl bg-[#14181f] border border-white/10 p-4" data-testid={`comment-${c.id}`}>
-            <div className="flex items-start gap-3">
+          <div key={c.id} className="rounded-lg overflow-hidden border border-white/5 bg-[#0d1220]/40" data-testid={`comment-${c.id}`}>
+            <div className="flex items-start gap-3 p-4">
               <Link to={`/user/${c.user_id}`} className="flex-shrink-0">
                 <div className="w-9 h-9 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400">
                   {c.user_avatar ? <img src={fileUrl(c.user_avatar)} alt="" className="w-full h-full object-cover" /> : (c.user_name?.[0] || "?")}
@@ -119,17 +119,30 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
                 <div className="flex items-center gap-2 flex-wrap">
                   <Link to={`/user/${c.user_id}`} className="font-semibold text-white hover:text-amber-400">{c.user_name || "Anonymous"}</Link>
                   {c.user_role && c.user_role !== "user" && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest ${roleTint[c.user_role] || "bg-white/5 text-slate-300 border-white/10"}`}>{c.user_role}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest ${roleTint[c.user_role] || "bg-white/5 text-slate-300 border-white/10"}`}>
+                      {c.user_role === "moderator" ? "MOD" : c.user_role}
+                    </span>
                   )}
-                  <span className="text-xs text-slate-500">{timeAgo(c.created_at)}</span>
+                  <span className="text-xs text-slate-500">· {timeAgo(c.created_at)}</span>
                 </div>
-                <p className="mt-1.5 text-slate-200 text-sm whitespace-pre-wrap break-words">{c.text}</p>
+                <p className="mt-2 text-slate-200 text-sm whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
               </div>
               {canDelete(c) && (
                 <button onClick={() => del(c.id)} className="text-slate-500 hover:text-rose-400 transition p-1" data-testid={`delete-comment-${c.id}`}>
                   <Trash2 className="w-4 h-4" />
                 </button>
               )}
+            </div>
+            <div className="flex items-center justify-between px-4 py-2 border-t border-white/5 bg-white/[0.02] text-xs text-slate-400">
+              <div className="flex items-center gap-4">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><ThumbsUp className="w-3.5 h-3.5" /> Like</button>
+                <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><QuoteIcon className="w-3.5 h-3.5" /> Quote</button>
+                <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Languages className="w-3.5 h-3.5" /> Translate</button>
+              </div>
+              <div className="flex items-center gap-4">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Flag className="w-3.5 h-3.5" /> Report</button>
+                <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><EyeOff className="w-3.5 h-3.5" /> Ignore</button>
+              </div>
             </div>
           </div>
         ))}
