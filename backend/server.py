@@ -1016,8 +1016,9 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
     viewer_is_mod = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
     viewer_is_self = bool(viewer and viewer.get("id") == str(u["_id"]))
 
-    # Hide suspended profiles from non-mods (and non-self)
-    if active_sus and not viewer_is_mod and not viewer_is_self:
+    # Hide suspended profiles site-wide (including from the suspended user themselves).
+    # Only moderators/admins can view a suspended profile.
+    if active_sus and not viewer_is_mod:
         raise HTTPException(status_code=404, detail="User not found")
 
     # resolve custom role
@@ -1608,6 +1609,9 @@ async def delete_comment(comment_id: str, user: dict = Depends(get_current_user)
     return {"ok": True}
 
 # ----------- Threads -----------
+MOD_MASK_NAME = "Support"
+MOD_MASK_ROLE = "support"
+
 def _serialize_thread(t: dict) -> dict:
     t["id"] = str(t.pop("_id"))
     return t
@@ -1622,6 +1626,62 @@ def _can_view_direct_thread(t: dict, user: Optional[dict]) -> bool:
         return True
     uid = user["id"]
     return uid == t.get("user_id") or uid == t.get("target_user_id")
+
+def _should_mask_for(viewer: Optional[dict]) -> bool:
+    """Non-mods (including suspended users) receive masked mod identities in direct threads / notifications."""
+    if not viewer:
+        return True
+    return not _is_mod_role(viewer)
+
+def _mask_direct_thread(t: dict, viewer: Optional[dict]) -> dict:
+    """If viewer is not a mod and thread was opened by a mod, hide mod identity."""
+    if not t.get("is_direct"):
+        return t
+    if not _should_mask_for(viewer):
+        return t
+    author_role = (t.get("user_role") or "").lower()
+    if author_role in ("moderator", "admin"):
+        t = dict(t)
+        t["user_name"] = MOD_MASK_NAME
+        t["user_avatar"] = ""
+        t["user_role"] = MOD_MASK_ROLE
+        t["user_id"] = ""
+    # target_user_name should not leak either (it identifies the recipient the mod picked)
+    if viewer and viewer.get("id") == t.get("target_user_id"):
+        # It's the recipient viewing; leave their own name intact.
+        pass
+    return t
+
+def _mask_thread_message(m: dict, viewer: Optional[dict]) -> dict:
+    if not _should_mask_for(viewer):
+        return m
+    role = (m.get("user_role") or "").lower()
+    if role in ("moderator", "admin"):
+        m = dict(m)
+        m["user_name"] = MOD_MASK_NAME
+        m["user_avatar"] = ""
+        m["user_role"] = MOD_MASK_ROLE
+        m["user_id"] = ""
+    return m
+
+def _mask_notification(n: dict, viewer: Optional[dict]) -> dict:
+    if not _should_mask_for(viewer):
+        return n
+    role = (n.get("from_user_role") or "").lower()
+    if role in ("moderator", "admin"):
+        n = dict(n)
+        n["from_user_name"] = MOD_MASK_NAME
+        n["from_user_avatar"] = ""
+        n["from_user_role"] = MOD_MASK_ROLE
+        n["from_user_id"] = ""
+        # Rewrite common title patterns that embed the mod's real name.
+        t = n.get("title") or ""
+        if "from " in t:
+            head, _sep, _tail = t.partition("from ")
+            n["title"] = f"{head}from {MOD_MASK_NAME}"
+        elif "by " in t and t.startswith("Your account has been suspended"):
+            n["title"] = t  # already generic
+    return n
 
 async def _create_notification(*, user_id: str, ntype: str, title: str, body: str = "",
                                 link: str = "", thread_id: Optional[str] = None,
@@ -1756,7 +1816,7 @@ async def inbox_threads(user: dict = Depends(get_current_user_allow_suspended), 
         q = {"is_direct": True, "$or": [{"user_id": user["id"]}, {"target_user_id": user["id"]}]}
     docs = []
     async for t in db.threads.find(q).sort("last_activity_at", -1).limit(limit):
-        docs.append(_serialize_thread(t))
+        docs.append(_mask_direct_thread(_serialize_thread(t), user))
     return docs
 
 @api_router.get("/threads/{thread_id}")
@@ -1771,10 +1831,11 @@ async def get_thread(thread_id: str, viewer: Optional[dict] = Depends(get_option
         if not _can_view_direct_thread(t, viewer):
             raise HTTPException(status_code=404, detail="Thread not found")
     t = _serialize_thread(t)
+    t = _mask_direct_thread(t, viewer)
     messages = []
     async for m in db.thread_messages.find({"thread_id": thread_id}).sort("created_at", 1):
         m["id"] = str(m.pop("_id"))
-        messages.append(m)
+        messages.append(_mask_thread_message(m, viewer))
     t["messages"] = messages
     return t
 
@@ -1792,10 +1853,11 @@ async def get_thread_inbox(thread_id: str, user: dict = Depends(get_current_user
     if not _can_view_direct_thread(t, user):
         raise HTTPException(status_code=404, detail="Thread not found")
     t = _serialize_thread(t)
+    t = _mask_direct_thread(t, user)
     messages = []
     async for m in db.thread_messages.find({"thread_id": thread_id}).sort("created_at", 1):
         m["id"] = str(m.pop("_id"))
-        messages.append(m)
+        messages.append(_mask_thread_message(m, user))
     t["messages"] = messages
     return t
 
@@ -1907,7 +1969,7 @@ def _serialize_notification(n: dict) -> dict:
 async def list_notifications(user: dict = Depends(get_current_user_allow_suspended), limit: int = 50):
     docs = []
     async for n in db.notifications.find({"user_id": user["id"]}).sort("created_at", -1).limit(limit):
-        docs.append(_serialize_notification(n))
+        docs.append(_mask_notification(_serialize_notification(n), user))
     return docs
 
 @api_router.get("/notifications/unread-count")

@@ -21,9 +21,14 @@ function timeAgo(iso) {
 const roleTint = {
   admin: "bg-rose-500/15 text-rose-300 border-rose-500/40",
   moderator: "bg-sky-500/15 text-sky-300 border-sky-500/40",
+  support: "bg-amber-500/15 text-amber-300 border-amber-500/40",
 };
 
 const catLabel = { support: "Support", general: "General", report: "Reports", direct: "Direct" };
+
+const MaybeLink = ({ id, className, children, title }) => (
+  id ? <Link to={`/user/${id}`} className={className} title={title}>{children}</Link> : <span className={className} title={title}>{children}</span>
+);
 
 export default function ThreadDetail() {
   const { id } = useParams();
@@ -95,14 +100,14 @@ export default function ThreadDetail() {
   const Post = ({ author, avatarUrl, role, when, children, showActions = true, testId }) => (
     <div className="rounded-lg overflow-hidden border border-white/5 bg-[#0d1220]/40" data-testid={testId}>
       <div className="flex items-start gap-4 p-5">
-        <Link to={`/user/${author?.id}`} className="flex-shrink-0">
+        <MaybeLink id={author?.id} className="flex-shrink-0">
           <div className="w-10 h-10 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400">
             {avatarUrl ? <img src={fileUrl(avatarUrl)} alt="" className="w-full h-full object-cover" /> : (author?.name?.[0] || "?")}
           </div>
-        </Link>
+        </MaybeLink>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Link to={`/user/${author?.id}`} className="font-semibold text-white hover:text-amber-400">{author?.name}</Link>
+            <MaybeLink id={author?.id} className="font-semibold text-white hover:text-amber-400">{author?.name}</MaybeLink>
             {role && role !== "user" && (
               <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest ${roleTint[role] || "bg-white/5 text-slate-300 border-white/10"}`}>
                 {role === "moderator" ? "MOD" : role}
@@ -158,10 +163,10 @@ export default function ThreadDetail() {
               <div className="mb-6">
                 <div className="text-right text-xs uppercase tracking-widest text-slate-400 font-semibold mb-2">Users In This Discussion</div>
                 <div className="flex justify-end gap-1.5 flex-wrap">
-                  {participants.map((p) => (
-                    <Link key={p.id} to={`/user/${p.id}`} title={p.name} className="w-8 h-8 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-[10px] text-slate-300 hover:border-amber-500/50 transition">
+                  {participants.map((p, idx) => (
+                    <MaybeLink key={p.id || `mask-${idx}`} id={p.id} title={p.name} className="w-8 h-8 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-[10px] text-slate-300 hover:border-amber-500/50 transition">
                       {p.avatar ? <img src={fileUrl(p.avatar)} alt="" className="w-full h-full object-cover" /> : (p.name?.[0] || "?")}
-                    </Link>
+                    </MaybeLink>
                   ))}
                 </div>
               </div>
@@ -191,14 +196,14 @@ export default function ThreadDetail() {
           <div className="p-5 border-b border-white/5 bg-[#0d1220]/40">
             <h2 className="font-heading text-2xl text-white font-bold" data-testid="thread-title">{thread.title}</h2>
             <div className="mt-3 flex items-start gap-4">
-              <Link to={`/user/${thread.user_id}`} className="flex-shrink-0">
+              <MaybeLink id={thread.user_id} className="flex-shrink-0">
                 <div className="w-10 h-10 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400">
                   {thread.user_avatar ? <img src={fileUrl(thread.user_avatar)} alt="" className="w-full h-full object-cover" /> : (thread.user_name?.[0] || "?")}
                 </div>
-              </Link>
+              </MaybeLink>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Link to={`/user/${thread.user_id}`} className="font-semibold text-white hover:text-amber-400">{thread.user_name}</Link>
+                  <MaybeLink id={thread.user_id} className="font-semibold text-white hover:text-amber-400">{thread.user_name}</MaybeLink>
                   {thread.user_role && thread.user_role !== "user" && (
                     <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest ${roleTint[thread.user_role] || "bg-white/5 text-slate-300 border-white/10"}`}>
                       {thread.user_role === "moderator" ? "MOD" : thread.user_role}

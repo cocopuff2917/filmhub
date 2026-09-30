@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash } from "lucide-react";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
 import SeriesForm from "@/components/forms/SeriesForm";
@@ -341,45 +342,52 @@ function UsersTab({ currentRole }) {
         </div>
 
         {suspendTarget && (
-          <div className="mt-6 rounded-xl border border-rose-500/40 bg-rose-500/5 p-5">
-            <div className="font-heading text-lg text-white mb-3">Suspend {suspendTarget.name}?</div>
-            <div className="grid grid-cols-1 md:grid-cols-[200px_140px_1fr] gap-3 items-end">
-              <div>
-                <label className="text-xs uppercase tracking-widest text-slate-400">Duration</label>
-                <Select value={duration} onValueChange={setDuration}>
-                  <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-duration-select"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-[#14181f] text-white border-white/10">
-                    <SelectItem value="1">1 day</SelectItem>
-                    <SelectItem value="3">3 days</SelectItem>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="14">14 days</SelectItem>
-                    <SelectItem value="30">30 days</SelectItem>
-                    <SelectItem value="90">90 days</SelectItem>
-                    <SelectItem value="180">180 days</SelectItem>
-                    <SelectItem value="365">1 year</SelectItem>
-                    <SelectItem value="custom">Custom…</SelectItem>
-                    <SelectItem value="permanent">Permanent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {duration === "custom" && (
+          <Dialog open={!!suspendTarget} onOpenChange={(v) => { if (!v) { setSuspendTarget(null); setReason(""); setDuration("7"); setCustomDays(""); } }}>
+            <DialogContent className="bg-[#14181f] border-white/10 text-white max-w-lg" data-testid="suspend-user-dialog">
+              <DialogHeader>
+                <DialogTitle>Suspend {suspendTarget.name}?</DialogTitle>
+                <DialogDescription className="text-slate-400">
+                  The user will only see "Support" — your identity is hidden from them. They keep read-only access to their inbox.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <label className="text-xs uppercase tracking-widest text-slate-400">Days</label>
-                  <Input type="number" min="1" value={customDays} onChange={(e) => setCustomDays(e.target.value)} placeholder="e.g. 45" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-custom-days" />
+                  <label className="text-xs uppercase tracking-widest text-slate-400">Duration</label>
+                  <Select value={duration} onValueChange={setDuration}>
+                    <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-duration-select"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[#14181f] text-white border-white/10">
+                      <SelectItem value="1">1 day</SelectItem>
+                      <SelectItem value="3">3 days</SelectItem>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="14">14 days</SelectItem>
+                      <SelectItem value="30">30 days</SelectItem>
+                      <SelectItem value="90">90 days</SelectItem>
+                      <SelectItem value="180">180 days</SelectItem>
+                      <SelectItem value="365">1 year</SelectItem>
+                      <SelectItem value="custom">Custom…</SelectItem>
+                      <SelectItem value="permanent">Permanent</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
-              <div className={duration === "custom" ? "" : "md:col-span-2"}>
-                <label className="text-xs uppercase tracking-widest text-slate-400">Reason</label>
-                <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for suspension" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-reason-input" />
+                {duration === "custom" && (
+                  <div>
+                    <label className="text-xs uppercase tracking-widest text-slate-400">Days</label>
+                    <Input type="number" min="1" value={customDays} onChange={(e) => setCustomDays(e.target.value)} placeholder="e.g. 45" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-custom-days" />
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs uppercase tracking-widest text-slate-400">Reason (private — not shown to user)</label>
+                  <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Internal note visible only to moderators" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-reason-input" />
+                </div>
               </div>
-            </div>
-            <div className="mt-4 flex gap-2">
-              <Button onClick={submitSuspend} className="bg-rose-500 hover:bg-rose-600 text-white font-semibold" data-testid="suspend-confirm-btn">
-                <Ban className="w-4 h-4 mr-1" /> Confirm suspension
-              </Button>
-              <Button variant="outline" onClick={() => setSuspendTarget(null)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
-            </div>
-          </div>
+              <DialogFooter className="gap-2 sm:gap-2">
+                <Button variant="outline" onClick={() => setSuspendTarget(null)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
+                <Button onClick={submitSuspend} className="bg-rose-500 hover:bg-rose-600 text-white font-semibold" data-testid="suspend-confirm-btn">
+                  <Ban className="w-4 h-4 mr-1" /> Confirm suspension
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
       </CardContent>
       <MessageUserDialog

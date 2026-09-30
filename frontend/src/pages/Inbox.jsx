@@ -57,7 +57,7 @@ export default function Inbox() {
           </div>
         ) : (
           threads.map((t) => {
-            const isFromMod = ["moderator", "admin"].includes((t.user_role || "").toLowerCase());
+            const isFromMod = ["moderator", "admin", "support"].includes((t.user_role || "").toLowerCase());
             const otherName = isMod && t.target_user_name ? t.target_user_name : t.user_name;
             return (
               <Link
@@ -81,7 +81,7 @@ export default function Inbox() {
                       </Badge>
                       {isFromMod && (
                         <Badge className="bg-sky-500/15 text-sky-300 border-sky-500/40 uppercase">
-                          {t.user_role}
+                          {t.user_role === "support" ? "Support" : t.user_role}
                         </Badge>
                       )}
                       {t.status === "closed" && (
