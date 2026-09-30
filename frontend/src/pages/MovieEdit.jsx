@@ -11,6 +11,7 @@ import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, GripVertical } from "
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import CastEditDialog from "@/components/CastEditDialog";
+import CollectionsPicker from "@/components/CollectionsPicker";
 
 const SECTIONS = [
   { id: "primary-facts", label: "Primary Facts" },
@@ -540,6 +541,17 @@ export default function MovieEdit() {
               <GalleryUpload value={form.gallery} onChange={(v) => setField("gallery", v)} testid="field-gallery" />
             </Field>
           </section>
+
+          {isMod && (
+            <section className="mt-6">
+              <CollectionsPicker
+                kind="movie"
+                titleId={id}
+                value={movie?.collection_ids || (movie?.collections || []).map((c) => c.id)}
+                onChange={(next) => setMovie((m) => m ? { ...m, collection_ids: next, collections: (m.collections || []).filter((c) => next.includes(c.id)) } : m)}
+              />
+            </section>
+          )}
 
           <div className="pt-4 pb-16 flex justify-end gap-2 border-t border-slate-200">
             <Button variant="outline" onClick={() => navigate(`/movie/${id}`)} className="border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</Button>

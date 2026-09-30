@@ -17,6 +17,8 @@ import SimilarSection from "@/components/SimilarSection";
 import DiscussionSection from "@/components/DiscussionSection";
 import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
+import VideosSection from "@/components/VideosSection";
+import CollectionCard from "@/components/CollectionCard";
 
 const fmtDate = (s) => {
   if (!s) return "";
@@ -347,6 +349,18 @@ export default function SeriesDetail() {
                   <SeasonBlock key={s.season_number} season={s} fallbackPoster={poster} defaultOpen={sIdx === sortedSeasons.length - 1} />
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Videos */}
+          <VideosSection trailerUrl={series.trailer_url} videoUrls={series.video_urls} testIdPrefix="series-video" />
+
+          {/* Collections */}
+          {(series.collections || []).length > 0 && (
+            <section className="mt-12 space-y-4" data-testid="series-collections-section">
+              {series.collections.map((c) => (
+                <CollectionCard key={c.id} collection={c} />
+              ))}
             </section>
           )}
 

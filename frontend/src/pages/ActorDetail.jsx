@@ -64,7 +64,7 @@ export default function ActorDetail() {
       <section className="hero-radial">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-8 items-start">
-            <div className="rounded-2xl overflow-hidden aspect-square bg-[#1e2430] border border-white/10">
+            <div className="rounded-2xl overflow-hidden aspect-[2/3] bg-[#1e2430] border border-white/10">
               {photo ? <img src={photo} alt={actor.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-5xl">{actor.name?.[0]}</div>}
             </div>
             <div>

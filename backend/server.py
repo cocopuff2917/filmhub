@@ -344,6 +344,7 @@ class MovieCreate(BaseModel):
     awards_wins: Optional[int] = None
     awards_nominations: Optional[int] = None
     is_trending: bool = False
+    collection_ids: List[str] = []
 
 class MovieUpdate(BaseModel):
     title: Optional[str] = None
@@ -367,6 +368,7 @@ class MovieUpdate(BaseModel):
     awards_wins: Optional[int] = None
     awards_nominations: Optional[int] = None
     is_trending: Optional[bool] = None
+    collection_ids: Optional[List[str]] = None
 
 class ActorCreate(BaseModel):
     name: str
@@ -438,6 +440,7 @@ class SeriesCreate(BaseModel):
     awards_nominations: Optional[int] = None
     seasons: List[SeasonItem] = []
     is_trending: bool = False
+    collection_ids: List[str] = []
 
 class SeriesUpdate(BaseModel):
     title: Optional[str] = None
@@ -463,6 +466,7 @@ class SeriesUpdate(BaseModel):
     awards_nominations: Optional[int] = None
     seasons: Optional[List[SeasonItem]] = None
     is_trending: Optional[bool] = None
+    collection_ids: Optional[List[str]] = None
 
 # ----------- Moderation Models -----------
 class SuspendRequest(BaseModel):
@@ -629,6 +633,7 @@ async def enrich_movie(doc):
     else:
         doc["avg_rating"] = None
         doc["rating_count"] = 0
+    doc["collections"] = await _collections_for_ids(doc.get("collection_ids") or [])
     return doc
 
 async def enrich_series(doc, deep: bool = True):
@@ -686,6 +691,7 @@ async def enrich_series(doc, deep: bool = True):
     else:
         doc["avg_rating"] = None
         doc["rating_count"] = 0
+    doc["collections"] = await _collections_for_ids(doc.get("collection_ids") or [])
     return doc
 
 # ----------- Edit Log Helper -----------
@@ -3121,6 +3127,203 @@ async def startup():
 
     # init storage
     init_storage()
+
+# ----------- Collections (Franchises) -----------
+class CollectionCreate(BaseModel):
+    name: str
+    description: str = ""
+    poster_url: str = ""
+    backdrop_url: str = ""
+
+class CollectionUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    poster_url: Optional[str] = None
+    backdrop_url: Optional[str] = None
+
+def _year_key(d: dict) -> str:
+    return (d.get("release_date") or d.get("first_air_date") or "9999") or "9999"
+
+async def _collections_for_ids(ids: List[str]) -> List[dict]:
+    if not ids:
+        return []
+    oids = []
+    for i in ids:
+        try:
+            oids.append(ObjectId(i))
+        except Exception:
+            pass
+    out = []
+    async for c in db.collections.find({"_id": {"$in": oids}}):
+        out.append({
+            "id": str(c["_id"]),
+            "name": c.get("name", ""),
+            "description": c.get("description", ""),
+            "poster_url": c.get("poster_url", ""),
+            "backdrop_url": c.get("backdrop_url", ""),
+        })
+    # preserve caller order
+    order = {i: idx for idx, i in enumerate(ids)}
+    out.sort(key=lambda x: order.get(x["id"], 9999))
+    return out
+
+@api_router.get("/collections")
+async def list_collections(q: Optional[str] = None, limit: int = 200):
+    query: dict = {}
+    if q:
+        query["name"] = {"$regex": q, "$options": "i"}
+    result = []
+    async for c in db.collections.find(query).sort("name", 1).limit(limit):
+        cid = str(c["_id"])
+        movie_count = await db.movies.count_documents(_alive({"collection_ids": cid}))
+        series_count = await db.series.count_documents(_alive({"collection_ids": cid}))
+        result.append({
+            "id": cid,
+            "name": c.get("name", ""),
+            "description": c.get("description", ""),
+            "poster_url": c.get("poster_url", ""),
+            "backdrop_url": c.get("backdrop_url", ""),
+            "movie_count": movie_count,
+            "series_count": series_count,
+            "total_count": movie_count + series_count,
+        })
+    return result
+
+@api_router.get("/collections/{collection_id}")
+async def get_collection(collection_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
+    try:
+        c = await db.collections.find_one({"_id": ObjectId(collection_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if not c:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    include_deleted = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
+    alive = {} if include_deleted else {"$or": [{"deleted": {"$exists": False}}, {"deleted": False}]}
+
+    titles = []
+    async for m in db.movies.find({**alive, "collection_ids": collection_id}):
+        titles.append({
+            "kind": "movie",
+            "id": str(m["_id"]),
+            "title": m.get("title", ""),
+            "year": (m.get("release_date") or "")[:4],
+            "release_date": m.get("release_date") or "",
+            "poster_url": m.get("poster_url", ""),
+            "backdrop_url": m.get("backdrop_url", ""),
+            "synopsis": m.get("synopsis", ""),
+        })
+    async for s in db.series.find({**alive, "collection_ids": collection_id}):
+        titles.append({
+            "kind": "series",
+            "id": str(s["_id"]),
+            "title": s.get("title", ""),
+            "year": (s.get("first_air_date") or "")[:4],
+            "first_air_date": s.get("first_air_date") or "",
+            "poster_url": s.get("poster_url", ""),
+            "backdrop_url": s.get("backdrop_url", ""),
+            "synopsis": s.get("synopsis", ""),
+        })
+    titles.sort(key=lambda t: (t.get("release_date") or t.get("first_air_date") or "9999", t.get("title", "")))
+    return {
+        "id": str(c["_id"]),
+        "name": c.get("name", ""),
+        "description": c.get("description", ""),
+        "poster_url": c.get("poster_url", ""),
+        "backdrop_url": c.get("backdrop_url", ""),
+        "titles": titles,
+    }
+
+@api_router.post("/collections")
+async def create_collection(payload: CollectionCreate, mod: dict = Depends(get_current_moderator)):
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    existing = await db.collections.find_one({"name": {"$regex": f"^\\s*{re.escape(name)}\\s*$", "$options": "i"}})
+    if existing:
+        raise HTTPException(status_code=409, detail="A collection with that name already exists.")
+    doc = {
+        "name": name,
+        "description": payload.description or "",
+        "poster_url": payload.poster_url or "",
+        "backdrop_url": payload.backdrop_url or "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": mod["id"],
+    }
+    result = await db.collections.insert_one(doc)
+    cid = str(result.inserted_id)
+    await log_edit(mod, "collection", cid, "create", name, f"Created collection \"{name}\"")
+    return {"id": cid, **{k: doc[k] for k in ("name", "description", "poster_url", "backdrop_url")}}
+
+@api_router.patch("/collections/{collection_id}")
+async def update_collection(collection_id: str, payload: CollectionUpdate, mod: dict = Depends(get_current_moderator)):
+    try:
+        c = await db.collections.find_one({"_id": ObjectId(collection_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if not c:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    if "name" in updates:
+        updates["name"] = updates["name"].strip()
+        if not updates["name"]:
+            raise HTTPException(status_code=400, detail="Name required")
+    if updates:
+        await db.collections.update_one({"_id": c["_id"]}, {"$set": updates})
+    fresh = await db.collections.find_one({"_id": c["_id"]})
+    await log_edit(mod, "collection", collection_id, "update", fresh.get("name", ""), "Updated collection", compute_field_changes(c, updates))
+    return {"id": collection_id, **{k: fresh.get(k, "") for k in ("name", "description", "poster_url", "backdrop_url")}}
+
+@api_router.delete("/collections/{collection_id}")
+async def delete_collection(collection_id: str, mod: dict = Depends(get_current_moderator)):
+    try:
+        c = await db.collections.find_one({"_id": ObjectId(collection_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if not c:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    # Detach all titles first
+    await db.movies.update_many({"collection_ids": collection_id}, {"$pull": {"collection_ids": collection_id}})
+    await db.series.update_many({"collection_ids": collection_id}, {"$pull": {"collection_ids": collection_id}})
+    await db.collections.delete_one({"_id": c["_id"]})
+    await log_edit(mod, "collection", collection_id, "delete", c.get("name", ""), "Deleted collection")
+    return {"ok": True}
+
+class CollectionMembership(BaseModel):
+    title_type: str  # "movie" | "series"
+    title_id: str
+
+@api_router.post("/collections/{collection_id}/add")
+async def add_to_collection(collection_id: str, payload: CollectionMembership, mod: dict = Depends(get_current_moderator)):
+    if payload.title_type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="Invalid title_type")
+    try:
+        c = await db.collections.find_one({"_id": ObjectId(collection_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if not c:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    coll = db.movies if payload.title_type == "movie" else db.series
+    try:
+        target_oid = ObjectId(payload.title_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Title not found")
+    target = await coll.find_one({"_id": target_oid})
+    if not target:
+        raise HTTPException(status_code=404, detail="Title not found")
+    await coll.update_one({"_id": target_oid}, {"$addToSet": {"collection_ids": collection_id}})
+    return {"ok": True}
+
+@api_router.post("/collections/{collection_id}/remove")
+async def remove_from_collection(collection_id: str, payload: CollectionMembership, mod: dict = Depends(get_current_moderator)):
+    if payload.title_type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="Invalid title_type")
+    coll = db.movies if payload.title_type == "movie" else db.series
+    try:
+        target_oid = ObjectId(payload.title_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Title not found")
+    await coll.update_one({"_id": target_oid}, {"$pull": {"collection_ids": collection_id}})
+    return {"ok": True}
 
 app.include_router(api_router)
 

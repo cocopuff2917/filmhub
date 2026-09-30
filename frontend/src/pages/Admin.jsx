@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash } from "lucide-react";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash, Layers, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import MovieForm from "@/components/forms/MovieForm";
@@ -45,6 +45,7 @@ export default function Admin() {
           <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
           <TabsTrigger value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
           <TabsTrigger value="trash" data-testid="tab-trash">Trash</TabsTrigger>
+          <TabsTrigger value="collections" data-testid="tab-collections">Collections</TabsTrigger>
           {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
         </TabsList>
         <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
@@ -53,6 +54,7 @@ export default function Admin() {
         <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
         <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
         <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
+        <TabsContent value="collections" className="mt-6"><CollectionsTab /></TabsContent>
         {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
       </Tabs>
     </div>
@@ -725,4 +727,223 @@ function TrashTab({ currentRole }) {
     </Card>
   );
 }
+
+function CollectionsTab() {
+  const [collections, setCollections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null); // null | {} | {id, name, ...}
+  const [form, setForm] = useState({ name: "", description: "", poster_url: "", backdrop_url: "" });
+  const [expanded, setExpanded] = useState({}); // id -> collection detail
+  const [detailLoading, setDetailLoading] = useState({});
+  const [pickerFor, setPickerFor] = useState(null); // collection id when picking title
+  const [pickQuery, setPickQuery] = useState("");
+  const [pickResults, setPickResults] = useState([]);
+
+  const load = async () => {
+    setLoading(true);
+    try { const r = await api.get("/collections"); setCollections(r.data); } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const startCreate = () => { setEditing({}); setForm({ name: "", description: "", poster_url: "", backdrop_url: "" }); };
+  const startEdit = (c) => { setEditing(c); setForm({ name: c.name || "", description: c.description || "", poster_url: c.poster_url || "", backdrop_url: c.backdrop_url || "" }); };
+  const cancel = () => { setEditing(null); setForm({ name: "", description: "", poster_url: "", backdrop_url: "" }); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const name = form.name.trim();
+    if (name.length < 2) { toast.error("Name required (min 2 chars)"); return; }
+    try {
+      if (editing && editing.id) {
+        await api.patch(`/collections/${editing.id}`, form);
+        toast.success("Collection updated");
+      } else {
+        await api.post("/collections", form);
+        toast.success("Collection created");
+      }
+      cancel(); load();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Delete "${c.name}"? Titles will be detached (not deleted).`)) return;
+    try { await api.delete(`/collections/${c.id}`); toast.success("Deleted"); load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const toggleExpand = async (c) => {
+    const isOpen = !!expanded[c.id];
+    if (isOpen) { setExpanded((s) => ({ ...s, [c.id]: null })); return; }
+    setDetailLoading((s) => ({ ...s, [c.id]: true }));
+    try {
+      const r = await api.get(`/collections/${c.id}`);
+      setExpanded((s) => ({ ...s, [c.id]: r.data }));
+    } catch { toast.error("Failed to load titles"); }
+    setDetailLoading((s) => ({ ...s, [c.id]: false }));
+  };
+
+  const detachTitle = async (cid, kind, tid) => {
+    try {
+      await api.post(`/collections/${cid}/remove`, { title_type: kind, title_id: tid });
+      const r = await api.get(`/collections/${cid}`);
+      setExpanded((s) => ({ ...s, [cid]: r.data }));
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const openPicker = (cid) => { setPickerFor(cid); setPickQuery(""); setPickResults([]); };
+  const closePicker = () => { setPickerFor(null); setPickQuery(""); setPickResults([]); };
+  const runPickSearch = async () => {
+    const q = pickQuery.trim();
+    if (!q) { setPickResults([]); return; }
+    try {
+      const r = await api.get(`/search/suggest?q=${encodeURIComponent(q)}`);
+      const movies = (r.data.movies || []).map((x) => ({ ...x, type: "movie" }));
+      const series = (r.data.series || []).map((x) => ({ ...x, type: "series" }));
+      setPickResults([...movies, ...series]);
+    } catch { setPickResults([]); }
+  };
+  const addToCollection = async (kind, id) => {
+    try {
+      await api.post(`/collections/${pickerFor}/add`, { title_type: kind, title_id: id });
+      toast.success("Added");
+      const r = await api.get(`/collections/${pickerFor}`);
+      setExpanded((s) => ({ ...s, [pickerFor]: r.data }));
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  return (
+    <Card className="bg-[#14181f] border-white/10 text-white">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2"><Layers className="w-5 h-5" /> Collections ({collections.length})</CardTitle>
+        {editing === null && (
+          <Button onClick={startCreate} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="collection-new-btn">
+            <Plus className="w-4 h-4 mr-1" /> New Collection
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        {editing !== null && (
+          <form onSubmit={submit} className="mb-6 rounded-xl border border-white/10 bg-[#0d0f12] p-5 space-y-3" data-testid="collection-form">
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-400">Name</label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1 bg-[#14181f] border-white/10 text-white" placeholder="e.g. The Lord of the Rings Collection" data-testid="collection-name-input" />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-400">Description</label>
+              <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-1 bg-[#14181f] border-white/10 text-white" placeholder="Optional description" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs uppercase tracking-widest text-slate-400">Poster URL</label>
+                <Input value={form.poster_url} onChange={(e) => setForm({ ...form, poster_url: e.target.value })} className="mt-1 bg-[#14181f] border-white/10 text-white" placeholder="/uploads/... or full URL" />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-widest text-slate-400">Backdrop URL</label>
+                <Input value={form.backdrop_url} onChange={(e) => setForm({ ...form, backdrop_url: e.target.value })} className="mt-1 bg-[#14181f] border-white/10 text-white" placeholder="/uploads/... or full URL" />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="collection-save-btn">Save</Button>
+              <Button type="button" variant="outline" onClick={cancel} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
+            </div>
+          </form>
+        )}
+
+        {loading ? (
+          <div className="text-slate-500 text-sm">Loading…</div>
+        ) : collections.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/10 bg-[#0d0f12]/50 py-16 text-center">
+            <Layers className="w-8 h-8 text-slate-600 mx-auto" />
+            <div className="mt-3 text-slate-400 text-sm">No collections yet. Group franchise titles to power the collection pages.</div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {collections.map((c) => (
+              <div key={c.id} className="rounded-lg border border-white/10 bg-[#0d0f12]" data-testid={`collection-row-${c.id}`}>
+                <div className="flex items-center gap-3 p-3">
+                  {c.poster_url ? <img src={fileUrl(c.poster_url)} alt="" className="w-10 h-14 rounded object-cover border border-white/10" /> : (
+                    <div className="w-10 h-14 rounded bg-[#1e2430] border border-white/10 flex items-center justify-center"><Layers className="w-4 h-4 text-slate-500" /></div>
+                  )}
+                  <Link to={`/collection/${c.id}`} className="flex-1 min-w-0 hover:text-amber-400 transition">
+                    <div className="font-semibold text-white truncate">{c.name}</div>
+                    <div className="text-xs text-slate-500 truncate">{c.total_count} title{c.total_count !== 1 && "s"} · {c.movie_count} movie{c.movie_count !== 1 && "s"} · {c.series_count} series</div>
+                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => toggleExpand(c)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`collection-toggle-${c.id}`}>
+                      {expanded[c.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />} Titles
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => startEdit(c)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`collection-edit-${c.id}`}>
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => remove(c)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`collection-delete-${c.id}`}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+                {expanded[c.id] && (
+                  <div className="border-t border-white/5 p-3 space-y-3">
+                    {detailLoading[c.id] ? (
+                      <div className="text-slate-500 text-sm">Loading titles…</div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          {(expanded[c.id].titles || []).length === 0 && <div className="text-slate-500 text-sm">No titles attached. Use "Add title" below.</div>}
+                          {(expanded[c.id].titles || []).map((t) => (
+                            <div key={`${t.kind}-${t.id}`} className="flex items-center gap-2 rounded-full bg-[#14181f] border border-white/10 pl-1 pr-2 py-1">
+                              {t.poster_url ? <img src={fileUrl(t.poster_url)} alt="" className="w-6 h-9 rounded object-cover" /> : <div className="w-6 h-9 rounded bg-[#1e2430]" />}
+                              <span className="text-xs text-white">{t.title}</span>
+                              <span className="text-[10px] text-slate-500 uppercase">{t.kind}{t.year && ` · ${t.year}`}</span>
+                              <button type="button" onClick={() => detachTitle(c.id, t.kind, t.id)} className="text-slate-500 hover:text-rose-300" title="Remove from collection">
+                                <Trash className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <Button size="sm" onClick={() => openPicker(c.id)} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`collection-add-title-${c.id}`}>
+                          <Plus className="w-4 h-4 mr-1" /> Add title
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {pickerFor && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={closePicker}>
+            <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-xl border border-white/10 bg-[#14181f] p-5" data-testid="collection-add-dialog">
+              <div className="flex items-center gap-2 text-sm text-slate-300 mb-3"><Plus className="w-4 h-4" /> Add a movie or series to this collection</div>
+              <div className="flex gap-2">
+                <Input autoFocus value={pickQuery} onChange={(e) => setPickQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runPickSearch(); } }} className="bg-[#0d0f12] border-white/10 text-white" placeholder="Search movies & series…" data-testid="collection-add-search" />
+                <Button onClick={runPickSearch} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold">Search</Button>
+              </div>
+              <div className="mt-3 max-h-80 overflow-y-auto space-y-1">
+                {pickResults.length === 0 && <div className="text-slate-500 text-sm py-4">Type a title and press Enter.</div>}
+                {pickResults.map((r) => (
+                  <button key={`${r.type}-${r.id}`} type="button" onClick={() => addToCollection(r.type, r.id)} className="w-full flex items-center gap-3 rounded-lg border border-white/10 bg-[#0d0f12] hover:border-amber-500/40 hover:bg-amber-500/5 p-2 text-left" data-testid={`collection-add-result-${r.id}`}>
+                    {r.poster_url ? <img src={fileUrl(r.poster_url)} alt="" className="w-8 h-12 rounded object-cover" /> : <div className="w-8 h-12 rounded bg-[#1e2430]" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-white text-sm truncate">{r.title}</div>
+                      <div className="text-xs text-slate-500 uppercase">{r.type}{r.year && ` · ${r.year}`}</div>
+                    </div>
+                    <Plus className="w-4 h-4 text-amber-400" />
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end">
+                <Button variant="outline" onClick={closePicker} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Close</Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 

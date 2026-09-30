@@ -19,6 +19,7 @@ import Admin from "@/pages/Admin";
 import MovieEdit from "@/pages/MovieEdit";
 import SeriesEdit from "@/pages/SeriesEdit";
 import Inbox from "@/pages/Inbox";
+import CollectionDetail from "@/pages/CollectionDetail";
 import { Toaster } from "@/components/ui/sonner";
 
 // Suspended users are restricted to /inbox, direct thread views, notifications, and auth.
@@ -54,6 +55,7 @@ function AppRoutes() {
         <Route path="/series/:id" element={<SeriesDetail />} />
         <Route path="/series/:id/edit" element={<SeriesEdit />} />
         <Route path="/actor/:id" element={<ActorDetail />} />
+        <Route path="/collection/:id" element={<CollectionDetail />} />
         <Route path="/user/:id" element={<UserProfile />} />
         <Route path="/threads" element={<ThreadsList />} />
         <Route path="/threads/:id" element={<ThreadDetail />} />

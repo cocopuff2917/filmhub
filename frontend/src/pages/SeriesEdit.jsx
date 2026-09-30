@@ -11,6 +11,7 @@ import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, ChevronDown, ChevronR
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import CastEditDialog from "@/components/CastEditDialog";
+import CollectionsPicker from "@/components/CollectionsPicker";
 
 const SECTIONS = [
   { id: "primary-facts", label: "Primary Facts" },
@@ -684,6 +685,17 @@ export default function SeriesEdit() {
               <Plus className="w-4 h-4 mr-1" /> Add season
             </Button>
           </section>
+
+          {isMod && (
+            <section className="mt-6">
+              <CollectionsPicker
+                kind="series"
+                titleId={id}
+                value={series?.collection_ids || (series?.collections || []).map((c) => c.id)}
+                onChange={(next) => setSeries((s) => s ? { ...s, collection_ids: next, collections: (s.collections || []).filter((c) => next.includes(c.id)) } : s)}
+              />
+            </section>
+          )}
 
           <div className="pt-4 pb-16 flex justify-end gap-2 border-t border-slate-200">
             <Button variant="outline" onClick={() => navigate(`/series/${id}`)} className="border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</Button>
