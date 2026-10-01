@@ -19,6 +19,8 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
   const [character, setCharacter] = useState("");
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [remoteMatches, setRemoteMatches] = useState([]); // live search results from backend
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef(null);
   const characterRef = useRef(null);
   const characterValRef = useRef("");
@@ -36,20 +38,56 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
       setQuery("");
     }
     setCharacter(value?.character_name || "");
+    setRemoteMatches([]);
     setTimeout(() => inputRef.current?.focus(), 30);
   }, [open, value, actors]);
 
+  // Debounced live search against the backend so actors beyond the preloaded cache (and newly-created ones) always show up.
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || !q || selected) {
+      setRemoteMatches([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.get(`/actors?q=${encodeURIComponent(q)}&limit=15`);
+        if (!cancelled) setRemoteMatches(r.data || []);
+      } catch {
+        if (!cancelled) setRemoteMatches([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 180);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [query, open, selected]);
+
   const suggestions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return actors.slice(0, 10);
-    return actors.filter((a) => (a.name || "").toLowerCase().includes(q)).slice(0, 10);
-  }, [actors, query]);
+    const seen = new Set();
+    const merged = [];
+    const push = (a) => {
+      if (!a || !a.id || seen.has(a.id)) return;
+      seen.add(a.id); merged.push(a);
+    };
+    // Prefer live backend matches (they're authoritative for the current query)
+    for (const a of remoteMatches) push(a);
+    // Then fall back to the preloaded cache, filtered locally
+    const local = q
+      ? actors.filter((a) => (a.name || "").toLowerCase().includes(q))
+      : actors;
+    for (const a of local) push(a);
+    return merged.slice(0, 10);
+  }, [actors, query, remoteMatches]);
 
   const exactMatch = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return null;
-    return actors.find((a) => (a.name || "").toLowerCase() === q) || null;
-  }, [actors, query]);
+    const pool = [...remoteMatches, ...actors];
+    return pool.find((a) => (a.name || "").toLowerCase() === q) || null;
+  }, [actors, query, remoteMatches]);
 
   const focusCharacter = () => setTimeout(() => characterRef.current?.focus(), 30);
 
@@ -135,7 +173,7 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
     onOpenChange(false);
   };
 
-  const showCreate = query.trim() && !exactMatch && !selected;
+  const showCreate = query.trim() && !exactMatch && !selected && !searching;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
