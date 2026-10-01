@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { PlayCircle, Youtube } from "lucide-react";
 
 /**
@@ -86,6 +86,8 @@ export default function VideosSection({ trailerUrl, videoUrls = [], titleFallbac
 
       <Dialog open={!!open} onOpenChange={(v) => { if (!v) setOpen(null); }}>
         <DialogContent className="bg-black border-white/10 text-white max-w-4xl p-0 overflow-hidden" data-testid={`${testIdPrefix}-player-dialog`}>
+          <DialogTitle className="sr-only">{open?.label || titleFallback}</DialogTitle>
+          <DialogDescription className="sr-only">YouTube video player</DialogDescription>
           {open && (
             <div className="aspect-video w-full bg-black">
               <iframe

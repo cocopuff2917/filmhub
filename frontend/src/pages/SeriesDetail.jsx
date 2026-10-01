@@ -306,13 +306,21 @@ export default function SeriesDetail() {
             ) : (
               <div className="mt-4 flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 snap-x">
                 {series.main_cast.map((c, idx) => (
-                  <Link to={`/actor/${c.actor.id}`} key={idx} className="group block flex-shrink-0 w-[140px] rounded-xl overflow-hidden bg-[#14181f] border border-white/5 snap-start hover:border-amber-500/30 transition">
-                    <div className="aspect-[3/4] bg-[#1e2430] overflow-hidden">
+                  <Link to={`/actor/${c.actor.id}`} key={idx} className="group block flex-shrink-0 w-[140px] rounded-xl overflow-hidden bg-[#14181f] border border-white/5 snap-start hover:border-amber-500/30 transition" data-testid={`series-cast-${c.actor.id}`}>
+                    <div className="aspect-[3/4] bg-[#1e2430] overflow-hidden relative">
                       {c.actor.photo_url ? <img src={fileUrl(c.actor.photo_url)} alt={c.actor.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}
+                      {c.recurring && (
+                        <span className="absolute top-2 left-2 text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded bg-sky-500/90 text-white shadow">Recurring</span>
+                      )}
                     </div>
                     <div className="p-2.5">
                       <div className="font-semibold text-sm line-clamp-1 group-hover:text-amber-400 transition-colors">{c.actor.name}</div>
-                      <div className="text-xs text-slate-400 line-clamp-2 mt-0.5">{c.character_name}</div>
+                      <div className="text-xs text-slate-400 line-clamp-2 mt-0.5">{c.character_name || "—"}</div>
+                      {c.episode_count ? (
+                        <div className="text-[11px] text-slate-500 mt-1" data-testid={`series-cast-episode-count-${c.actor.id}`}>
+                          {c.episode_count} Episode{c.episode_count !== 1 ? "s" : ""}
+                        </div>
+                      ) : null}
                     </div>
                   </Link>
                 ))}

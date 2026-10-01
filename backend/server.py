@@ -666,7 +666,6 @@ async def enrich_series(doc, deep: bool = True):
         actor = actors_map.get(c.get("actor_id"))
         if actor:
             enriched_main.append({**c, "actor": actor})
-    doc["main_cast"] = enriched_main
     if deep:
         for season in doc.get("seasons", []) or []:
             for ep in season.get("episodes", []) or []:
@@ -679,7 +678,49 @@ async def enrich_series(doc, deep: bool = True):
     # episode / season counts
     seasons = doc.get("seasons", []) or []
     doc["season_count"] = len(seasons)
-    doc["episode_count"] = sum(len(s.get("episodes", []) or []) for s in seasons)
+    total_episodes = sum(len(s.get("episodes", []) or []) for s in seasons)
+    doc["episode_count"] = total_episodes
+
+    # Count how many episodes each guest-star appeared in across the whole series.
+    gs_counts: dict = {}
+    gs_character: dict = {}
+    for season in seasons:
+        for ep in season.get("episodes", []) or []:
+            for gs in ep.get("guest_stars", []) or []:
+                aid = gs.get("actor_id")
+                if not aid:
+                    continue
+                gs_counts[aid] = gs_counts.get(aid, 0) + 1
+                if aid not in gs_character and gs.get("character_name"):
+                    gs_character[aid] = gs.get("character_name")
+
+    # Main cast appear across the whole series by convention; attach episode_count.
+    main_actor_ids = set()
+    for c in enriched_main:
+        c["episode_count"] = total_episodes
+        main_actor_ids.add(c.get("actor_id"))
+
+    # Promote recurring guest stars (>=5 episodes) into the Series Cast list.
+    RECURRING_THRESHOLD = 5
+    recurring_candidates = []
+    for aid, count in gs_counts.items():
+        if count < RECURRING_THRESHOLD or aid in main_actor_ids:
+            continue
+        actor = actors_map.get(aid)
+        if not actor:
+            continue
+        recurring_candidates.append({
+            "actor_id": aid,
+            "character_name": gs_character.get(aid, ""),
+            "actor": actor,
+            "episode_count": count,
+            "recurring": True,
+        })
+    recurring_candidates.sort(key=lambda x: -x["episode_count"])
+    enriched_main.extend(recurring_candidates)
+
+    # Keep stable ordering: original main_cast first (in input order), then recurring sorted by count desc.
+    doc["main_cast"] = enriched_main
     # rating aggregation (series-scoped reviews)
     agg = await db.reviews.aggregate([
         {"$match": {"series_id": doc["id"]}},
@@ -692,6 +733,7 @@ async def enrich_series(doc, deep: bool = True):
         doc["avg_rating"] = None
         doc["rating_count"] = 0
     doc["collections"] = await _collections_for_ids(doc.get("collection_ids") or [])
+    doc["collection_ids"] = doc.get("collection_ids") or []
     return doc
 
 # ----------- Edit Log Helper -----------

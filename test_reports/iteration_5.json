@@ -1,0 +1,39 @@
+{
+  "summary": "Tested Collections (Franchises) + Videos section + Actor portrait aspect. Backend: 16/16 pytest tests passed in /app/backend/tests/test_collections.py covering (a) list/create/get/patch/delete /api/collections with mod/admin role gating (non-mod POST/PATCH -> 403; case-insensitive duplicate -> 409); (b) POST /api/collections/{id}/add + /remove correctly toggles collection_ids on movie doc (verified via GET), invalid title_type -> 400, non-mod -> 403; (c) GET /api/collections/{id} returns titles array with kind/id/title/year/poster_url; (d) DELETE collection detaches (does not delete) movies while removing the id from movies.collection_ids and returns 404 on subsequent GET; (e) PATCH /api/movies with collection_ids does not regress trailer_url; (f) enrich_movie returns both `collection_ids` and `collections`; enrich_series returns `collections` (see minor issue below). Frontend (playwright, admin login): actor page has `aspect-[2/3]` container; Admin Collections tab creates a collection via [data-testid=collection-new-btn]+[data-testid=collection-form], new [data-testid=collection-row-{id}] appears, expand via [data-testid=collection-toggle-{id}], picker via [data-testid=collection-add-title-{id}] opens [data-testid=collection-add-dialog], typing+Enter loads suggestions and clicking a result ('A Minecraft Movie') attaches it; MovieDetail with trailer renders [data-testid=videos-section]; clicking thumbnail opens [data-testid=movie-video-player-dialog] with embedded YouTube iframe; MovieDetail without collections correctly hides collections-section; /collection/:id renders [data-testid=collection-detail-page] with title-card ([data-testid=collection-title-{id}]); MovieEdit as admin shows [data-testid=collections-picker] with [data-testid=collections-picker-add] button.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/series/{id}", "issue": "Response omits `collection_ids` field (movies include it). Frontend uses `collections` array so no runtime regression, but API surface is asymmetric with movies. enrich_series adds `collections` but does not preserve `collection_ids` from the doc."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "MovieDetail video-player dialog / Admin collection-add dialog", "issues": ["Radix DialogContent missing DialogTitle causes a11y console error 'DialogContent requires a DialogTitle for screen reader users' and a Missing Description warning. Wrap a hidden DialogTitle/DialogDescription (VisuallyHidden) inside these DialogContent components."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_collections.py",
+    "/app/test_reports/pytest/collections.xml"
+  ],
+  "action_items": [
+    "(Minor) Return `collection_ids` on GET /api/series/{id} for symmetry with GET /api/movies/{id}.",
+    "(A11y) Add hidden DialogTitle+DialogDescription to VideosSection player dialog and Admin CollectionsTab add-title dialog to eliminate Radix accessibility console errors."
+  ],
+  "critical_code_review_comments": [
+    "_collections_for_ids gracefully swallows invalid ObjectId strings (pass) — good.",
+    "enrich_series inserts `collections` but the `collection_ids` field is dropped somewhere between doc_to_dict and response serialization (likely SeriesResponse model omits it). Consider explicitly assigning doc['collection_ids'] = doc.get('collection_ids') or [] in enrich_series for parity.",
+    "DELETE /api/collections uses update_many with $pull on both movies and series collections — correct detach pattern; edit_log entry recorded.",
+    "Admin CollectionsTab picker consumes /api/search/suggest response shape {movies:[], series:[], actors:[]} — verified in UI (clicking 'A Minecraft Moviemovie · 2025' successfully attached).",
+    "MovieDetail correctly renders videos-section only when trailer_url or video_urls present; hides collections-section when empty."
+  ],
+  "updated_files": ["/app/backend/tests/test_collections.py"],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% (all data-testids verified)"},
+  "test_credentials": "admin@cineverse.com / Admin@123 ; user@test.com / Test@123",
+  "seed_data_creation": "Created a collection 'UITEST_Coll_<ts>' via UI and attached movie 'A Minecraft Movie' during frontend test. Backend tests create/delete TEST_Collection_* + TEST_DEL_* collections with proper cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests: run `pytest backend/tests/test_collections.py -o addopts=''` (project pytest.ini forces xdist loadscope). Collections endpoints under /api/collections; membership endpoints POST /api/collections/{id}/add and /remove take {title_type, title_id}. Frontend routes: /collection/:id (public), Admin Collections tab data-testid=tab-collections. Note: series detail lacks `collection_ids` in response.",
+  "rca of the issue": "N/A — no functional bugs. Minor API-asymmetry (series missing collection_ids) and Radix Dialog a11y warnings noted as improvement items."
+}
