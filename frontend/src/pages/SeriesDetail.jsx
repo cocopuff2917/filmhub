@@ -312,6 +312,9 @@ export default function SeriesDetail() {
                       {c.recurring && (
                         <span className="absolute top-2 left-2 text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded bg-sky-500/90 text-white shadow">Recurring</span>
                       )}
+                      {c.kind === "guest" && !c.recurring && (
+                        <span className="absolute top-2 left-2 text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded bg-slate-700/90 text-slate-100 shadow" title="Shown because this actor appears in at least one episode">Guest</span>
+                      )}
                     </div>
                     <div className="p-2.5">
                       <div className="font-semibold text-sm line-clamp-1 group-hover:text-amber-400 transition-colors">{c.actor.name}</div>

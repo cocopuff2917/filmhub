@@ -764,13 +764,17 @@ async def enrich_series(doc, deep: bool = True):
                 if aid not in gs_character and gs.get("character_name"):
                     gs_character[aid] = gs.get("character_name")
 
-    # Main cast appear across the whole series by convention; attach episode_count.
+    # Main cast appear across the whole series by convention; attach episode_count + kind.
     main_actor_ids = set()
     for c in enriched_main:
         c["episode_count"] = total_episodes
+        c["kind"] = "main"
         main_actor_ids.add(c.get("actor_id"))
 
     # Promote every recurring/guest star into the Series Cast list, with their actual episode count.
+    # Guests always come AFTER the main cast and are sorted by episode count DESC.
+    # They cannot be removed manually — the ONLY way a guest disappears from Series Cast is to be
+    # removed from every episode where they currently appear.
     # Keep a visual distinction: >=5 appearances → `recurring: true` badge on the card.
     RECURRING_THRESHOLD = 5
     recurring_candidates = []
@@ -786,6 +790,7 @@ async def enrich_series(doc, deep: bool = True):
             "actor": actor,
             "episode_count": count,
             "recurring": count >= RECURRING_THRESHOLD,
+            "kind": "guest",
         })
     recurring_candidates.sort(key=lambda x: -x["episode_count"])
     enriched_main.extend(recurring_candidates)
