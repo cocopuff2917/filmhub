@@ -254,6 +254,32 @@ export default function UserProfile() {
             </div>
           )}
 
+          {Array.isArray(profile.suspension_history) && profile.suspension_history.length > 0 && (
+            <div className="mt-6 rounded-lg bg-amber-500/5 border border-amber-500/30 p-4 text-sm max-w-2xl" data-testid="user-suspension-history">
+              <div className="flex items-center gap-2 mb-3">
+                <Ban className="w-3.5 h-3.5 text-amber-300" />
+                <div className="font-semibold text-amber-200 uppercase tracking-widest text-[11px]">Suspension History</div>
+                <span className="text-[10px] text-amber-300/70">· Moderators & admins only</span>
+              </div>
+              <ul className="space-y-2.5">
+                {profile.suspension_history.map((h) => {
+                  const label = h.action === "unsuspend" ? "Unsuspended" : h.action === "suspend-update" ? "Updated" : "Suspended";
+                  const color = h.action === "unsuspend" ? "text-emerald-300" : "text-rose-300";
+                  return (
+                    <li key={h.id} className="border-l-2 border-amber-500/40 pl-3" data-testid={`sus-history-${h.id}`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`font-semibold ${color}`}>{label}</span>
+                        <span className="text-xs text-white/60">by {h.user_name || "—"}</span>
+                        <span className="text-xs text-white/40">· {timeAgo(h.created_at)}</span>
+                      </div>
+                      {h.summary && <div className="text-xs text-white/70 mt-0.5">{h.summary}</div>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
           {profile.bio && (
             <div className="mt-4 text-white/80 text-sm max-w-2xl leading-relaxed" data-testid="user-bio">{profile.bio}</div>
           )}

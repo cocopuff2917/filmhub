@@ -1241,6 +1241,19 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
         profile["suspended_until"] = sus
         profile["suspension_reason"] = u.get("suspension_reason", "")
 
+    # Suspension history — mods/admins only
+    if viewer_is_mod:
+        sus_history = []
+        async for e in db.edits.find({
+            "entity_type": "user",
+            "entity_id": str(u["_id"]),
+            "action": {"$in": ["suspend", "suspend-update", "unsuspend"]},
+        }).sort("created_at", -1):
+            e_id = str(e.pop("_id"))
+            e["id"] = e_id
+            sus_history.append(e)
+        profile["suspension_history"] = sus_history
+
     # recent edits (last 30)
     edits = []
     async for e in db.edits.find({"user_id": str(u["_id"])}).sort("created_at", -1).limit(30):
@@ -1854,6 +1867,18 @@ def _is_mod_role(user: dict) -> bool:
     # A granular-permission user with read_reply can view every direct thread like a mod.
     return "moderation.messages.read_reply" in (user.get("permissions") or [])
 
+async def _get_suspended_user_ids() -> list:
+    """Return string ids of users whose suspension is currently active."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    ids: list = []
+    cursor = db.users.find(
+        {"$or": [{"suspended_until": "permanent"}, {"suspended_until": {"$gt": now_iso}}]},
+        {"_id": 1},
+    )
+    async for u in cursor:
+        ids.append(str(u["_id"]))
+    return ids
+
 def _can_view_direct_thread(t: dict, user: Optional[dict]) -> bool:
     if not user:
         return False
@@ -2042,6 +2067,11 @@ async def list_threads(
         # exclude direct threads from generic listings
         base_exclude = {"$or": [{"is_direct": {"$ne": True}}, {"is_direct": {"$exists": False}}]}
         q = {"$and": [q, base_exclude]} if q else base_exclude
+    # Hide threads created by currently-suspended users from non-mod viewers
+    if not _is_mod_role(viewer):
+        suspended_ids = await _get_suspended_user_ids()
+        if suspended_ids:
+            q = {"$and": [q, {"user_id": {"$nin": suspended_ids}}]}
     docs = []
     async for t in db.threads.find(q).sort("last_activity_at", -1).limit(limit):
         docs.append(_serialize_thread(t))
@@ -2069,6 +2099,11 @@ async def get_thread(thread_id: str, viewer: Optional[dict] = Depends(get_option
         raise HTTPException(status_code=404, detail="Thread not found")
     if t.get("is_direct"):
         if not _can_view_direct_thread(t, viewer):
+            raise HTTPException(status_code=404, detail="Thread not found")
+    # Hide forum threads authored by currently-suspended users from non-mod viewers
+    if not t.get("is_direct") and not _is_mod_role(viewer):
+        author_id = t.get("user_id")
+        if author_id and author_id in await _get_suspended_user_ids():
             raise HTTPException(status_code=404, detail="Thread not found")
     t = _serialize_thread(t)
     t = _mask_direct_thread(t, viewer)

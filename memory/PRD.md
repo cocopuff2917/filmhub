@@ -100,6 +100,8 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 ## Changelog 2026-02
 - Raised default pagination caps on `/api/actors`, `/api/movies`, and `/api/series` from 10,000 → **500,000** to accommodate large catalogs on edit dialogs and admin tables.
 - **Removed pagination cap entirely** on `/api/actors`, `/api/movies`, and `/api/series`. `limit` is now optional — when omitted, the endpoint returns the full dataset with no upper bound.
+- **Suspension history on user profile** (mods/admins only): `GET /api/users/{id}` now returns a `suspension_history` array for moderator/admin viewers, sourced from the `db.edits` audit log for actions `suspend`, `suspend-update`, and `unsuspend`. Rendered as a timeline block in `UserProfile.jsx` with `data-testid="user-suspension-history"`.
+- **Hide forum threads from suspended authors**: `GET /api/threads` and `GET /api/threads/{id}` now exclude non-direct threads created by currently-suspended users from non-moderator viewers (anon or logged-in regular users). Direct threads and moderator views are unaffected.
 
 ## Credentials
 - Admin: admin@cineverse.com / Admin@123
