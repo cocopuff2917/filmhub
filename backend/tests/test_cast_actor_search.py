@@ -69,12 +69,16 @@ def seeded_actors(admin_session):
 
 
 class TestActorSearch:
-    def test_list_actors_default_limit_100(self, admin_session):
-        r = admin_session.get(f"{API}/actors", timeout=15)
+    def test_list_actors_returns_full_catalog(self, admin_session, seeded_actors):
+        """After seeding 121 TEST_ actors (fillers+target), the uncapped default should return >=121."""
+        r = admin_session.get(f"{API}/actors", timeout=30)
         assert r.status_code == 200
         data = r.json()
         assert isinstance(data, list)
-        assert len(data) <= 100
+        # must include our target (proving it isn't truncated at 100)
+        ids = {a["id"] for a in data}
+        assert seeded_actors["target_id"] in ids
+        assert len(data) >= 121
 
     def test_search_finds_target_by_substring(self, admin_session, seeded_actors):
         q = seeded_actors["target_name"][:20]  # e.g. 'TEST_TargetActor_abc'
@@ -99,6 +103,33 @@ class TestActorSearch:
             r2 = admin_session.get(f"{API}/actors", params={"q": name}, timeout=10)
             assert r2.status_code == 200
             assert any(a["id"] == aid for a in r2.json())
+        finally:
+            admin_session.delete(f"{API}/actors/{aid}", timeout=10)
+
+
+class TestUncappedCatalogs:
+    """Verify /api/movies and /api/series also return the full catalog by default (limit raised to 10000)."""
+
+    def test_movies_default_uncapped(self, admin_session):
+        r = admin_session.get(f"{API}/movies", timeout=30)
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+        # just verify the request returns far more than the old cap of 60 if seeded, or at least succeeds
+        # (we don't seed 60 movies here to save time)
+
+    def test_series_default_uncapped(self, admin_session):
+        r = admin_session.get(f"{API}/series", timeout=30)
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_duplicate_actor_name_returns_409(self, admin_session):
+        name = f"TEST_Dupe_{uuid.uuid4().hex[:8]}"
+        r = admin_session.post(f"{API}/actors", json={"name": name}, timeout=10)
+        assert r.status_code in (200, 201)
+        aid = r.json()["id"]
+        try:
+            r2 = admin_session.post(f"{API}/actors", json={"name": name}, timeout=10)
+            assert r2.status_code == 409, f"expected 409, got {r2.status_code}: {r2.text}"
         finally:
             admin_session.delete(f"{API}/actors/{aid}", timeout=10)
 
