@@ -764,38 +764,13 @@ async def enrich_series(doc, deep: bool = True):
                 if aid not in gs_character and gs.get("character_name"):
                     gs_character[aid] = gs.get("character_name")
 
-    # Main cast appear across the whole series by convention; attach episode_count + kind.
+    # Main cast appear across the whole series by convention; attach kind.
     main_actor_ids = set()
     for c in enriched_main:
-        c["episode_count"] = total_episodes
         c["kind"] = "main"
         main_actor_ids.add(c.get("actor_id"))
 
-    # Promote every recurring/guest star into the Series Cast list, with their actual episode count.
-    # Guests always come AFTER the main cast and are sorted by episode count DESC.
-    # They cannot be removed manually — the ONLY way a guest disappears from Series Cast is to be
-    # removed from every episode where they currently appear.
-    # Keep a visual distinction: >=5 appearances → `recurring: true` badge on the card.
-    RECURRING_THRESHOLD = 5
-    recurring_candidates = []
-    for aid, count in gs_counts.items():
-        if aid in main_actor_ids:
-            continue
-        actor = actors_map.get(aid)
-        if not actor:
-            continue
-        recurring_candidates.append({
-            "actor_id": aid,
-            "character_name": gs_character.get(aid, ""),
-            "actor": actor,
-            "episode_count": count,
-            "recurring": count >= RECURRING_THRESHOLD,
-            "kind": "guest",
-        })
-    recurring_candidates.sort(key=lambda x: -x["episode_count"])
-    enriched_main.extend(recurring_candidates)
-
-    # Keep stable ordering: original main_cast first (in input order), then recurring sorted by count desc.
+    # Count guest-star appearances for analytics only — guests are NOT shown in Series Cast.
     doc["main_cast"] = enriched_main
     # rating aggregation (series-scoped reviews)
     agg = await db.reviews.aggregate([
