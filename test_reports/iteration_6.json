@@ -1,0 +1,28 @@
+{
+  "summary": "Tested Series Cast enrichment (episode_count per cast, recurring guest-star promotion at threshold=5), collection_ids parity on GET /api/series/{id}, and the frontend SeriesDetail rendering + Recurring badge. All 7 backend tests pass; UI verified with a seeded 6-episode series (lead + guest both show '6 Episodes'; only guest card shows RECURRING badge). Test seed data was cleaned up at module teardown and after the UI run.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "SeriesDetail -> Series Cast card", "issues": ["'N Episodes' uses text-slate-500 on #14181f which is quite low-contrast; consider text-slate-400 for better WCAG AA on the recurring/episode subline."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_series_cast.py",
+    "/app/test_reports/pytest/series_cast.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py enrich_series: logic is correct and well-scoped. Minor: when the same actor is a guest star AND in main_cast, their original character_name is preserved (good). gs_character stores first-seen character_name only — acceptable but worth documenting.",
+    "SeriesDetail.jsx cast card contrast on '{N} Episodes' subline is low (text-slate-500 on near-black). Non-blocking but a quick a11y win.",
+    "VideosSection.jsx now wraps the player in a Dialog with sr-only DialogTitle + DialogDescription — resolves the Radix a11y warning."
+  ],
+  "updated_files": ["/app/backend/tests/test_series_cast.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (UI assertions passed)"},
+  "test_credentials": "admin@cineverse.com / Admin@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created transient actors/series/collections prefixed with TEST_ via API in both pytest fixtures and the playwright UI test; all cleaned up at teardown (DELETE /api/series/{id}, /api/actors/{id}, /api/collections/{id}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_series_cast.py covers: collection_ids parity on GET /api/series/{id}, episode_count on original main_cast equals series total, guest-star promotion at threshold=6 (>=5) with Recurring flag, no promotion at 4 episodes (<5), no duplication when actor is both lead and guest, and ordering (originals in input order then recurring sorted desc by episode_count). The UI check seeds a 6-ep series and asserts the [data-testid=series-cast-{id}] + [data-testid=series-cast-episode-count-{id}] + Recurring badge."
+}

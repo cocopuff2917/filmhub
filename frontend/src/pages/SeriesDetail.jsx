@@ -317,7 +317,7 @@ export default function SeriesDetail() {
                       <div className="font-semibold text-sm line-clamp-1 group-hover:text-amber-400 transition-colors">{c.actor.name}</div>
                       <div className="text-xs text-slate-400 line-clamp-2 mt-0.5">{c.character_name || "—"}</div>
                       {c.episode_count ? (
-                        <div className="text-[11px] text-slate-500 mt-1" data-testid={`series-cast-episode-count-${c.actor.id}`}>
+                        <div className="text-[11px] text-slate-400 mt-1" data-testid={`series-cast-episode-count-${c.actor.id}`}>
                           {c.episode_count} Episode{c.episode_count !== 1 ? "s" : ""}
                         </div>
                       ) : null}
