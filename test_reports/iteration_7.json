@@ -1,0 +1,37 @@
+{
+  "summary": "Tested the CastEditDialog '(unknown)' bug fix for MovieEdit (and by code-review, SeriesEdit). Backend: 5/5 pytest cases pass — /api/actors?q= live search works, newly-created actors are findable, duplicate names 409, and GET /api/movies/{id} already enriches each cast row with a nested actor:{id,name,photo_url}. Frontend: the ADD flow now works correctly — picking a remote-only match from the live-search dropdown saves a cast row that renders the real actor name immediately. HOWEVER, after a page reload the fix regresses: the row shows '(unknown)' again because MovieEdit.jsx / SeriesEdit.jsx still resolve the display name via actors.find() against a one-shot /api/actors call that is capped at the server default of 100 actors. Any cast member whose actor_id is beyond those 100 preloaded actors (which is exactly the regression the user reported) renders '(unknown)' on fresh page load even though the backend provides cast[i].actor.name on the movie response. The fix is only half-landed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "MovieEdit.jsx Cast row", "issue": "On page load, cast rows for actors beyond the first 100 preloaded actors render '(unknown)' instead of the real name. GET /api/movies/{id} already returns cast[i].actor.{id,name,photo_url}; the component should fall back to c.actor?.name / c.actor?.photo_url when actors.find(...) misses. Reproduces reliably: seed >100 actors, add any one of them to a movie's cast, reload /movie/{id}/edit → row shows '(unknown) as <char>'. This is the exact bug reported by the user ('(unknown) as Madea').", "selector": "[data-testid^=\"cast-row-\"]", "priority": "HIGH"},
+      {"component": "SeriesEdit.jsx Cast + Guest-star rows", "issue": "Same root cause (lines 525/546/693/703): actors.find() against capped /api/actors list, no fallback to c.actor.name provided by backend enrichment.", "selector": "[data-testid^=\"cast-row-\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CastEditDialog", "issues": ["Radix a11y warning: 'Missing Description or aria-describedby for DialogContent' logged on open — add a sr-only DialogDescription."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cast_actor_search.py",
+    "/app/test_reports/pytest/cast_actor_search.xml"
+  ],
+  "action_items": [
+    "Fix MovieEdit.jsx line 465/482/486: change `const actor = actors.find((a) => a.id === c.actor_id);` resolution to also fall back to `c.actor` (the backend-enriched object) so reloaded pages don't show '(unknown)' for actors beyond the preloaded 100. Example: `const actor = actors.find((a) => a.id === c.actor_id) || c.actor;`.",
+    "Apply the same fallback in SeriesEdit.jsx at lines 525 (main cast) and 693 (guest stars).",
+    "Alternatively (or in addition), hydrate the actors state after /api/movies load with any c.actor payloads that aren't yet in the actors list — same pattern as handleActorCreated.",
+    "Add sr-only DialogDescription to CastEditDialog to silence Radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "CastEditDialog.jsx: the live-search + onActorCreated propagation is correct and robust; auto-save on Enter path also calls onActorCreated. Good.",
+    "MovieEdit.jsx / SeriesEdit.jsx: the parent-side cache update (handleActorCreated) only covers the current session; on refresh the cache rebuild via GET /api/actors (default limit 100) does not include every cast actor, so the display again falls to '(unknown)'. Backend already provides the enrichment (cast[i].actor.{id,name,photo_url}); the UI just needs to prefer it as a fallback.",
+    "/api/actors default limit=100 silently hides data; consider either paginating properly on the clients that need the full list or always relying on cast[i].actor from the movie/series payload for render."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "50% — add flow works, reload flow regresses to '(unknown)'"},
+  "test_credentials": "admin@cineverse.com / Admin@123",
+  "seed_data_creation": "Created 110 TEST_Filler_* actors + 1 TEST_ZarathustraQuill_* target actor + 1 TEST_CastBugMovie_* movie via API during the Playwright run. Cleaned up afterward (verified 111 TEST_ actors + 1 movie deleted).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "To reproduce quickly: login as admin, POST 110 /api/actors, then POST one more actor with a unique name (e.g. TEST_Target_X), create a movie, add that target as cast via the UI (works), THEN RELOAD the edit page — the row will show '(unknown) as Madea'. Backend response for GET /api/movies/{id} already includes cast[i].actor:{id,name,photo_url}; the client just needs to use that as a fallback.",
+  "rca of the issue": "ROOT CAUSE: MovieEdit.jsx (and SeriesEdit.jsx) resolves the display name for each cast row by searching an `actors` state array that is populated once on mount from GET /api/actors — which is capped at 100 results server-side. Any cast actor_id outside those first 100 rows produces actors.find(...) === undefined, which renders '(unknown)'. REPRODUCTION: seed >100 actors, add any actor beyond the first 100 to a movie's cast, reload the edit page. MITIGATION: use the backend-enriched `cast[i].actor` object as a fallback (one-liner change in both pages), or hydrate the actors state with cast[i].actor entries after loading the movie."
+}

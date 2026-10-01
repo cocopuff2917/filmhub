@@ -522,7 +522,7 @@ export default function SeriesEdit() {
             )}
             <div className="space-y-2">
               {form.main_cast.map((c, i) => {
-                const actor = actors.find((a) => a.id === c.actor_id);
+                const actor = actors.find((a) => a.id === c.actor_id) || c.actor || null;
                 const dragging = dragIdx === i;
                 const rowLocked = (series?.locked_cast_actor_ids || []).includes(c.actor_id);
                 const rowEditable = canEditField("main_cast") && (canLockCast || !rowLocked);
@@ -690,7 +690,7 @@ export default function SeriesEdit() {
                                   ) : (
                                     <div className="flex flex-wrap gap-2">
                                       {(ep.guest_stars || []).map((g, gIdx) => {
-                                        const actor = actors.find((a) => a.id === g.actor_id);
+                                        const actor = actors.find((a) => a.id === g.actor_id) || g.actor || null;
                                         const gKey = `${sn.season_number}:${ep.episode_number}:${g.actor_id}`;
                                         const gLocked = (series?.locked_guest_stars || []).includes(gKey);
                                         const gEditable = canEditField("seasons") && (canLockCast || !gLocked);

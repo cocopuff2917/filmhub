@@ -462,7 +462,7 @@ export default function MovieEdit() {
             )}
             <div className="space-y-2">
               {form.cast.map((c, i) => {
-                const actor = actors.find((a) => a.id === c.actor_id);
+                const actor = actors.find((a) => a.id === c.actor_id) || c.actor || null;
                 const dragging = dragIdx === i;
                 const rowLocked = (movie?.locked_cast_actor_ids || []).includes(c.actor_id);
                 const rowEditable = canEditField("cast") && (canLockCast || !rowLocked);
