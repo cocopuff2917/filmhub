@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
-export default function ImageUpload({ value, onChange, testid, shape = "square" }) {
+export default function ImageUpload({ value, onChange, testid, shape = "square", canDelete = true }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
 
@@ -41,8 +41,8 @@ export default function ImageUpload({ value, onChange, testid, shape = "square" 
         className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={testid}>
         {busy ? "Uploading..." : value ? "Replace" : "Upload"}
       </Button>
-      {value && (
-        <Button type="button" variant="ghost" onClick={() => onChange("")} className="text-slate-400 hover:text-white hover:bg-white/5">
+      {value && canDelete && (
+        <Button type="button" variant="ghost" onClick={() => onChange("")} className="text-slate-400 hover:text-white hover:bg-white/5" data-testid={testid ? `${testid}-remove` : undefined}>
           <X className="w-4 h-4" />
         </Button>
       )}
@@ -50,7 +50,7 @@ export default function ImageUpload({ value, onChange, testid, shape = "square" 
   );
 }
 
-export function GalleryUpload({ value, onChange, testid }) {
+export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
   const list = value || [];
@@ -82,9 +82,11 @@ export function GalleryUpload({ value, onChange, testid }) {
         {list.map((p, i) => (
           <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden bg-[#1e2430] border border-white/10 group">
             <img src={fileUrl(p)} alt="" className="w-full h-full object-cover" />
-            <button type="button" onClick={() => remove(i)} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-              <X className="w-3 h-3 text-white" />
-            </button>
+            {canDelete && (
+              <button type="button" onClick={() => remove(i)} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition" data-testid={testid ? `${testid}-remove-${i}` : undefined}>
+                <X className="w-3 h-3 text-white" />
+              </button>
+            )}
           </div>
         ))}
         <button type="button" onClick={() => ref.current.click()} disabled={busy}

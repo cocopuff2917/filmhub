@@ -660,6 +660,49 @@ def _enforce_cast_locks(existing_cast, submitted_cast, locked_actor_ids, is_mod)
         result.insert(pos_clamped, row)
     return result
 
+def _enforce_season_episode_integrity(existing_seasons, submitted_seasons, user):
+    """Non-mods cannot delete seasons or episodes — silently restore any that have gone missing.
+    Users with content.delete (mods, admins, or anyone granted that perm) bypass this check."""
+    if _has_perm(user, "content.delete"):
+        return submitted_seasons or []
+    old = existing_seasons or []
+    new = list(submitted_seasons or [])
+    new_by_sn = {s.get("season_number"): s for s in new}
+    merged: List[dict] = []
+    merged_sns = set()
+    # Pass 1: for every existing season, keep it (merging in any legit edits to it from submitted)
+    for old_s in old:
+        sn = old_s.get("season_number")
+        if sn in new_by_sn:
+            new_s = dict(new_by_sn[sn])
+            new_ep_by_en = {e.get("episode_number"): e for e in (new_s.get("episodes") or [])}
+            merged_eps: List[dict] = []
+            merged_ens = set()
+            for old_ep in (old_s.get("episodes") or []):
+                en = old_ep.get("episode_number")
+                if en in new_ep_by_en:
+                    merged_eps.append(dict(new_ep_by_en[en]))
+                else:
+                    merged_eps.append(dict(old_ep))
+                merged_ens.add(en)
+            # Append any brand-new episodes the non-mod added
+            for new_ep in (new_s.get("episodes") or []):
+                en = new_ep.get("episode_number")
+                if en not in merged_ens:
+                    merged_eps.append(dict(new_ep))
+                    merged_ens.add(en)
+            new_s["episodes"] = merged_eps
+            merged.append(new_s)
+        else:
+            # Season dropped by non-mod — restore it exactly as it was
+            merged.append(dict(old_s))
+        merged_sns.add(sn)
+    # Pass 2: brand-new seasons the non-mod added
+    for new_s in new:
+        if new_s.get("season_number") not in merged_sns:
+            merged.append(dict(new_s))
+    return merged
+
 def _norm_title(s: str) -> str:
     return (s or "").strip().lower()
 
@@ -2755,6 +2798,13 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
             update_data["main_cast"],
             old_doc.get("locked_cast_actor_ids") or [],
             is_mod,
+        )
+    # Episodes & seasons cannot be deleted by non-mods — restore any that went missing BEFORE enforcing guest locks.
+    if "seasons" in update_data:
+        update_data["seasons"] = _enforce_season_episode_integrity(
+            old_doc.get("seasons") or [],
+            update_data["seasons"],
+            user,
         )
     # Enforce per-episode guest_star locks
     if "seasons" in update_data and not is_mod:

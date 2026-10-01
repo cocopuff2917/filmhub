@@ -105,6 +105,7 @@ export default function SeriesEdit() {
   const perms = (user && user.permissions) || [];
   const canLockCast = isMod || perms.includes("content.lock_cast");
   const canProtectFields = isMod || perms.includes("content.protect_fields");
+  const canDelete = isMod || perms.includes("content.delete");
 
   useEffect(() => {
     (async () => {
@@ -648,7 +649,7 @@ export default function SeriesEdit() {
                         <div className="font-semibold text-slate-900">Season {sn.season_number}{sn.name ? ` — ${sn.name}` : ""}</div>
                         <div className="text-xs text-slate-500">{(sn.episodes || []).length} episodes · {sn.air_date ? new Date(sn.air_date).getFullYear() : "no air date"}</div>
                       </div>
-                      <Button type="button" variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); remSeason(sIdx); }} disabled={!canEditField("seasons")} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
+                      <Button type="button" variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); remSeason(sIdx); }} disabled={!canEditField("seasons") || !canDelete} className={`text-slate-400 hover:text-rose-500 ${canDelete ? "" : "hidden"}`}><X className="w-4 h-4" /></Button>
                     </button>
                     {opened && (
                       <div className="border-t border-slate-100 p-4 space-y-4">
@@ -672,7 +673,7 @@ export default function SeriesEdit() {
                                   <Input type="number" placeholder="#" value={ep.episode_number} onChange={(e) => updEpisode(sIdx, eIdx, "episode_number", Number(e.target.value))} disabled={!canEditField("seasons")} className="bg-white border-slate-300" />
                                   <Input placeholder="Episode title" value={ep.title} onChange={(e) => updEpisode(sIdx, eIdx, "title", e.target.value)} disabled={!canEditField("seasons")} className="bg-white border-slate-300" data-testid={`episode-title-${sIdx}-${eIdx}`} />
                                   <Input type="date" value={ep.air_date} onChange={(e) => updEpisode(sIdx, eIdx, "air_date", e.target.value)} disabled={!canEditField("seasons")} className="bg-white border-slate-300" />
-                                  <Button type="button" variant="ghost" size="sm" onClick={() => remEpisode(sIdx, eIdx)} disabled={!canEditField("seasons")} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
+                                  <Button type="button" variant="ghost" size="sm" onClick={() => remEpisode(sIdx, eIdx)} disabled={!canEditField("seasons") || !canDelete} className={`text-slate-400 hover:text-rose-500 ${canDelete ? "" : "hidden"}`}><X className="w-4 h-4" /></Button>
                                 </div>
                                 <Textarea placeholder="Overview" rows={2} value={ep.overview} onChange={(e) => updEpisode(sIdx, eIdx, "overview", e.target.value)} disabled={!canEditField("seasons")} className="mt-2 bg-white border-slate-300 text-sm" />
                                 <div className="mt-2"><Label className="text-xs text-slate-600 block mb-1">Still image</Label><ImageUpload value={ep.still_url} onChange={(v) => updEpisode(sIdx, eIdx, "still_url", v)} /></div>
