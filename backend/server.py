@@ -2307,7 +2307,7 @@ async def list_movies(
     genre: Optional[str] = None,
     year: Optional[int] = None,
     sort: Optional[str] = "recent",
-    limit: int = 10000,
+    limit: int = 500000,
 ):
     filter_query: dict = {}
     if q:
@@ -2702,7 +2702,7 @@ async def list_series(
     genre: Optional[str] = None,
     year: Optional[int] = None,
     sort: Optional[str] = "recent",
-    limit: int = 10000,
+    limit: int = 500000,
 ):
     filter_query: dict = {}
     if q:
@@ -3139,7 +3139,7 @@ async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_us
     return dd
 
 @api_router.get("/actors")
-async def list_actors(q: Optional[str] = None, limit: int = 10000):
+async def list_actors(q: Optional[str] = None, limit: int = 500000):
     filter_query = {}
     if q:
         filter_query["name"] = {"$regex": q, "$options": "i"}

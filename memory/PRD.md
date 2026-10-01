@@ -84,6 +84,7 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - Clear (X) button hidden while in the buggy loading state.
 
 ## Backlog (P1/P2)
+- P1: Expand Home Page (trending series + upcoming episodes) — PAUSED
 - P1: Drag-to-reorder for crew, creators, and season/episode lists
 - P1: Actor detail redesign (parity)
 - P1: TV Series reviews (unlock TV Score on user profile)
@@ -95,6 +96,9 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 - P2: Threads/Forum layout redesign (TMDB-style sidebar + search)
 - P2: Verify custom sender domain on Resend so mails can come from `noreply@cineverse.app` instead of the platform default
 - P2: Refactor `server.py` into APIRouter modules
+
+## Changelog 2026-02
+- Raised default pagination caps on `/api/actors`, `/api/movies`, and `/api/series` from 10,000 → **500,000** to accommodate large catalogs on edit dialogs and admin tables.
 
 ## Credentials
 - Admin: admin@cineverse.com / Admin@123
