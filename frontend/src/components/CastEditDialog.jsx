@@ -167,6 +167,10 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
       characterRef.current?.focus();
       return;
     }
+    // Make sure the parent cache knows about this actor so the cast row renders their real name/photo.
+    if (!actors.some((a) => a.id === actor.id)) {
+      onActorCreated?.(actor);
+    }
     setSaving(true);
     onSave?.({ actor_id: actor.id, character_name: character.trim() });
     setSaving(false);
