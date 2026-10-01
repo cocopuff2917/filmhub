@@ -2307,7 +2307,7 @@ async def list_movies(
     genre: Optional[str] = None,
     year: Optional[int] = None,
     sort: Optional[str] = "recent",
-    limit: int = 500000,
+    limit: Optional[int] = None,
 ):
     filter_query: dict = {}
     if q:
@@ -2327,7 +2327,9 @@ async def list_movies(
         filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
     if year:
         filter_query["release_date"] = {"$regex": f"^{year}"}
-    cursor = db.movies.find(_alive(filter_query)).limit(limit)
+    cursor = db.movies.find(_alive(filter_query))
+    if limit:
+        cursor = cursor.limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
@@ -2702,7 +2704,7 @@ async def list_series(
     genre: Optional[str] = None,
     year: Optional[int] = None,
     sort: Optional[str] = "recent",
-    limit: int = 500000,
+    limit: Optional[int] = None,
 ):
     filter_query: dict = {}
     if q:
@@ -2721,7 +2723,9 @@ async def list_series(
         filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
     if year:
         filter_query["first_air_date"] = {"$regex": f"^{year}"}
-    cursor = db.series.find(_alive(filter_query)).limit(limit)
+    cursor = db.series.find(_alive(filter_query))
+    if limit:
+        cursor = cursor.limit(limit)
     docs = []
     async for d in cursor:
         docs.append(await enrich_series(d, deep=False))
@@ -3139,11 +3143,13 @@ async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_us
     return dd
 
 @api_router.get("/actors")
-async def list_actors(q: Optional[str] = None, limit: int = 500000):
+async def list_actors(q: Optional[str] = None, limit: Optional[int] = None):
     filter_query = {}
     if q:
         filter_query["name"] = {"$regex": q, "$options": "i"}
-    cursor = db.actors.find(_alive(filter_query)).limit(limit)
+    cursor = db.actors.find(_alive(filter_query))
+    if limit:
+        cursor = cursor.limit(limit)
     return [doc_to_dict(d) async for d in cursor]
 
 @api_router.get("/actors/{actor_id}")

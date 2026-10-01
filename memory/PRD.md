@@ -99,6 +99,7 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 
 ## Changelog 2026-02
 - Raised default pagination caps on `/api/actors`, `/api/movies`, and `/api/series` from 10,000 → **500,000** to accommodate large catalogs on edit dialogs and admin tables.
+- **Removed pagination cap entirely** on `/api/actors`, `/api/movies`, and `/api/series`. `limit` is now optional — when omitted, the endpoint returns the full dataset with no upper bound.
 
 ## Credentials
 - Admin: admin@cineverse.com / Admin@123
