@@ -700,11 +700,12 @@ async def enrich_series(doc, deep: bool = True):
         c["episode_count"] = total_episodes
         main_actor_ids.add(c.get("actor_id"))
 
-    # Promote recurring guest stars (>=5 episodes) into the Series Cast list.
+    # Promote every recurring/guest star into the Series Cast list, with their actual episode count.
+    # Keep a visual distinction: >=5 appearances → `recurring: true` badge on the card.
     RECURRING_THRESHOLD = 5
     recurring_candidates = []
     for aid, count in gs_counts.items():
-        if count < RECURRING_THRESHOLD or aid in main_actor_ids:
+        if aid in main_actor_ids:
             continue
         actor = actors_map.get(aid)
         if not actor:
@@ -714,7 +715,7 @@ async def enrich_series(doc, deep: bool = True):
             "character_name": gs_character.get(aid, ""),
             "actor": actor,
             "episode_count": count,
-            "recurring": True,
+            "recurring": count >= RECURRING_THRESHOLD,
         })
     recurring_candidates.sort(key=lambda x: -x["episode_count"])
     enriched_main.extend(recurring_candidates)
