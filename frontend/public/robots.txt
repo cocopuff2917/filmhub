@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Block admin, auth and private pages
+Disallow: /admin
+Disallow: /login
+Disallow: /register
+Disallow: /inbox
+Disallow: /reset-password
+Disallow: /forgot-password
+
+# Sitemap (dynamically generated from the catalog)
+Sitemap: /api/sitemap.xml

@@ -3724,6 +3724,31 @@ async def remove_from_collection(collection_id: str, payload: CollectionMembersh
     await coll.update_one({"_id": target_oid}, {"$pull": {"collection_ids": collection_id}})
     return {"ok": True}
 
+@api_router.get("/sitemap.xml")
+async def sitemap():
+    """XML sitemap listing every public movie, series, actor and collection."""
+    base = os.environ.get("PUBLIC_SITE_URL", "").rstrip("/")
+    urls: List[str] = []
+    # Static pages
+    for path in ["/", "/browse", "/forums"]:
+        urls.append(path)
+    async for d in db.movies.find(_alive(), {"_id": 1, "updated_at": 1, "created_at": 1}):
+        urls.append(f"/movie/{str(d['_id'])}")
+    async for d in db.series.find(_alive(), {"_id": 1}):
+        urls.append(f"/series/{str(d['_id'])}")
+    async for d in db.actors.find(_alive(), {"_id": 1}):
+        urls.append(f"/actor/{str(d['_id'])}")
+    async for d in db.collections.find({}, {"_id": 1}):
+        urls.append(f"/collection/{str(d['_id'])}")
+    today = datetime.now(timezone.utc).date().isoformat()
+    parts = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for u in urls:
+        loc = f"{base}{u}" if base else u
+        parts.append(f"  <url><loc>{loc}</loc><lastmod>{today}</lastmod></url>")
+    parts.append("</urlset>")
+    xml = "\n".join(parts)
+    return FastAPIResponse(content=xml, media_type="application/xml")
+
 app.include_router(api_router)
 
 app.add_middleware(
