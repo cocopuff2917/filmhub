@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, GripVertical } from "lucide-react";
+import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, GripVertical, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import CastEditDialog from "@/components/CastEditDialog";
@@ -290,6 +290,17 @@ export default function MovieEdit() {
     setForm(nextForm);
     save(nextForm);
   };
+  const toggleCastLock = async (actorId) => {
+    try {
+      const r = await api.post(`/movies/${id}/cast-lock`, { actor_id: actorId });
+      setMovie((m) => m ? { ...m, locked_cast_actor_ids: r.data.locked_cast_actor_ids } : m);
+      const nowLocked = (r.data.locked_cast_actor_ids || []).includes(actorId);
+      const actor = actors.find((a) => a.id === actorId);
+      toast.success(`${nowLocked ? "Locked" : "Unlocked"} ${actor?.name || "cast member"}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed");
+    }
+  };
   const handleCastSave = (row) => {
     // Prevent duplicates: if adding (index==null) and this actor is already in the list, error out.
     if (castDialog.index == null && (form.cast || []).some((c) => c.actor_id === row.actor_id)) {
@@ -439,32 +450,50 @@ export default function MovieEdit() {
               <h2 className="font-heading text-xl font-bold text-slate-900">Cast</h2>
               <LockIcon locked={isFieldLocked("cast")} canToggle={isMod} onToggle={() => toggleLock("cast")} />
             </div>
+            {(movie?.locked_cast_actor_ids || []).length > 0 && (
+              <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-center gap-2" data-testid="cast-lock-banner">
+                <LockKeyhole className="w-3.5 h-3.5 flex-shrink-0" />
+                {(movie.locked_cast_actor_ids || []).length} cast member{(movie.locked_cast_actor_ids || []).length !== 1 && "s"} locked by moderators — these rows can't be removed, edited or reordered by non-mods.
+              </div>
+            )}
             <div className="space-y-2">
               {form.cast.map((c, i) => {
                 const actor = actors.find((a) => a.id === c.actor_id);
                 const dragging = dragIdx === i;
+                const rowLocked = (movie?.locked_cast_actor_ids || []).includes(c.actor_id);
+                const rowEditable = canEditField("cast") && (isMod || !rowLocked);
                 return (
                   <div
                     key={i}
-                    draggable={canEditField("cast")}
+                    draggable={rowEditable}
                     onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-                    onDrop={(e) => { e.preventDefault(); reorderCast(dragIdx, i); setDragIdx(null); }}
+                    onDrop={(e) => { e.preventDefault(); if (rowEditable) reorderCast(dragIdx, i); setDragIdx(null); }}
                     onDragEnd={() => setDragIdx(null)}
-                    className={`flex items-center gap-3 rounded-md border bg-white px-3 py-2 transition ${dragging ? "opacity-40 border-cyan-400" : "border-slate-200 hover:border-slate-300"}`}
+                    className={`flex items-center gap-3 rounded-md border bg-white px-3 py-2 transition ${dragging ? "opacity-40 border-cyan-400" : rowLocked ? "border-amber-300 bg-amber-50/40" : "border-slate-200 hover:border-slate-300"}`}
                     data-testid={`cast-row-${i}`}
                   >
-                    <GripVertical className={`w-4 h-4 text-slate-400 ${canEditField("cast") ? "cursor-grab active:cursor-grabbing" : "opacity-30"}`} data-testid={`cast-drag-${i}`} />
+                    <GripVertical className={`w-4 h-4 text-slate-400 ${rowEditable ? "cursor-grab active:cursor-grabbing" : "opacity-30"}`} data-testid={`cast-drag-${i}`} />
                     <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-xs text-slate-500 flex-shrink-0">
                       {actor?.photo_url ? <img src={fileUrl(actor.photo_url)} alt="" className="w-full h-full object-cover" /> : (actor?.name?.[0] || "?")}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm text-slate-900 truncate">{actor?.name || "(unknown)"}</div>
+                      <div className="font-semibold text-sm text-slate-900 truncate flex items-center gap-1.5">
+                        {actor?.name || "(unknown)"}
+                        {rowLocked && <LockKeyhole className="w-3.5 h-3.5 text-amber-500" title="Locked by moderators" />}
+                      </div>
                       <div className="text-xs text-slate-500 truncate">as {c.character_name || "—"}</div>
                     </div>
                     <span className="text-[10px] text-slate-400 tabular-nums w-6 text-right">#{i + 1}</span>
-                    <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!canEditField("cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!canEditField("cast")} className="text-slate-400 hover:text-rose-500" data-testid={`cast-remove-${i}`}><X className="w-4 h-4" /></Button>
+                    {isMod && c.actor_id && (
+                      <Button type="button" size="sm" variant="outline" onClick={() => toggleCastLock(c.actor_id)} className={`h-8 ${rowLocked ? "border-amber-400 text-amber-700 hover:bg-amber-100" : "border-slate-300 text-slate-700 hover:bg-slate-100"}`} data-testid={`cast-lock-${i}`}>
+                        {rowLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                      </Button>
+                    )}
+                    <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!rowEditable} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
+                    {!(rowLocked && !isMod) && (
+                      <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!rowEditable} className="text-slate-400 hover:text-rose-500" data-testid={`cast-remove-${i}`}><X className="w-4 h-4" /></Button>
+                    )}
                   </div>
                 );
               })}

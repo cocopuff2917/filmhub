@@ -345,6 +345,7 @@ class MovieCreate(BaseModel):
     awards_nominations: Optional[int] = None
     is_trending: bool = False
     collection_ids: List[str] = []
+    locked_cast_actor_ids: List[str] = []
 
 class MovieUpdate(BaseModel):
     title: Optional[str] = None
@@ -369,6 +370,7 @@ class MovieUpdate(BaseModel):
     awards_nominations: Optional[int] = None
     is_trending: Optional[bool] = None
     collection_ids: Optional[List[str]] = None
+    locked_cast_actor_ids: Optional[List[str]] = None
 
 class ActorCreate(BaseModel):
     name: str
@@ -441,6 +443,8 @@ class SeriesCreate(BaseModel):
     seasons: List[SeasonItem] = []
     is_trending: bool = False
     collection_ids: List[str] = []
+    locked_cast_actor_ids: List[str] = []
+    locked_guest_stars: List[str] = []  # composite keys "{season_number}:{episode_number}:{actor_id}"
 
 class SeriesUpdate(BaseModel):
     title: Optional[str] = None
@@ -467,6 +471,8 @@ class SeriesUpdate(BaseModel):
     seasons: Optional[List[SeasonItem]] = None
     is_trending: Optional[bool] = None
     collection_ids: Optional[List[str]] = None
+    locked_cast_actor_ids: Optional[List[str]] = None
+    locked_guest_stars: Optional[List[str]] = None
 
 # ----------- Moderation Models -----------
 class SuspendRequest(BaseModel):
@@ -589,6 +595,25 @@ def _dedupe_cast(rows):
         seen.add(aid)
         out.append(d)
     return out
+
+def _enforce_cast_locks(existing_cast, submitted_cast, locked_actor_ids, is_mod):
+    """Pin locked cast rows at their original positions and keep their exact row content.
+    Mods bypass. Non-mods may edit/remove/reorder every unlocked row freely."""
+    if is_mod or not locked_actor_ids:
+        return submitted_cast or []
+    locked_set = set(locked_actor_ids)
+    locked_rows = []  # (original_index, row)
+    for i, row in enumerate(existing_cast or []):
+        if row.get("actor_id") in locked_set:
+            locked_rows.append((i, dict(row)))
+    # Keep every submitted row whose actor_id is NOT locked (non-locked actors are free to shuffle/edit/remove)
+    unlocked_submitted = [dict(r) for r in (submitted_cast or []) if r.get("actor_id") not in locked_set]
+    # Rebuild list by inserting locked rows at their original indices
+    result = unlocked_submitted[:]
+    for pos, row in sorted(locked_rows, key=lambda x: x[0]):
+        pos_clamped = min(pos, len(result))
+        result.insert(pos_clamped, row)
+    return result
 
 def _norm_title(s: str) -> str:
     return (s or "").strip().lower()
@@ -2372,11 +2397,21 @@ def _check_locks(old_doc: dict, update_data: dict, user: dict, action: str = "ed
 @api_router.patch("/movies/{movie_id}")
 async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
+    is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    # Non-mods cannot change locked_cast_actor_ids
+    if "locked_cast_actor_ids" in update_data and not is_mod:
+        update_data.pop("locked_cast_actor_ids", None)
     if "cast" in update_data:
+        update_data["cast"] = _enforce_cast_locks(
+            old_doc.get("cast") or [],
+            update_data["cast"],
+            old_doc.get("locked_cast_actor_ids") or [],
+            is_mod,
+        )
         update_data["cast"] = _dedupe_cast(update_data["cast"])
     if "crew" in update_data:
         update_data["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["crew"]]
-    old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
     _check_locks(old_doc, update_data, user)
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
@@ -2385,6 +2420,25 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
     changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
     await log_edit(user, "movie", movie_id, "update", enriched["title"], f"Updated {changed_names}", changes)
     return enriched
+
+@api_router.post("/movies/{movie_id}/cast-lock")
+async def toggle_movie_cast_lock(movie_id: str, payload: dict, mod: dict = Depends(get_current_moderator)):
+    actor_id = (payload or {}).get("actor_id")
+    if not actor_id:
+        raise HTTPException(status_code=400, detail="actor_id required")
+    doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    current = list(doc.get("locked_cast_actor_ids") or [])
+    if actor_id in current:
+        current.remove(actor_id)
+        action = "unlock"
+    else:
+        current.append(actor_id)
+        action = "lock"
+    await db.movies.update_one({"_id": doc["_id"]}, {"$set": {"locked_cast_actor_ids": current}})
+    await log_edit(mod, "movie", movie_id, "cast-lock", doc.get("title", ""), f"{action} cast actor {actor_id}")
+    return {"ok": True, "locked_cast_actor_ids": current}
 
 @api_router.patch("/movies/{movie_id}/lock")
 async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
@@ -2629,6 +2683,43 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
     update_data = _serialize_series_payload(update_data)
     old_doc = await db.series.find_one({"_id": ObjectId(series_id)}) or {}
     _check_locks(old_doc, update_data, user)
+    is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    if "locked_cast_actor_ids" in update_data and not is_mod:
+        update_data.pop("locked_cast_actor_ids", None)
+    if "locked_guest_stars" in update_data and not is_mod:
+        update_data.pop("locked_guest_stars", None)
+    # Enforce main_cast locks
+    if "main_cast" in update_data:
+        update_data["main_cast"] = _enforce_cast_locks(
+            old_doc.get("main_cast") or [],
+            update_data["main_cast"],
+            old_doc.get("locked_cast_actor_ids") or [],
+            is_mod,
+        )
+    # Enforce per-episode guest_star locks
+    if "seasons" in update_data and not is_mod:
+        locked_gs = set(old_doc.get("locked_guest_stars") or [])
+        if locked_gs:
+            # Build quick lookup: season_number -> episode_number -> old guest_stars list
+            old_lookup = {}
+            for sn in old_doc.get("seasons") or []:
+                sn_num = sn.get("season_number")
+                for ep in sn.get("episodes") or []:
+                    ep_num = ep.get("episode_number")
+                    old_lookup[(sn_num, ep_num)] = ep.get("guest_stars") or []
+            for sn in update_data["seasons"]:
+                sn_num = sn.get("season_number")
+                for ep in sn.get("episodes") or []:
+                    ep_num = ep.get("episode_number")
+                    old_guests = old_lookup.get((sn_num, ep_num), [])
+                    locked_for_ep = [og for og in old_guests if f"{sn_num}:{ep_num}:{og.get('actor_id')}" in locked_gs]
+                    locked_ids = {og.get("actor_id") for og in locked_for_ep}
+                    ep["guest_stars"] = _enforce_cast_locks(
+                        old_guests,
+                        ep.get("guest_stars") or [],
+                        list(locked_ids),
+                        is_mod,
+                    )
     await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": update_data})
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
     enriched = await enrich_series(doc)
@@ -2636,6 +2727,43 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
     changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
     await log_edit(user, "series", series_id, "update", enriched["title"], f"Updated {changed_names}", changes)
     return enriched
+
+@api_router.post("/series/{series_id}/cast-lock")
+async def toggle_series_cast_lock(series_id: str, payload: dict, mod: dict = Depends(get_current_moderator)):
+    actor_id = (payload or {}).get("actor_id")
+    if not actor_id:
+        raise HTTPException(status_code=400, detail="actor_id required")
+    doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+    current = list(doc.get("locked_cast_actor_ids") or [])
+    if actor_id in current:
+        current.remove(actor_id); action = "unlock"
+    else:
+        current.append(actor_id); action = "lock"
+    await db.series.update_one({"_id": doc["_id"]}, {"$set": {"locked_cast_actor_ids": current}})
+    await log_edit(mod, "series", series_id, "cast-lock", doc.get("title", ""), f"{action} main cast actor {actor_id}")
+    return {"ok": True, "locked_cast_actor_ids": current}
+
+@api_router.post("/series/{series_id}/guest-star-lock")
+async def toggle_series_guest_lock(series_id: str, payload: dict, mod: dict = Depends(get_current_moderator)):
+    sn = (payload or {}).get("season_number")
+    ep = (payload or {}).get("episode_number")
+    actor_id = (payload or {}).get("actor_id")
+    if sn is None or ep is None or not actor_id:
+        raise HTTPException(status_code=400, detail="season_number, episode_number and actor_id required")
+    key = f"{sn}:{ep}:{actor_id}"
+    doc = await db.series.find_one({"_id": ObjectId(series_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+    current = list(doc.get("locked_guest_stars") or [])
+    if key in current:
+        current.remove(key); action = "unlock"
+    else:
+        current.append(key); action = "lock"
+    await db.series.update_one({"_id": doc["_id"]}, {"$set": {"locked_guest_stars": current}})
+    await log_edit(mod, "series", series_id, "guest-lock", doc.get("title", ""), f"{action} guest star {key}")
+    return {"ok": True, "locked_guest_stars": current}
 
 @api_router.patch("/series/{series_id}/lock")
 async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
