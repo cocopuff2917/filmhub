@@ -495,7 +495,7 @@ export default function SeriesEdit() {
             </div>
 
             <Field name="network_logo_url" label="Network Logo" locked={isFieldLocked("network_logo_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("network_logo_url")}>
-              <ImageUpload value={form.network_logo_url} onChange={(v) => setField("network_logo_url", v)} testid="field-network-logo" />
+              <ImageUpload value={form.network_logo_url} onChange={(v) => setField("network_logo_url", v)} testid="field-network-logo" canDelete={canDelete} />
             </Field>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -620,14 +620,14 @@ export default function SeriesEdit() {
           <section id="images" ref={(el) => (sectionRefs.current["images"] = el)} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="poster_url" label="Poster" locked={isFieldLocked("poster_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("poster_url")}>
-                <ImageUpload value={form.poster_url} onChange={(v) => setField("poster_url", v)} testid="field-poster" />
+                <ImageUpload value={form.poster_url} onChange={(v) => setField("poster_url", v)} testid="field-poster" canDelete={canDelete} />
               </Field>
               <Field name="backdrop_url" label="Backdrop" locked={isFieldLocked("backdrop_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("backdrop_url")}>
-                <ImageUpload value={form.backdrop_url} onChange={(v) => setField("backdrop_url", v)} testid="field-backdrop" />
+                <ImageUpload value={form.backdrop_url} onChange={(v) => setField("backdrop_url", v)} testid="field-backdrop" canDelete={canDelete} />
               </Field>
             </div>
             <Field name="gallery" label={`Gallery (${form.gallery.length} images)`} locked={isFieldLocked("gallery")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("gallery")}>
-              <GalleryUpload value={form.gallery} onChange={(v) => setField("gallery", v)} testid="field-gallery" />
+              <GalleryUpload value={form.gallery} onChange={(v) => setField("gallery", v)} testid="field-gallery" canDelete={canDelete} />
             </Field>
           </section>
 
@@ -659,7 +659,7 @@ export default function SeriesEdit() {
                           <div><Label className="text-xs text-slate-600">Air date</Label><Input type="date" value={sn.air_date} onChange={(e) => updSeason(sIdx, "air_date", e.target.value)} disabled={!canEditField("seasons")} className="mt-1 bg-white border-slate-300" /></div>
                         </div>
                         <div><Label className="text-xs text-slate-600">Overview</Label><Textarea rows={2} value={sn.overview} onChange={(e) => updSeason(sIdx, "overview", e.target.value)} disabled={!canEditField("seasons")} className="mt-1 bg-white border-slate-300" /></div>
-                        <div><Label className="text-xs text-slate-600 block mb-1">Poster</Label><ImageUpload value={sn.poster_url} onChange={(v) => updSeason(sIdx, "poster_url", v)} /></div>
+                        <div><Label className="text-xs text-slate-600 block mb-1">Poster</Label><ImageUpload value={sn.poster_url} onChange={(v) => updSeason(sIdx, "poster_url", v)} canDelete={canDelete} /></div>
 
                         <div className="pt-2 border-t border-slate-100">
                           <div className="flex items-center justify-between mb-2">
@@ -676,7 +676,7 @@ export default function SeriesEdit() {
                                   <Button type="button" variant="ghost" size="sm" onClick={() => remEpisode(sIdx, eIdx)} disabled={!canEditField("seasons") || !canDelete} className={`text-slate-400 hover:text-rose-500 ${canDelete ? "" : "hidden"}`}><X className="w-4 h-4" /></Button>
                                 </div>
                                 <Textarea placeholder="Overview" rows={2} value={ep.overview} onChange={(e) => updEpisode(sIdx, eIdx, "overview", e.target.value)} disabled={!canEditField("seasons")} className="mt-2 bg-white border-slate-300 text-sm" />
-                                <div className="mt-2"><Label className="text-xs text-slate-600 block mb-1">Still image</Label><ImageUpload value={ep.still_url} onChange={(v) => updEpisode(sIdx, eIdx, "still_url", v)} /></div>
+                                <div className="mt-2"><Label className="text-xs text-slate-600 block mb-1">Still image</Label><ImageUpload value={ep.still_url} onChange={(v) => updEpisode(sIdx, eIdx, "still_url", v)} canDelete={canDelete} /></div>
 
                                 <div className="mt-3 pt-3 border-t border-slate-200">
                                   <div className="flex items-center justify-between mb-2">

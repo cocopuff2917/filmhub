@@ -487,7 +487,9 @@ class SeriesUpdate(BaseModel):
 
 # ----------- Moderation Models -----------
 class SuspendRequest(BaseModel):
-    duration_days: Optional[int] = None  # None = permanent
+    duration_days: Optional[int] = None  # legacy: days (None = permanent when duration also absent)
+    duration: Optional[int] = None       # new numeric value paired with duration_unit
+    duration_unit: Optional[str] = None  # "minutes" | "hours" | "days" | "permanent"
     reason: str = ""
 
 class RoleUpdate(BaseModel):
@@ -702,6 +704,52 @@ def _enforce_season_episode_integrity(existing_seasons, submitted_seasons, user)
         if new_s.get("season_number") not in merged_sns:
             merged.append(dict(new_s))
     return merged
+
+def _enforce_image_delete_guard(old_doc: dict, update_data: dict, user: dict, single_fields: Optional[List[str]] = None, gallery_fields: Optional[List[str]] = None):
+    """Non-mods cannot delete images — silently restore any single-image field that got blanked
+    and any gallery items that were removed. Users with content.delete bypass."""
+    if _has_perm(user, "content.delete"):
+        return
+    for f in (single_fields or []):
+        if f in update_data:
+            old_val = old_doc.get(f) or ""
+            new_val = update_data.get(f) or ""
+            # Only guard against DELETION (clearing an existing image). Replacing with a new URL is fine.
+            if old_val and not new_val:
+                update_data[f] = old_val
+    for f in (gallery_fields or []):
+        if f in update_data:
+            old_list = list(old_doc.get(f) or [])
+            new_list = list(update_data.get(f) or [])
+            missing = [p for p in old_list if p not in new_list]
+            if missing:
+                # Keep removed items at the end, preserving any new additions.
+                update_data[f] = new_list + missing
+
+def _enforce_series_episode_image_guard(old_doc: dict, update_data: dict, user: dict):
+    """Guard poster_url (season) and still_url + stills (episode) images from non-mod deletion."""
+    if _has_perm(user, "content.delete") or "seasons" not in update_data:
+        return
+    old_seasons = old_doc.get("seasons") or []
+    old_by_sn = {s.get("season_number"): s for s in old_seasons}
+    for sn_entry in update_data["seasons"]:
+        sn_num = sn_entry.get("season_number")
+        old_sn = old_by_sn.get(sn_num) or {}
+        # Season poster
+        if old_sn.get("poster_url") and not (sn_entry.get("poster_url") or ""):
+            sn_entry["poster_url"] = old_sn.get("poster_url")
+        old_eps = {e.get("episode_number"): e for e in (old_sn.get("episodes") or [])}
+        for ep in (sn_entry.get("episodes") or []):
+            en = ep.get("episode_number")
+            old_ep = old_eps.get(en) or {}
+            if old_ep.get("still_url") and not (ep.get("still_url") or ""):
+                ep["still_url"] = old_ep.get("still_url")
+            # Episode stills gallery
+            old_stills = list(old_ep.get("stills") or [])
+            new_stills = list(ep.get("stills") or [])
+            missing = [p for p in old_stills if p not in new_stills]
+            if missing:
+                ep["stills"] = new_stills + missing
 
 def _norm_title(s: str) -> str:
     return (s or "").strip().lower()
@@ -1607,37 +1655,61 @@ async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depend
         raise HTTPException(status_code=404, detail="User not found")
     if target.get("role") == "admin":
         raise HTTPException(status_code=403, detail="Cannot suspend admin")
-    if payload.duration_days is None:
+
+    # Normalize into (unit, amount)
+    unit = (payload.duration_unit or "").lower() or None
+    amount = payload.duration
+    if unit is None and amount is None and payload.duration_days is not None:
+        unit = "days"
+        amount = payload.duration_days
+
+    if unit == "permanent" or (unit is None and amount is None):
         until = "permanent"
         duration_label = "permanently"
     else:
-        if payload.duration_days <= 0:
-            raise HTTPException(status_code=400, detail="Duration must be positive")
-        until = (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat()
-        duration_label = f"for {payload.duration_days} day{'s' if payload.duration_days != 1 else ''}"
+        if amount is None or amount <= 0:
+            raise HTTPException(status_code=400, detail="Duration must be a positive number")
+        if unit == "minutes":
+            delta = timedelta(minutes=amount)
+            duration_label = f"for {amount} minute{'s' if amount != 1 else ''}"
+        elif unit == "hours":
+            delta = timedelta(hours=amount)
+            duration_label = f"for {amount} hour{'s' if amount != 1 else ''}"
+        else:  # default to days
+            delta = timedelta(days=amount)
+            duration_label = f"for {amount} day{'s' if amount != 1 else ''}"
+        until = (datetime.now(timezone.utc) + delta).isoformat()
+
+    # Detect whether we are MODIFYING an existing suspension vs. creating a new one.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    prev = target.get("suspended_until")
+    was_suspended = bool(prev) and (prev == "permanent" or prev > now_iso)
+    action = "suspend-update" if was_suspended else "suspend"
+
     await db.users.update_one({"_id": target["_id"]}, {"$set": {
         "suspended_until": until,
         "suspension_reason": payload.reason or "",
         "suspended_by": mod["id"],
         "suspended_by_name": mod.get("name"),
-        "suspended_at": datetime.now(timezone.utc).isoformat(),
+        "suspended_at": now_iso,
     }})
     changes = [
-        {"field": "status", "before": "active", "after": "suspended"},
-        {"field": "duration", "before": "—", "after": duration_label},
-        {"field": "until", "before": "—", "after": "permanent" if until == "permanent" else until[:19].replace("T", " ")},
-        {"field": "reason", "before": "—", "after": payload.reason or "(no reason)"},
+        {"field": "duration", "before": prev if was_suspended else "—", "after": duration_label},
+        {"field": "until", "before": prev if was_suspended else "—", "after": "permanent" if until == "permanent" else until[:19].replace("T", " ")},
+        {"field": "reason", "before": target.get("suspension_reason") or "—", "after": payload.reason or "(no reason)"},
     ]
-    await log_edit(mod, "user", user_id, "suspend", target.get("name", ""), f"Suspended {duration_label}: {payload.reason or '(no reason)'}", changes)
+    verb = "Updated suspension" if was_suspended else "Suspended"
+    await log_edit(mod, "user", user_id, action, target.get("name", ""), f"{verb} {duration_label}: {payload.reason or '(no reason)'}", changes)
+    title = f"Your suspension has been updated — now {duration_label}" if was_suspended else f"Your account has been suspended {duration_label}"
     await _create_notification(
         user_id=str(target["_id"]),
         ntype="suspension",
-        title=f"Your account has been suspended {duration_label}",
+        title=title,
         body=payload.reason or "",
         link="/inbox",
         from_user=mod,
     )
-    return {"ok": True, "suspended_until": until}
+    return {"ok": True, "suspended_until": until, "updated": was_suspended}
 
 @api_router.post("/moderation/users/{user_id}/unsuspend")
 async def unsuspend_user(user_id: str, mod: dict = Depends(get_current_user)):
@@ -2513,6 +2585,7 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
         update_data["cast"] = _dedupe_cast(update_data["cast"])
     if "crew" in update_data:
         update_data["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["crew"]]
+    _enforce_image_delete_guard(old_doc, update_data, user, single_fields=["poster_url", "backdrop_url"], gallery_fields=["gallery"])
     _check_locks(old_doc, update_data, user)
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
@@ -2675,6 +2748,44 @@ async def recent_series(limit: int = 12):
         docs.append(await enrich_series(d, deep=False))
     return docs
 
+@api_router.get("/series/upcoming-episodes")
+async def upcoming_episodes(limit: int = 12):
+    """Return series that have at least one future-dated episode, with the next upcoming episode preview."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    results = []
+    async for d in db.series.find(_alive()):
+        next_ep = None
+        for sn in (d.get("seasons") or []):
+            for ep in (sn.get("episodes") or []):
+                ad = ep.get("air_date")
+                if not ad or ad < today:
+                    continue
+                candidate = {
+                    "season_number": sn.get("season_number"),
+                    "episode_number": ep.get("episode_number"),
+                    "name": ep.get("name"),
+                    "air_date": ad,
+                    "still_url": ep.get("still_url", ""),
+                    "synopsis": ep.get("synopsis", ""),
+                }
+                if next_ep is None or candidate["air_date"] < next_ep["air_date"]:
+                    next_ep = candidate
+        if next_ep:
+            enriched = await enrich_series(d, deep=False)
+            enriched["next_episode"] = next_ep
+            results.append(enriched)
+    results.sort(key=lambda x: x["next_episode"]["air_date"])
+    return results[:limit]
+
+@api_router.get("/series/top-rated")
+async def top_rated_series(limit: int = 12):
+    docs = []
+    async for d in db.series.find(_alive()):
+        docs.append(await enrich_series(d, deep=False))
+    rated = [d for d in docs if d.get("rating_count") and d.get("avg_rating") is not None]
+    rated.sort(key=lambda x: (-(x.get("avg_rating") or 0), -(x.get("rating_count") or 0)))
+    return rated[:limit]
+
 @api_router.get("/series/{series_id}")
 async def get_series(series_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
     try:
@@ -2806,6 +2917,8 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
             update_data["seasons"],
             user,
         )
+    _enforce_image_delete_guard(old_doc, update_data, user, single_fields=["poster_url", "backdrop_url", "network_logo_url"], gallery_fields=["gallery"])
+    _enforce_series_episode_image_guard(old_doc, update_data, user)
     # Enforce per-episode guest_star locks
     if "seasons" in update_data and not is_mod:
         locked_gs = set(old_doc.get("locked_guest_stars") or [])
@@ -3094,6 +3207,7 @@ async def get_actor(actor_id: str, viewer: Optional[dict] = Depends(get_optional
 async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     old_doc = await db.actors.find_one({"_id": ObjectId(actor_id)}) or {}
+    _enforce_image_delete_guard(old_doc, update_data, user, single_fields=["photo_url"], gallery_fields=["gallery"])
     _check_locks(old_doc, update_data, user)
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": update_data})
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})

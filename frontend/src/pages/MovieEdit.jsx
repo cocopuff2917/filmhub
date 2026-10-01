@@ -118,6 +118,7 @@ export default function MovieEdit() {
   const perms = (user && user.permissions) || [];
   const canLockCast = isMod || perms.includes("content.lock_cast");
   const canProtectFields = isMod || perms.includes("content.protect_fields");
+  const canDelete = isMod || perms.includes("content.delete");
 
   useEffect(() => {
     (async () => {
@@ -563,14 +564,14 @@ export default function MovieEdit() {
           <section id="images" ref={(el) => (sectionRefs.current["images"] = el)} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="poster_url" label="Poster" locked={isFieldLocked("poster_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("poster_url")}>
-                <ImageUpload value={form.poster_url} onChange={(v) => setField("poster_url", v)} testid="field-poster" />
+                <ImageUpload value={form.poster_url} onChange={(v) => setField("poster_url", v)} testid="field-poster" canDelete={canDelete} />
               </Field>
               <Field name="backdrop_url" label="Backdrop" locked={isFieldLocked("backdrop_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("backdrop_url")}>
-                <ImageUpload value={form.backdrop_url} onChange={(v) => setField("backdrop_url", v)} testid="field-backdrop" />
+                <ImageUpload value={form.backdrop_url} onChange={(v) => setField("backdrop_url", v)} testid="field-backdrop" canDelete={canDelete} />
               </Field>
             </div>
             <Field name="gallery" label={`Gallery (${form.gallery.length} images)`} locked={isFieldLocked("gallery")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("gallery")}>
-              <GalleryUpload value={form.gallery} onChange={(v) => setField("gallery", v)} testid="field-gallery" />
+              <GalleryUpload value={form.gallery} onChange={(v) => setField("gallery", v)} testid="field-gallery" canDelete={canDelete} />
             </Field>
           </section>
 

@@ -198,8 +198,9 @@ function UsersTab({ currentRole }) {
   const [customRoles, setCustomRoles] = useState([]);
   const [query, setQuery] = useState("");
   const [suspendTarget, setSuspendTarget] = useState(null);
-  const [duration, setDuration] = useState("7");
-  const [customDays, setCustomDays] = useState("");
+  const [duration, setDuration] = useState("7");       // preset dropdown value
+  const [customAmount, setCustomAmount] = useState(""); // numeric input for Custom…
+  const [customUnit, setCustomUnit] = useState("days"); // minutes | hours | days
   const [reason, setReason] = useState("");
   const [messageTarget, setMessageTarget] = useState(null);
   const [ipData, setIpData] = useState({});
@@ -227,20 +228,49 @@ function UsersTab({ currentRole }) {
 
   const submitSuspend = async () => {
     const body = { reason };
+    // Preset format: "<amount>:<unit>" or "permanent" / "custom"
     if (duration === "permanent") {
-      // no duration_days
+      body.duration_unit = "permanent";
     } else if (duration === "custom") {
-      const n = Number(customDays);
-      if (!n || n <= 0) { toast.error("Enter a valid number of days"); return; }
-      body.duration_days = n;
+      const n = Number(customAmount);
+      if (!n || n <= 0) { toast.error(`Enter a valid number of ${customUnit}`); return; }
+      body.duration = n;
+      body.duration_unit = customUnit;
     } else {
-      body.duration_days = Number(duration);
+      const [amtStr, unit] = duration.split(":");
+      const n = Number(amtStr);
+      body.duration = n;
+      body.duration_unit = unit || "days";
     }
     try {
-      await api.post(`/moderation/users/${suspendTarget.id}/suspend`, body);
-      toast.success("User suspended");
-      setSuspendTarget(null); setReason(""); setDuration("7"); setCustomDays(""); load();
+      const r = await api.post(`/moderation/users/${suspendTarget.id}/suspend`, body);
+      toast.success(r.data.updated ? "Suspension updated" : "User suspended");
+      setSuspendTarget(null); setReason(""); setDuration("7"); setCustomAmount(""); setCustomUnit("days"); load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const openSuspendDialog = (u, modify = false) => {
+    if (modify) {
+      // Pre-fill with the existing reason & reset duration to custom
+      setReason(u.suspension_reason || "");
+      setDuration("custom");
+      // best-effort: convert remaining time into the smallest unit
+      if (u.suspended_until && u.suspended_until !== "permanent") {
+        const until = new Date(u.suspended_until);
+        const ms = until.getTime() - Date.now();
+        if (ms > 0) {
+          const mins = Math.round(ms / 60000);
+          if (mins < 120) { setCustomAmount(String(mins)); setCustomUnit("minutes"); }
+          else if (mins < 60 * 48) { setCustomAmount(String(Math.round(mins / 60))); setCustomUnit("hours"); }
+          else { setCustomAmount(String(Math.round(mins / 1440))); setCustomUnit("days"); }
+        }
+      } else if (u.suspended_until === "permanent") {
+        setDuration("permanent");
+      }
+    } else {
+      setReason(""); setDuration("7"); setCustomAmount(""); setCustomUnit("days");
+    }
+    setSuspendTarget(u);
   };
 
   const unsuspend = async (uid) => {
@@ -344,11 +374,16 @@ function UsersTab({ currentRole }) {
                 )}
                 {u.role !== "admin" && (
                   isSuspended(u) ? (
-                    <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>
-                      <CheckCircle className="w-4 h-4 mr-1" /> Unsuspend
-                    </Button>
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => openSuspendDialog(u, true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid={`modify-suspension-${u.id}`}>
+                        <Edit className="w-4 h-4 mr-1" /> Modify
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>
+                        <CheckCircle className="w-4 h-4 mr-1" /> Unsuspend
+                      </Button>
+                    </>
                   ) : (
-                    <Button size="sm" variant="outline" onClick={() => setSuspendTarget(u)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`suspend-${u.id}`}>
+                    <Button size="sm" variant="outline" onClick={() => openSuspendDialog(u, false)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`suspend-${u.id}`}>
                       <Ban className="w-4 h-4 mr-1" /> Suspend
                     </Button>
                   )
@@ -405,10 +440,10 @@ function UsersTab({ currentRole }) {
         </div>
 
         {suspendTarget && (
-          <Dialog open={!!suspendTarget} onOpenChange={(v) => { if (!v) { setSuspendTarget(null); setReason(""); setDuration("7"); setCustomDays(""); } }}>
+          <Dialog open={!!suspendTarget} onOpenChange={(v) => { if (!v) { setSuspendTarget(null); setReason(""); setDuration("7"); setCustomAmount(""); setCustomUnit("days"); } }}>
             <DialogContent className="bg-[#14181f] border-white/10 text-white max-w-lg" data-testid="suspend-user-dialog">
               <DialogHeader>
-                <DialogTitle>Suspend {suspendTarget.name}?</DialogTitle>
+                <DialogTitle>{isSuspended(suspendTarget) ? `Modify suspension for ${suspendTarget.name}` : `Suspend ${suspendTarget.name}?`}</DialogTitle>
                 <DialogDescription className="text-slate-400">
                   The user will only see "Support" — your identity is hidden from them. They keep read-only access to their inbox.
                 </DialogDescription>
@@ -419,23 +454,41 @@ function UsersTab({ currentRole }) {
                   <Select value={duration} onValueChange={setDuration}>
                     <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-duration-select"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#14181f] text-white border-white/10">
-                      <SelectItem value="1">1 day</SelectItem>
-                      <SelectItem value="3">3 days</SelectItem>
+                      <SelectItem value="5:minutes">5 minutes</SelectItem>
+                      <SelectItem value="15:minutes">15 minutes</SelectItem>
+                      <SelectItem value="30:minutes">30 minutes</SelectItem>
+                      <SelectItem value="1:hours">1 hour</SelectItem>
+                      <SelectItem value="6:hours">6 hours</SelectItem>
+                      <SelectItem value="24:hours">24 hours</SelectItem>
+                      <SelectItem value="1:days">1 day</SelectItem>
+                      <SelectItem value="3:days">3 days</SelectItem>
                       <SelectItem value="7">7 days</SelectItem>
-                      <SelectItem value="14">14 days</SelectItem>
-                      <SelectItem value="30">30 days</SelectItem>
-                      <SelectItem value="90">90 days</SelectItem>
-                      <SelectItem value="180">180 days</SelectItem>
-                      <SelectItem value="365">1 year</SelectItem>
+                      <SelectItem value="14:days">14 days</SelectItem>
+                      <SelectItem value="30:days">30 days</SelectItem>
+                      <SelectItem value="90:days">90 days</SelectItem>
+                      <SelectItem value="365:days">1 year</SelectItem>
                       <SelectItem value="custom">Custom…</SelectItem>
                       <SelectItem value="permanent">Permanent</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 {duration === "custom" && (
-                  <div>
-                    <label className="text-xs uppercase tracking-widest text-slate-400">Days</label>
-                    <Input type="number" min="1" value={customDays} onChange={(e) => setCustomDays(e.target.value)} placeholder="e.g. 45" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-custom-days" />
+                  <div className="grid grid-cols-[1fr_140px] gap-2">
+                    <div>
+                      <label className="text-xs uppercase tracking-widest text-slate-400">Amount</label>
+                      <Input type="number" min="1" value={customAmount} onChange={(e) => setCustomAmount(e.target.value)} placeholder="e.g. 45" className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-custom-amount" />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase tracking-widest text-slate-400">Unit</label>
+                      <Select value={customUnit} onValueChange={setCustomUnit}>
+                        <SelectTrigger className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="suspend-custom-unit"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-[#14181f] text-white border-white/10">
+                          <SelectItem value="minutes">Minutes</SelectItem>
+                          <SelectItem value="hours">Hours</SelectItem>
+                          <SelectItem value="days">Days</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 )}
                 <div>
@@ -446,7 +499,7 @@ function UsersTab({ currentRole }) {
               <DialogFooter className="gap-2 sm:gap-2">
                 <Button variant="outline" onClick={() => setSuspendTarget(null)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
                 <Button onClick={submitSuspend} className="bg-rose-500 hover:bg-rose-600 text-white font-semibold" data-testid="suspend-confirm-btn">
-                  <Ban className="w-4 h-4 mr-1" /> Confirm suspension
+                  <Ban className="w-4 h-4 mr-1" /> {isSuspended(suspendTarget) ? "Save changes" : "Confirm suspension"}
                 </Button>
               </DialogFooter>
             </DialogContent>
