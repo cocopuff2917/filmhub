@@ -102,6 +102,10 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 - **Removed pagination cap entirely** on `/api/actors`, `/api/movies`, and `/api/series`. `limit` is now optional — when omitted, the endpoint returns the full dataset with no upper bound.
 - **Suspension history on user profile** (mods/admins only): `GET /api/users/{id}` now returns a `suspension_history` array for moderator/admin viewers, sourced from the `db.edits` audit log for actions `suspend`, `suspend-update`, and `unsuspend`. Rendered as a timeline block in `UserProfile.jsx` with `data-testid="user-suspension-history"`.
 - **Hide forum threads from suspended authors**: `GET /api/threads` and `GET /api/threads/{id}` now exclude non-direct threads created by currently-suspended users from non-moderator viewers (anon or logged-in regular users). Direct threads and moderator views are unaffected.
+- **Suspended user profile placeholder**: visiting a suspended user's profile as a non-mod now returns a minimal document with `suspended_placeholder=true` (instead of 404). The frontend renders a "This user is currently suspended" placeholder page.
+- **Full name → Username**: user-facing label changed everywhere ("Full Name" on Register, "Email" on Login → "Email or Username"). Username format is enforced (2–40 chars; letters, numbers, `.`, `_`, `-`) and must be case-insensitively unique.
+- **Username change cooldown**: users can only change their username **once every 30 days**. `GET /auth/me` exposes `name_last_changed_at` and `name_change_available_at` for UI gating. The Edit Profile dialog disables the input and shows the next-eligible date when within the cooldown.
+- **Login with username or email**: `POST /auth/login` now accepts `identifier` (preferred) OR legacy `email`. Identifiers containing `@` are matched against `email`; otherwise against `name` (case-insensitive). Backward-compatible with existing clients.
 
 ## Credentials
 - Admin: admin@cineverse.com / Admin@123

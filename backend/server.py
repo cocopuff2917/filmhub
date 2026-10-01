@@ -319,10 +319,11 @@ async def get_optional_user(request: Request) -> Optional[dict]:
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
-    name: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=2, max_length=40)
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    identifier: Optional[str] = None
+    email: Optional[str] = None
     password: str
 
 class CastMember(BaseModel):
@@ -958,17 +959,38 @@ async def record_user_ip(user_id: ObjectId, ip: str):
             {"$push": {"ips": {"ip": ip, "first_seen": now, "last_seen": now, "count": 1}}},
         )
 
+import re
+USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{2,40}$")
+
+async def _username_taken(username: str, exclude_user_id: Optional[str] = None) -> bool:
+    """Case-insensitive username uniqueness check."""
+    q = {"name": {"$regex": f"^{re.escape(username)}$", "$options": "i"}}
+    if exclude_user_id:
+        try:
+            q["_id"] = {"$ne": ObjectId(exclude_user_id)}
+        except Exception:
+            pass
+    existing = await db.users.find_one(q)
+    return existing is not None
+
 # ----------- Auth Routes -----------
 @api_router.post("/auth/register")
 async def register(payload: RegisterRequest, request: Request, response: Response):
     email = payload.email.lower()
+    username = payload.name.strip()
+    if not USERNAME_RE.match(username):
+        raise HTTPException(status_code=400, detail="Username must be 2–40 characters: letters, numbers, dots, underscores, or hyphens only.")
+    if "@" in username:
+        raise HTTPException(status_code=400, detail="Username cannot contain '@'.")
     existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    if await _username_taken(username):
+        raise HTTPException(status_code=400, detail="Username is already taken")
     doc = {
         "email": email,
         "password_hash": hash_password(payload.password),
-        "name": payload.name,
+        "name": username,
         "role": "user",
         "avatar_url": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -984,10 +1006,18 @@ async def register(payload: RegisterRequest, request: Request, response: Respons
 
 @api_router.post("/auth/login")
 async def login(payload: LoginRequest, request: Request, response: Response):
-    email = payload.email.lower()
-    user = await db.users.find_one({"email": email})
+    identifier = (payload.identifier or payload.email or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Email or username is required")
+    # If identifier looks like an email, match by email (lowercase).
+    # Otherwise, treat it as a username (case-insensitive exact match).
+    if "@" in identifier:
+        user = await db.users.find_one({"email": identifier.lower()})
+    else:
+        user = await db.users.find_one({"name": {"$regex": f"^{re.escape(identifier)}$", "$options": "i"}})
     if not user or not verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    email = user.get("email", "")
     # Suspension: DO NOT block login anymore; suspended users can log in to access their inbox.
     # Auto-lift expired suspensions.
     sus = user.get("suspended_until")
@@ -1031,6 +1061,14 @@ async def logout(response: Response):
 
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user_allow_suspended)):
+    # username change cooldown
+    name_last_changed_at = user.get("name_last_changed_at")
+    name_change_available_at = None
+    if name_last_changed_at:
+        try:
+            name_change_available_at = (datetime.fromisoformat(name_last_changed_at) + timedelta(days=30)).isoformat()
+        except Exception:
+            pass
     return {
         "id": user["id"],
         "email": user.get("email"),
@@ -1044,6 +1082,8 @@ async def me(user: dict = Depends(get_current_user_allow_suspended)):
         "permissions": user.get("permissions", []),
         "avatar_url": user.get("avatar_url", ""),
         "created_at": user.get("created_at"),
+        "name_last_changed_at": name_last_changed_at,
+        "name_change_available_at": name_change_available_at,
         "is_suspended": user.get("is_suspended", False),
         "suspension_reason": user.get("suspension_reason") if user.get("is_suspended") else None,
         "suspension_until": user.get("suspension_until") if user.get("is_suspended") else None,
@@ -1059,9 +1099,38 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
     update = {}
     if payload.name is not None:
         new_name = payload.name.strip()
-        if len(new_name) < 2:
-            raise HTTPException(status_code=400, detail="Username must be at least 2 characters")
-        update["name"] = new_name
+        # Only validate if the username actually changed (case-insensitive compare)
+        current_name = (user.get("name") or "").strip()
+        if new_name.lower() != current_name.lower():
+            if not USERNAME_RE.match(new_name):
+                raise HTTPException(status_code=400, detail="Username must be 2–40 characters: letters, numbers, dots, underscores, or hyphens only.")
+            if "@" in new_name:
+                raise HTTPException(status_code=400, detail="Username cannot contain '@'.")
+            # 30-day cooldown on username changes
+            fresh = await db.users.find_one({"_id": ObjectId(user["id"])})
+            last_changed = (fresh or {}).get("name_last_changed_at")
+            if last_changed:
+                try:
+                    last_dt = datetime.fromisoformat(last_changed)
+                    next_eligible = last_dt + timedelta(days=30)
+                    now = datetime.now(timezone.utc)
+                    if next_eligible > now:
+                        days_left = (next_eligible - now).days + 1
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"You can change your username again in {days_left} day{'s' if days_left != 1 else ''} (on {next_eligible.strftime('%b %d, %Y')}).",
+                        )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+            if await _username_taken(new_name, exclude_user_id=user["id"]):
+                raise HTTPException(status_code=400, detail="Username is already taken")
+            update["name"] = new_name
+            update["name_last_changed_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            # Not an actual change — ignore
+            pass
     if payload.bio is not None:
         update["bio"] = payload.bio.strip()
     if not update:
@@ -1209,10 +1278,21 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
     viewer_is_mod = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
     viewer_is_self = bool(viewer and viewer.get("id") == str(u["_id"]))
 
-    # Hide suspended profiles site-wide (including from the suspended user themselves).
-    # Only moderators/admins can view a suspended profile.
-    if active_sus and not viewer_is_mod:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Hide suspended profiles site-wide. For non-mod viewers, return a minimal
+    # placeholder so the UI can render "This user is currently suspended"
+    # instead of a 404. Mods/admins still get the full profile.
+    if active_sus and not viewer_is_mod and not viewer_is_self:
+        return {
+            "id": str(u["_id"]),
+            "name": u.get("name"),
+            "avatar_url": "",
+            "bio": "",
+            "role": "user",
+            "custom_role": None,
+            "created_at": u.get("created_at"),
+            "is_suspended": True,
+            "suspended_placeholder": True,
+        }
 
     # resolve custom role
     custom_role = None

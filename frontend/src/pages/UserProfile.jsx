@@ -181,6 +181,29 @@ export default function UserProfile() {
   if (!profile) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">Loading...</div>;
   if (profile.notFound) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">User not found.</div>;
 
+  // Suspended placeholder for non-mod viewers
+  if (profile.suspended_placeholder) {
+    const sInitial = (profile.name || "?")[0]?.toUpperCase();
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900">
+        <section className="relative overflow-hidden" data-testid="user-suspended-placeholder" style={{ background: "radial-gradient(1200px 380px at 10% -20%, #1e293b 0%, #0f172a 55%, #020617 100%)" }}>
+          <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+            <div className="mx-auto w-24 h-24 rounded-full overflow-hidden flex items-center justify-center text-white font-display text-4xl border-4 border-white/10 shadow-lg bg-slate-700 opacity-70" aria-hidden>
+              <span>{sInitial}</span>
+            </div>
+            <h1 className="mt-6 font-heading text-2xl sm:text-3xl font-bold text-white" data-testid="user-suspended-title">{profile.name || "This user"} is currently suspended</h1>
+            <p className="mt-3 text-sm text-slate-300 max-w-xl mx-auto">Their profile, reviews, and forum activity are temporarily hidden from the public while the suspension is active.</p>
+            <div className="mt-6">
+              <Link to="/" className="inline-flex items-center text-sm px-4 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="suspended-back-home-btn">
+                Back to Home
+              </Link>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   const avatarBg = "#e11d48"; // rose-600 like reference
   const initial = (profile.name || "?")[0]?.toUpperCase();
   const activity = profile.daily_activity_30d || [];

@@ -11,14 +11,14 @@ import { Film } from "lucide-react";
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const res = await login(email, password);
+    const res = await login(identifier, password);
     setLoading(false);
     if (res.ok) {
       toast.success("Welcome back!");
@@ -42,12 +42,13 @@ export default function Login() {
           <CardContent className="pt-6">
             <form onSubmit={submit} className="space-y-4">
               <div>
-                <Label htmlFor="email" className="text-slate-300">Email</Label>
+                <Label htmlFor="identifier" className="text-slate-300">Email or Username</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="identifier"
+                  type="text"
+                  autoComplete="username"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   required
                   className="mt-1.5 bg-[#0d0f12] border-white/10 text-white"
                   data-testid="login-email-input"

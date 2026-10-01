@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import ImageUpload from "@/components/ImageUpload";
 
 export default function EditProfileDialog({ open, onOpenChange, profile, onSaved }) {
-  const { refresh } = useAuth();
+  const { user: me, refresh } = useAuth();
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -23,6 +23,9 @@ export default function EditProfileDialog({ open, onOpenChange, profile, onSaved
   const [confirmPw, setConfirmPw] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [savingPw, setSavingPw] = useState(false);
+
+  const availableOn = me?.name_change_available_at ? new Date(me.name_change_available_at) : null;
+  const canChangeUsername = !availableOn || availableOn.getTime() <= Date.now();
 
   useEffect(() => {
     if (open && profile) {
@@ -103,13 +106,23 @@ export default function EditProfileDialog({ open, onOpenChange, profile, onSaved
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1.5 bg-[#0d0f12] border-white/10 text-white"
-                  placeholder="Your display name"
+                  className="mt-1.5 bg-[#0d0f12] border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                  placeholder="your_username"
                   minLength={2}
                   maxLength={40}
+                  pattern="[A-Za-z0-9._-]{2,40}"
+                  title="2–40 characters: letters, numbers, dots, underscores, or hyphens"
                   required
+                  disabled={!canChangeUsername}
                   data-testid="profile-username-input"
                 />
+                {!canChangeUsername && availableOn ? (
+                  <div className="text-[11px] text-amber-400/80 mt-1" data-testid="username-cooldown-msg">
+                    You can change your username again on <span className="font-semibold">{availableOn.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>.
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-slate-500 mt-1">Usernames can be changed once every 30 days.</div>
+                )}
               </div>
 
               <div>

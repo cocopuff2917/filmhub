@@ -43,15 +43,20 @@ export default function Register() {
           <CardContent className="pt-6">
             <form onSubmit={submit} className="space-y-4">
               <div>
-                <Label htmlFor="name" className="text-slate-300">Full Name</Label>
+                <Label htmlFor="name" className="text-slate-300">Username</Label>
                 <Input
                   id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
+                  minLength={2}
+                  maxLength={40}
+                  pattern="[A-Za-z0-9._-]{2,40}"
+                  title="2–40 characters: letters, numbers, dots, underscores, or hyphens"
                   className="mt-1.5 bg-[#0d0f12] border-white/10 text-white"
                   data-testid="register-name-input"
                 />
+                <div className="text-[11px] text-slate-500 mt-1">2–40 characters. Letters, numbers, dots, underscores, or hyphens. You can change this once every 30 days.</div>
               </div>
               <div>
                 <Label htmlFor="email" className="text-slate-300">Email</Label>

@@ -22,9 +22,9 @@ export function AuthProvider({ children }) {
     refresh();
   }, [refresh]);
 
-  const login = async (email, password) => {
+  const login = async (identifier, password) => {
     try {
-      await api.post("/auth/login", { email, password });
+      await api.post("/auth/login", { identifier, password });
       // Fetch enriched user (includes permissions + custom_roles)
       const { data } = await api.get("/auth/me");
       setUser(data);
