@@ -1,0 +1,29 @@
+{
+  "summary": "Re-verified the iteration_7 '(unknown)' cast-row regression after main agent (1) raised default limit to 10000 on /api/actors, /api/movies, /api/series and (2) added `|| c.actor` fallback in MovieEdit.jsx line 465 and SeriesEdit.jsx lines 525 (main cast) and 693 (guest stars). Backend: wrote /app/backend/tests/test_uncapped_lists.py (6/6 pass) — seeded 110 TEST_UNCAP_* actors + verified GET /api/actors returns > 100 (actual 197 including existing data) and includes every created id; caller `limit` still respected; search `?q=TEST_UNCAP_` returns all 110; duplicate name still 409; /api/movies and /api/series return full lists. Frontend reproduction: seeded 110 filler actors + 1 target actor + 1 movie with target in cast, then RELOADED /movie/{id}/edit — cast row renders real name 'TEST_RELOAD_*_TARGET_Madea as Madea' (no '(unknown)'). Same validated for SeriesEdit main cast on reload. Guest-star fallback verified by code review (identical pattern as fixed main-cast line). All seed data cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [
+    {"screen": "CastEditDialog", "issues": ["Carried over from iteration_7: Radix a11y warning for missing DialogDescription on CastEditDialog — not fixed in this iteration (low priority, cosmetic console warning)."]}
+  ]},
+  "test_report_links": [
+    "/app/backend/tests/test_uncapped_lists.py",
+    "/app/test_reports/pytest/uncapped_lists.xml"
+  ],
+  "action_items": [
+    "Optional: add sr-only DialogDescription to CastEditDialog to silence Radix a11y warning (carryover from iteration_7).",
+    "Note: default limit=10000 on /api/actors could become expensive as the catalog grows — consider true pagination + relying on cast[i].actor enrichment (which is already in place as the correct fallback). Not blocking today."
+  ],
+  "critical_code_review_comments": [
+    "MovieEdit.jsx line 465 fallback `actors.find(...) || c.actor` is the correct and minimal fix; GET /api/movies/{id} already provides cast[i].actor:{id,name,photo_url}.",
+    "SeriesEdit.jsx lines 525 (main cast) and 693 (guest stars) apply the same pattern — confirmed by grep.",
+    "Default limit=10000 is a pragmatic ceiling that keeps current clients working without pagination work; longer-term a /api/actors?page=N API would be cleaner.",
+    "list_actors / list_movies / list_series each perform full enrichment per doc — expensive at scale; keep an eye on response time once catalogs grow."
+  ],
+  "updated_files": ["/app/backend/tests/test_uncapped_lists.py"],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% — reload no longer shows '(unknown)' for cast actor beyond first 100"},
+  "test_credentials": "admin@cineverse.com / Admin@123",
+  "seed_data_creation": "Backend pytest: 110 TEST_UNCAP_*_Actor_* actors (auto-deleted in teardown). Frontend repro: 110 TEST_RELOAD_*_A### + 1 TEST_RELOAD_*_TARGET_Madea actors + 1 TEST_RELOAD_*_Movie_X movie (all deleted via API after run). Series repro: 1 TEST_SRELOAD_*_MainCast + 1 TEST_SRELOAD_*_Guest actors + 1 TEST_SRELOAD_*_Series (all deleted). Verified cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iteration_7 regression is fixed on both backend (default limit raised) and frontend (fallback to c.actor from enriched payload). Both fixes are complementary — either alone would work, but having both is defense-in-depth. Backend uncapped lists test lives at /app/backend/tests/test_uncapped_lists.py and should be included in future regression runs.",
+  "rca of the issue": "Original RCA (iteration_7): MovieEdit/SeriesEdit resolved cast actor display name via actors.find() against a one-shot GET /api/actors that was server-capped at 100. Any cast actor_id outside those 100 produced actors.find() === undefined → rendered '(unknown)'. Fix landed in iteration_8: (a) backend default limit raised to 10000 on /api/actors, /api/movies, /api/series so clients get the full list; (b) UI falls back to the backend-enriched cast[i].actor object (which GET /api/movies/{id} and /api/series/{id} already populate) when actors.find() misses — one-line change in MovieEdit.jsx:465 and SeriesEdit.jsx:525,693. Verified via automated backend tests + manual Playwright reload."
+}
