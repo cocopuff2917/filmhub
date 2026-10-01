@@ -1650,14 +1650,41 @@ async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = De
 
 # ----------- Edits Feed -----------
 @api_router.get("/edits")
-async def list_edits(entity_type: Optional[str] = None, entity_id: Optional[str] = None, limit: int = 50):
-    q = {}
+async def list_edits(
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = 50,
+):
+    query: dict = {}
     if entity_type:
-        q["entity_type"] = entity_type
+        query["entity_type"] = entity_type
     if entity_id:
-        q["entity_id"] = entity_id
+        query["entity_id"] = entity_id
+    if action:
+        query["action"] = action
+    if user_id:
+        query["user_id"] = user_id
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [
+            {"entity_title": rx},
+            {"summary": rx},
+            {"user_name": rx},
+        ]
+    if date_from or date_to:
+        rng: dict = {}
+        if date_from:
+            rng["$gte"] = date_from
+        if date_to:
+            rng["$lte"] = date_to
+        query["created_at"] = rng
     edits = []
-    async for e in db.edits.find(q).sort("created_at", -1).limit(limit):
+    async for e in db.edits.find(query).sort("created_at", -1).limit(limit):
         e_id = str(e.pop("_id"))
         e["id"] = e_id
         # strip raw values from listing (used only for revert)
@@ -1888,6 +1915,122 @@ async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int 
             "ip_count": len(u.get("ips", []) or []),
         })
     return users
+
+@api_router.get("/moderation/stats")
+async def moderation_stats(mod: dict = Depends(get_current_moderator)):
+    """Dashboard stats for the moderator/admin console."""
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    day_ago = (now - timedelta(hours=24)).isoformat()
+    week_ago = (now - timedelta(days=7)).isoformat()
+
+    # Content totals (alive)
+    total_movies = await db.movies.count_documents(_alive())
+    total_series = await db.series.count_documents(_alive())
+    total_actors = await db.actors.count_documents(_alive())
+    total_collections = await db.collections.count_documents(_alive())
+    trash_movies = await db.movies.count_documents({"deleted": True})
+    trash_series = await db.series.count_documents({"deleted": True})
+    trash_actors = await db.actors.count_documents({"deleted": True})
+
+    # User totals
+    total_users = await db.users.count_documents({})
+    total_mods = await db.users.count_documents({"role": {"$in": ["moderator", "admin"]}})
+    active_sus = await db.users.count_documents({
+        "$or": [{"suspended_until": "permanent"}, {"suspended_until": {"$gt": now_iso}}]
+    })
+
+    # Reports (threads with category="report", status="open")
+    open_reports = await db.threads.count_documents({"category": "report", "status": "open"})
+
+    # Edit activity
+    edits_24h = await db.edits.count_documents({"created_at": {"$gte": day_ago}})
+    edits_7d = await db.edits.count_documents({"created_at": {"$gte": week_ago}})
+    new_users_7d = await db.users.count_documents({"created_at": {"$gte": week_ago}})
+
+    # Recent edits feed
+    recent_edits = []
+    async for e in db.edits.find({}).sort("created_at", -1).limit(10):
+        recent_edits.append({
+            "id": str(e["_id"]),
+            "entity_type": e.get("entity_type"),
+            "entity_id": e.get("entity_id"),
+            "entity_title": e.get("entity_title"),
+            "action": e.get("action"),
+            "summary": e.get("summary"),
+            "user_name": e.get("user_name"),
+            "user_role": e.get("user_role"),
+            "created_at": e.get("created_at"),
+        })
+
+    # Active suspensions sample
+    active_suspensions = []
+    async for u in db.users.find(
+        {"$or": [{"suspended_until": "permanent"}, {"suspended_until": {"$gt": now_iso}}]}
+    ).sort("suspended_at", -1).limit(10):
+        active_suspensions.append({
+            "id": str(u["_id"]),
+            "name": u.get("name"),
+            "avatar_url": u.get("avatar_url", ""),
+            "suspended_until": u.get("suspended_until"),
+            "suspension_reason": u.get("suspension_reason", ""),
+            "suspended_by_name": u.get("suspended_by_name", ""),
+            "suspended_at": u.get("suspended_at"),
+        })
+
+    return {
+        "content": {
+            "movies": total_movies,
+            "series": total_series,
+            "actors": total_actors,
+            "collections": total_collections,
+            "trash": trash_movies + trash_series + trash_actors,
+        },
+        "users": {
+            "total": total_users,
+            "moderators": total_mods,
+            "active_suspensions": active_sus,
+            "new_7d": new_users_7d,
+        },
+        "reports": {
+            "open": open_reports,
+        },
+        "activity": {
+            "edits_24h": edits_24h,
+            "edits_7d": edits_7d,
+        },
+        "recent_edits": recent_edits,
+        "active_suspensions": active_suspensions,
+    }
+
+@api_router.get("/moderation/suspensions")
+async def list_suspensions(mod: dict = Depends(get_current_moderator), q: Optional[str] = None, include_expired: bool = False, limit: int = 200):
+    """List currently active suspensions (and optionally expired ones for history)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if include_expired:
+        base = {"suspended_until": {"$exists": True, "$ne": None}}
+    else:
+        base = {"$or": [{"suspended_until": "permanent"}, {"suspended_until": {"$gt": now_iso}}]}
+    if q:
+        name_rx = {"$regex": q, "$options": "i"}
+        base = {"$and": [base, {"$or": [{"name": name_rx}, {"email": name_rx}]}]}
+    out = []
+    async for u in db.users.find(base).sort("suspended_at", -1).limit(limit):
+        sus = u.get("suspended_until")
+        is_active = sus == "permanent" or (sus and sus > now_iso)
+        out.append({
+            "id": str(u["_id"]),
+            "name": u.get("name"),
+            "email": u.get("email"),
+            "avatar_url": u.get("avatar_url", ""),
+            "role": u.get("role", "user"),
+            "suspended_until": sus,
+            "suspension_reason": u.get("suspension_reason", ""),
+            "suspended_by_name": u.get("suspended_by_name", ""),
+            "suspended_at": u.get("suspended_at"),
+            "is_active": bool(is_active),
+        })
+    return out
 
 # ----------- Comments (Discussion) -----------
 @api_router.post("/comments")

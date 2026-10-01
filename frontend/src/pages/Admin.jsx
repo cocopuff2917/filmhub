@@ -15,6 +15,7 @@ import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
 import SeriesForm from "@/components/forms/SeriesForm";
 import MessageUserDialog from "@/components/MessageUserDialog";
+import { DashboardTab, ReportsTab, SuspensionsTab, EditHistoryTab } from "@/components/admin/ModerationTabs";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -46,8 +47,12 @@ export default function Admin() {
       </div>
       <h1 className="mt-2 font-heading text-4xl font-bold text-white">Manage Catalog</h1>
 
-      <Tabs defaultValue="movies" className="mt-8">
-        <TabsList className="bg-[#14181f] border border-white/10">
+      <Tabs defaultValue="dashboard" className="mt-8">
+        <TabsList className="bg-[#14181f] border border-white/10 flex-wrap h-auto gap-1">
+          <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
+          <TabsTrigger value="reports" data-testid="tab-reports">Reports</TabsTrigger>
+          <TabsTrigger value="suspensions" data-testid="tab-suspensions">Suspensions</TabsTrigger>
+          <TabsTrigger value="edits" data-testid="tab-edits">Edit History</TabsTrigger>
           <TabsTrigger value="movies" data-testid="tab-movies">Movies</TabsTrigger>
           <TabsTrigger value="series" data-testid="tab-series">TV Series</TabsTrigger>
           <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
@@ -57,6 +62,10 @@ export default function Admin() {
           <TabsTrigger value="collections" data-testid="tab-collections">Collections</TabsTrigger>
           {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
         </TabsList>
+        <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>
+        <TabsContent value="reports" className="mt-6"><ReportsTab /></TabsContent>
+        <TabsContent value="suspensions" className="mt-6"><SuspensionsTab /></TabsContent>
+        <TabsContent value="edits" className="mt-6"><EditHistoryTab /></TabsContent>
         <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
         <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" /></TabsContent>
         <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
