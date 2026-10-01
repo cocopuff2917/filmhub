@@ -23,10 +23,19 @@ export default function Admin() {
   useEffect(() => {
     if (initializing) return;
     if (!user) { navigate("/login"); return; }
-    if (!["moderator", "admin"].includes(user.role)) { navigate("/"); }
+    const perms = user.permissions || [];
+    const hasAnyModPerm = ["moderator", "admin"].includes(user.role)
+      || ["moderator", "admin"].includes(user.effective_role)
+      || perms.some((p) => ["user.suspend", "content.lock_cast", "content.protect_fields", "moderation.messages.read_reply", "content.delete", "content.lock", "user.view_ips", "thread.moderate", "comment.moderate"].includes(p));
+    if (!hasAnyModPerm) { navigate("/"); }
   }, [user, initializing, navigate]);
 
-  if (initializing || !user || !["moderator", "admin"].includes(user.role) && !["moderator", "admin"].includes(user.effective_role)) return null;
+  if (initializing || !user) return null;
+  const perms = user.permissions || [];
+  const hasAnyModPerm = ["moderator", "admin"].includes(user.role)
+    || ["moderator", "admin"].includes(user.effective_role)
+    || perms.some((p) => ["user.suspend", "content.lock_cast", "content.protect_fields", "moderation.messages.read_reply", "content.delete", "content.lock", "user.view_ips", "thread.moderate", "comment.moderate"].includes(p));
+  if (!hasAnyModPerm) return null;
 
   const canManageRoles = user.role === "admin" || user.effective_role === "admin";
 
@@ -128,6 +137,62 @@ function EntityAdmin({ kind }) {
   );
 }
 
+function CustomRolesMultiPicker({ all, value, onToggle, onClear, testid }) {
+  const [open, setOpen] = useState(false);
+  const selected = all.filter((cr) => value.includes(cr.id));
+  const label = selected.length === 0 ? "Custom roles…" : selected.length === 1 ? selected[0].name : `${selected.length} roles`;
+  return (
+    <div className="relative" data-testid={testid}>
+      <Button type="button" size="sm" variant="outline" onClick={() => setOpen((v) => !v)} className="w-[180px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs justify-between hover:bg-white/5 hover:text-white">
+        <span className="truncate flex items-center gap-1.5">
+          {selected.length > 0 && <span style={{ color: selected[0].color }}>●</span>}
+          {label}
+        </span>
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-[calc(100%+4px)] z-50 w-64 rounded-lg border border-white/10 bg-[#14181f] shadow-xl p-2 max-h-80 overflow-y-auto">
+            {all.length === 0 ? (
+              <div className="text-xs text-slate-500 p-3">No custom roles exist yet.</div>
+            ) : (
+              <>
+                {all.map((cr) => {
+                  const checked = value.includes(cr.id);
+                  return (
+                    <button
+                      key={cr.id}
+                      type="button"
+                      onClick={() => onToggle(cr.id)}
+                      className={`w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-white/5 ${checked ? "bg-amber-500/10" : ""}`}
+                      data-testid={`${testid}-opt-${cr.id}`}
+                    >
+                      <span className="inline-block w-3 h-3 rounded-sm border border-white/20" style={{ background: checked ? cr.color : "transparent", borderColor: cr.color }} />
+                      <span className="flex-1 truncate text-white">{cr.name}</span>
+                      <span className="text-[10px] uppercase text-slate-500">{(cr.permissions || []).length} perms</span>
+                    </button>
+                  );
+                })}
+                {value.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onClear}
+                    className="mt-1 w-full rounded px-2 py-1.5 text-left text-[11px] text-rose-300 hover:bg-rose-500/10 uppercase tracking-widest"
+                  >
+                    Clear all roles
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 function UsersTab({ currentRole }) {
   const [users, setUsers] = useState([]);
   const [customRoles, setCustomRoles] = useState([]);
@@ -201,12 +266,17 @@ function UsersTab({ currentRole }) {
     setIpLoading((s) => ({ ...s, [uid]: false }));
   };
 
-  const setCustomRole = async (uid, crid) => {
+  const assignCustomRoles = async (uid, crids) => {
     try {
-      await api.patch(`/moderation/users/${uid}/custom-role`, { custom_role_id: crid || null });
-      toast.success(crid ? "Custom role assigned" : "Custom role removed");
+      await api.patch(`/moderation/users/${uid}/custom-role`, { custom_role_ids: crids });
+      toast.success(crids.length ? "Custom roles updated" : "Custom roles cleared");
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+  const toggleCustomRole = (uid, u, crid) => {
+    const current = (u.custom_role_ids && u.custom_role_ids.length) ? u.custom_role_ids : (u.custom_role ? [u.custom_role.id] : []);
+    const next = current.includes(crid) ? current.filter((x) => x !== crid) : [...current, crid];
+    assignCustomRoles(uid, next);
   };
 
   return (
@@ -232,11 +302,11 @@ function UsersTab({ currentRole }) {
                     u.role === "moderator" ? "bg-sky-500/15 text-sky-300 border-sky-500/40" :
                     "bg-white/5 text-slate-300 border-white/10"
                   }>{u.role}</Badge>
-                  {u.custom_role && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest font-semibold" style={{ color: u.custom_role.color, borderColor: u.custom_role.color + "66", background: u.custom_role.color + "22" }}>
-                      {u.custom_role.name}
+                  {(u.custom_roles && u.custom_roles.length ? u.custom_roles : (u.custom_role ? [u.custom_role] : [])).map((cr) => (
+                    <span key={cr.id} className="text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-widest font-semibold" style={{ color: cr.color, borderColor: cr.color + "66", background: cr.color + "22" }}>
+                      {cr.name}
                     </span>
-                  )}
+                  ))}
                   {u.ip_count > 0 && (
                     <span className="text-[10px] text-slate-500 uppercase tracking-widest">{u.ip_count} IP{u.ip_count !== 1 && "s"}</span>
                   )}
@@ -259,22 +329,13 @@ function UsersTab({ currentRole }) {
                   </Select>
                 )}
                 {currentRole === "admin" && u.role !== "admin" && (
-                  <Select
-                    value={u.custom_role?.id || "__none__"}
-                    onValueChange={(v) => setCustomRole(u.id, v === "__none__" ? null : v)}
-                  >
-                    <SelectTrigger className="w-[160px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs" data-testid={`custom-role-select-${u.id}`}>
-                      <SelectValue placeholder="Custom role…" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#14181f] text-white border-white/10">
-                      <SelectItem value="__none__">No custom role</SelectItem>
-                      {customRoles.map((cr) => (
-                        <SelectItem key={cr.id} value={cr.id}>
-                          <span style={{ color: cr.color }}>●</span> <span className="ml-1">{cr.name}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CustomRolesMultiPicker
+                    all={customRoles}
+                    value={(u.custom_roles && u.custom_roles.length ? u.custom_roles.map((cr) => cr.id) : (u.custom_role ? [u.custom_role.id] : []))}
+                    onToggle={(crid) => toggleCustomRole(u.id, u, crid)}
+                    onClear={() => assignCustomRoles(u.id, [])}
+                    testid={`custom-roles-picker-${u.id}`}
+                  />
                 )}
                 {u.role !== "admin" && (
                   <Button size="sm" variant="outline" onClick={() => setMessageTarget(u)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid={`message-user-${u.id}`}>
@@ -488,7 +549,7 @@ function RolesTab() {
   const derivedBase = (() => {
     const perms = new Set(form.permissions);
     if ([...perms].some((p) => ["user.assign_role", "user.assign_custom_role", "roles.manage"].includes(p))) return "admin";
-    if ([...perms].some((p) => ["content.delete","content.lock","user.suspend","user.view_ips","thread.moderate","comment.moderate","content.edit_locked"].includes(p))) return "moderator";
+    if ([...perms].some((p) => ["content.delete","content.lock","content.protect_fields","content.lock_cast","user.suspend","user.view_ips","moderation.messages.read_reply","thread.moderate","comment.moderate","content.edit_locked"].includes(p))) return "moderator";
     return "user";
   })();
 

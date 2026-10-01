@@ -115,6 +115,9 @@ export default function MovieEdit() {
   const savedAtRef = useRef(null);
 
   const isMod = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+  const perms = (user && user.permissions) || [];
+  const canLockCast = isMod || perms.includes("content.lock_cast");
+  const canProtectFields = isMod || perms.includes("content.protect_fields");
 
   useEffect(() => {
     (async () => {
@@ -461,7 +464,7 @@ export default function MovieEdit() {
                 const actor = actors.find((a) => a.id === c.actor_id);
                 const dragging = dragIdx === i;
                 const rowLocked = (movie?.locked_cast_actor_ids || []).includes(c.actor_id);
-                const rowEditable = canEditField("cast") && (isMod || !rowLocked);
+                const rowEditable = canEditField("cast") && (canLockCast || !rowLocked);
                 return (
                   <div
                     key={i}
@@ -485,13 +488,13 @@ export default function MovieEdit() {
                       <div className="text-xs text-slate-500 truncate">as {c.character_name || "—"}</div>
                     </div>
                     <span className="text-[10px] text-slate-400 tabular-nums w-6 text-right">#{i + 1}</span>
-                    {isMod && c.actor_id && (
+                    {canLockCast && c.actor_id && (
                       <Button type="button" size="sm" variant="outline" onClick={() => toggleCastLock(c.actor_id)} className={`h-8 ${rowLocked ? "border-amber-400 text-amber-700 hover:bg-amber-100" : "border-slate-300 text-slate-700 hover:bg-slate-100"}`} data-testid={`cast-lock-${i}`}>
                         {rowLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                       </Button>
                     )}
                     <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!rowEditable} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
-                    {!(rowLocked && !isMod) && (
+                    {!(rowLocked && !canLockCast) && (
                       <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!rowEditable} className="text-slate-400 hover:text-rose-500" data-testid={`cast-remove-${i}`}><X className="w-4 h-4" /></Button>
                     )}
                   </div>

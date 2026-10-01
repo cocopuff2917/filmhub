@@ -241,37 +241,48 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
         user.pop("password_hash", None)
         user["is_suspended"] = is_suspended
         user["suspension_until"] = user.get("suspended_until")
-        # resolve custom role
-        custom_role = None
-        crid = user.get("custom_role_id")
-        if crid:
+        # resolve custom roles (new multi-array + legacy single id)
+        role_ids = []
+        for rid in (user.get("custom_role_ids") or []):
+            if rid and rid not in role_ids:
+                role_ids.append(rid)
+        legacy = user.get("custom_role_id")
+        if legacy and legacy not in role_ids:
+            role_ids.append(legacy)
+        custom_roles_resolved = []
+        for crid in role_ids:
             try:
                 cr = await db.custom_roles.find_one({"_id": ObjectId(crid)})
-                if cr:
-                    perms = cr.get("permissions", []) or []
-                    custom_role = {
-                        "id": str(cr["_id"]),
-                        "name": cr.get("name"),
-                        "color": cr.get("color", "#f59e0b"),
-                        "base": _derive_base(perms),
-                        "permissions": perms,
-                        "description": cr.get("description", ""),
-                    }
             except Exception:
-                pass
-        user["custom_role"] = custom_role
+                cr = None
+            if not cr:
+                continue
+            perms = cr.get("permissions", []) or []
+            custom_roles_resolved.append({
+                "id": str(cr["_id"]),
+                "name": cr.get("name"),
+                "color": cr.get("color", "#f59e0b"),
+                "base": _derive_base(perms),
+                "permissions": perms,
+                "description": cr.get("description", ""),
+            })
+        user["custom_roles"] = custom_roles_resolved
+        user["custom_role_ids"] = [cr["id"] for cr in custom_roles_resolved]
+        # Back-compat: expose the first custom role under the old key too
+        user["custom_role"] = custom_roles_resolved[0] if custom_roles_resolved else None
         rank = {"user": 0, "moderator": 1, "admin": 2}
         eff = user.get("role", "user")
-        if custom_role and rank.get(custom_role["base"], 0) > rank.get(eff, 0):
-            eff = custom_role["base"]
+        for cr in custom_roles_resolved:
+            if rank.get(cr["base"], 0) > rank.get(eff, 0):
+                eff = cr["base"]
         user["effective_role"] = eff
         eff_perms = set()
         if user.get("role") == "admin" or eff == "admin":
             eff_perms = set(PERMISSIONS_ALL)
         elif user.get("role") == "moderator" or eff == "moderator":
             eff_perms = set(PERMS_MODERATOR)
-        if custom_role:
-            eff_perms.update(custom_role.get("permissions") or [])
+        for cr in custom_roles_resolved:
+            eff_perms.update(cr.get("permissions") or [])
         user["permissions"] = sorted(eff_perms)
         return user
     except jwt.ExpiredSignatureError:
@@ -536,15 +547,37 @@ PERMISSIONS_ALL = [
     "content.edit_locked",
     "content.delete",
     "content.lock",
+    "content.protect_fields",
+    "content.lock_cast",
     "user.suspend",
     "user.view_ips",
     "user.assign_role",
     "user.assign_custom_role",
+    "moderation.messages.read_reply",
     "thread.moderate",
     "comment.moderate",
     "roles.manage",
 ]
-PERMS_MODERATOR = {"content.delete", "content.lock", "user.suspend", "user.view_ips", "thread.moderate", "comment.moderate", "content.edit_locked"}
+PERMISSION_LABELS = {
+    "content.edit_locked": "Edit locked fields",
+    "content.delete": "Delete / restore movies, series, actors",
+    "content.lock": "Lock entire entity fields (bulk)",
+    "content.protect_fields": "Protect fields (toggle per-field locks)",
+    "content.lock_cast": "Lock & unlock individual cast / guest-star rows",
+    "user.suspend": "Suspend & unsuspend users",
+    "user.view_ips": "View user IP addresses and overlap",
+    "user.assign_role": "Assign the base role (user / moderator / admin)",
+    "user.assign_custom_role": "Assign custom roles to users",
+    "moderation.messages.read_reply": "Read & reply in every direct message thread",
+    "thread.moderate": "Moderate public forum threads",
+    "comment.moderate": "Moderate reviews & comments",
+    "roles.manage": "Create / edit / delete custom roles",
+}
+PERMS_MODERATOR = {
+    "content.delete", "content.lock", "content.protect_fields", "content.lock_cast",
+    "user.suspend", "user.view_ips", "moderation.messages.read_reply",
+    "thread.moderate", "comment.moderate", "content.edit_locked",
+}
 PERMS_ADMIN = {"user.assign_role", "user.assign_custom_role", "roles.manage"}
 
 def _derive_base(permissions: List[str]) -> str:
@@ -554,6 +587,17 @@ def _derive_base(permissions: List[str]) -> str:
     if perms & PERMS_MODERATOR:
         return "moderator"
     return "user"
+
+def _has_perm(user: Optional[dict], perm: str) -> bool:
+    if not user:
+        return False
+    if user.get("role") == "admin" or user.get("effective_role") == "admin":
+        return True
+    return perm in (user.get("permissions") or [])
+
+def _require_perm(user: Optional[dict], perm: str, detail: str = "You don't have permission to do this."):
+    if not _has_perm(user, perm):
+        raise HTTPException(status_code=403, detail=detail)
 
 class RoleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=40)
@@ -568,7 +612,8 @@ class RolePatch(BaseModel):
     permissions: Optional[List[str]] = None
 
 class AssignRole(BaseModel):
-    custom_role_id: Optional[str] = None
+    custom_role_id: Optional[str] = None  # legacy single assignment (kept for back-compat)
+    custom_role_ids: Optional[List[str]] = None  # new multi-role assignment
 
 # ----------- Utility -----------
 def _alive(q: Optional[dict] = None) -> dict:
@@ -923,6 +968,9 @@ async def me(user: dict = Depends(get_current_user_allow_suspended)):
         "role": user.get("role", "user"),
         "effective_role": user.get("effective_role", user.get("role", "user")),
         "custom_role": user.get("custom_role"),
+        "custom_roles": user.get("custom_roles", []),
+        "custom_role_ids": user.get("custom_role_ids", []),
+        "permissions": user.get("permissions", []),
         "avatar_url": user.get("avatar_url", ""),
         "created_at": user.get("created_at"),
         "is_suspended": user.get("is_suspended", False),
@@ -1347,26 +1395,21 @@ async def leaderboard(limit: int = 10):
 @api_router.get("/roles/permissions")
 async def list_permissions():
     """Return available permission keys with human labels."""
-    labels = {
-        "content.edit_locked": "Edit fields locked by moderators",
-        "content.delete": "Delete movies / series / actors",
-        "content.lock": "Lock / unlock fields on content",
-        "user.suspend": "Suspend and unsuspend accounts",
-        "user.view_ips": "View user IPs and shared accounts",
-        "user.assign_role": "Change users' system roles",
-        "user.assign_custom_role": "Assign custom roles to users",
-        "thread.moderate": "Close / reopen / delete threads",
-        "comment.moderate": "Delete any comment on content",
-        "roles.manage": "Create, edit and delete custom roles",
-    }
+    labels = PERMISSION_LABELS
     # group by category for UI
-    groups = {"Content": [], "Users": [], "Community": [], "Admin": []}
+    groups = {"Content": [], "Users": [], "Moderation": [], "Community": [], "Admin": []}
     for k in PERMISSIONS_ALL:
         item = {"key": k, "label": labels.get(k, k), "tier": "admin" if k in PERMS_ADMIN else "moderator" if k in PERMS_MODERATOR else "user"}
-        if k.startswith("content."): groups["Content"].append(item)
-        elif k.startswith("user."): groups["Users"].append(item)
-        elif k.startswith("thread.") or k.startswith("comment."): groups["Community"].append(item)
-        else: groups["Admin"].append(item)
+        if k.startswith("content."):
+            groups["Content"].append(item)
+        elif k.startswith("moderation."):
+            groups["Moderation"].append(item)
+        elif k.startswith("user."):
+            groups["Users"].append(item)
+        elif k.startswith("thread.") or k.startswith("comment."):
+            groups["Community"].append(item)
+        else:
+            groups["Admin"].append(item)
     return groups
 
 @api_router.get("/roles")
@@ -1409,21 +1452,37 @@ async def delete_role(role_id: str, admin: dict = Depends(get_current_admin)):
 
 @api_router.patch("/moderation/users/{user_id}/custom-role")
 async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = Depends(get_current_admin)):
-    if payload.custom_role_id:
+    # Accept new array (preferred) or legacy single id and persist to array
+    role_ids: List[str] = []
+    if payload.custom_role_ids is not None:
+        role_ids = list(payload.custom_role_ids)
+    elif payload.custom_role_id:
+        role_ids = [payload.custom_role_id]
+    # dedupe + validate
+    cleaned: List[str] = []
+    labels: List[str] = []
+    for rid in role_ids:
+        if not rid or rid in cleaned:
+            continue
         try:
-            cr = await db.custom_roles.find_one({"_id": ObjectId(payload.custom_role_id)})
+            cr = await db.custom_roles.find_one({"_id": ObjectId(rid)})
         except Exception:
             cr = None
         if not cr:
-            raise HTTPException(status_code=404, detail="Custom role not found")
-        await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"custom_role_id": payload.custom_role_id}})
-        label = cr.get("name")
+            raise HTTPException(status_code=404, detail=f"Custom role {rid} not found")
+        cleaned.append(rid)
+        labels.append(cr.get("name") or "")
+    update = {"$set": {"custom_role_ids": cleaned}}
+    # mirror the first id into the legacy single-field for back-compat reads
+    if cleaned:
+        update["$set"]["custom_role_id"] = cleaned[0]
     else:
-        await db.users.update_one({"_id": ObjectId(user_id)}, {"$unset": {"custom_role_id": ""}})
-        label = "(none)"
+        update["$unset"] = {"custom_role_id": ""}
+    await db.users.update_one({"_id": ObjectId(user_id)}, update)
     target = await db.users.find_one({"_id": ObjectId(user_id)})
-    await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Custom role: {label}")
-    return {"ok": True}
+    label = ", ".join(labels) if labels else "(none)"
+    await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Custom roles: {label}")
+    return {"ok": True, "custom_role_ids": cleaned}
 
 # ----------- Edits Feed -----------
 @api_router.get("/edits")
@@ -1515,7 +1574,8 @@ async def revert_edit(edit_id: str, mod: dict = Depends(get_current_moderator)):
 
 # ----------- Moderation -----------
 @api_router.post("/moderation/users/{user_id}/suspend")
-async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depends(get_current_moderator)):
+async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "user.suspend", "You don't have permission to suspend users.")
     try:
         target = await db.users.find_one({"_id": ObjectId(user_id)})
     except Exception:
@@ -1557,7 +1617,8 @@ async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depend
     return {"ok": True, "suspended_until": until}
 
 @api_router.post("/moderation/users/{user_id}/unsuspend")
-async def unsuspend_user(user_id: str, mod: dict = Depends(get_current_moderator)):
+async def unsuspend_user(user_id: str, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "user.suspend", "You don't have permission to suspend/unsuspend users.")
     try:
         target = await db.users.find_one({"_id": ObjectId(user_id)})
     except Exception:
@@ -1691,7 +1752,12 @@ def _serialize_thread(t: dict) -> dict:
     return t
 
 def _is_mod_role(user: dict) -> bool:
-    return user.get("effective_role") in ("moderator", "admin")
+    if not user:
+        return False
+    if user.get("effective_role") in ("moderator", "admin"):
+        return True
+    # A granular-permission user with read_reply can view every direct thread like a mod.
+    return "moderation.messages.read_reply" in (user.get("permissions") or [])
 
 def _can_view_direct_thread(t: dict, user: Optional[dict]) -> bool:
     if not user:
@@ -1805,7 +1871,8 @@ async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_
     return _serialize_thread(doc)
 
 @api_router.post("/moderation/threads")
-async def create_direct_thread(payload: DirectThreadCreate, mod: dict = Depends(get_current_moderator)):
+async def create_direct_thread(payload: DirectThreadCreate, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "moderation.messages.read_reply", "You don't have permission to send moderation messages.")
     try:
         target = await db.users.find_one({"_id": ObjectId(payload.target_user_id)})
     except Exception:
@@ -1815,6 +1882,10 @@ async def create_direct_thread(payload: DirectThreadCreate, mod: dict = Depends(
     if str(target["_id"]) == mod["id"]:
         raise HTTPException(status_code=400, detail="Cannot message yourself")
     now = datetime.now(timezone.utc).isoformat()
+    # Always stamp mod-style role on the stored thread so suspended user sees "Support"
+    author_role = mod.get("effective_role", mod.get("role", "user"))
+    if author_role not in ("moderator", "admin"):
+        author_role = "moderator"
     doc = {
         "title": payload.title.strip(),
         "body": payload.body.strip(),
@@ -1826,7 +1897,7 @@ async def create_direct_thread(payload: DirectThreadCreate, mod: dict = Depends(
         "user_id": mod["id"],
         "user_name": mod.get("name"),
         "user_avatar": mod.get("avatar_url", ""),
-        "user_role": mod.get("effective_role", mod.get("role", "moderator")),
+        "user_role": author_role,
         "target_user_id": str(target["_id"]),
         "target_user_name": target.get("name"),
         "is_direct": True,
@@ -1954,13 +2025,20 @@ async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user
     if t.get("status") == "closed" and not _is_mod_role(user):
         raise HTTPException(status_code=403, detail="Thread is closed")
     now = datetime.now(timezone.utc).isoformat()
+    # If a mod-perm user is posting into a direct thread they're not a participant in,
+    # mark the message with role=moderator so masking kicks in for the suspended recipient.
+    posting_role = user.get("effective_role", user.get("role", "user"))
+    if is_direct:
+        is_participant = user["id"] in (t.get("user_id"), t.get("target_user_id"))
+        if not is_participant and _is_mod_role(user) and posting_role not in ("moderator", "admin"):
+            posting_role = "moderator"
     doc = {
         "thread_id": thread_id,
         "text": payload.text.strip(),
         "user_id": user["id"],
         "user_name": user.get("name"),
         "user_avatar": user.get("avatar_url", ""),
-        "user_role": user.get("effective_role", user.get("role", "user")),
+        "user_role": posting_role,
         "created_at": now,
     }
     result = await db.thread_messages.insert_one(doc)
@@ -2422,7 +2500,8 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
     return enriched
 
 @api_router.post("/movies/{movie_id}/cast-lock")
-async def toggle_movie_cast_lock(movie_id: str, payload: dict, mod: dict = Depends(get_current_moderator)):
+async def toggle_movie_cast_lock(movie_id: str, payload: dict, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "content.lock_cast", "You don't have permission to lock cast members.")
     actor_id = (payload or {}).get("actor_id")
     if not actor_id:
         raise HTTPException(status_code=400, detail="actor_id required")
@@ -2441,7 +2520,8 @@ async def toggle_movie_cast_lock(movie_id: str, payload: dict, mod: dict = Depen
     return {"ok": True, "locked_cast_actor_ids": current}
 
 @api_router.patch("/movies/{movie_id}/lock")
-async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
+async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "content.protect_fields", "You don't have permission to protect fields.")
     old = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
     prev = old.get("locked_fields", []) or []
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": {"locked_fields": payload.locked_fields}})
@@ -2729,7 +2809,8 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
     return enriched
 
 @api_router.post("/series/{series_id}/cast-lock")
-async def toggle_series_cast_lock(series_id: str, payload: dict, mod: dict = Depends(get_current_moderator)):
+async def toggle_series_cast_lock(series_id: str, payload: dict, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "content.lock_cast", "You don't have permission to lock cast members.")
     actor_id = (payload or {}).get("actor_id")
     if not actor_id:
         raise HTTPException(status_code=400, detail="actor_id required")
@@ -2746,7 +2827,8 @@ async def toggle_series_cast_lock(series_id: str, payload: dict, mod: dict = Dep
     return {"ok": True, "locked_cast_actor_ids": current}
 
 @api_router.post("/series/{series_id}/guest-star-lock")
-async def toggle_series_guest_lock(series_id: str, payload: dict, mod: dict = Depends(get_current_moderator)):
+async def toggle_series_guest_lock(series_id: str, payload: dict, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "content.lock_cast", "You don't have permission to lock guest stars.")
     sn = (payload or {}).get("season_number")
     ep = (payload or {}).get("episode_number")
     actor_id = (payload or {}).get("actor_id")
@@ -2766,7 +2848,8 @@ async def toggle_series_guest_lock(series_id: str, payload: dict, mod: dict = De
     return {"ok": True, "locked_guest_stars": current}
 
 @api_router.patch("/series/{series_id}/lock")
-async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
+async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "content.protect_fields", "You don't have permission to protect fields.")
     old = await db.series.find_one({"_id": ObjectId(series_id)}) or {}
     prev = old.get("locked_fields", []) or []
     await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": {"locked_fields": payload.locked_fields}})
@@ -2991,7 +3074,8 @@ async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends
     return dd
 
 @api_router.patch("/actors/{actor_id}/lock")
-async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depends(get_current_moderator)):
+async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depends(get_current_user)):
+    _require_perm(mod, "content.protect_fields", "You don't have permission to protect fields.")
     old = await db.actors.find_one({"_id": ObjectId(actor_id)}) or {}
     prev = old.get("locked_fields", []) or []
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": {"locked_fields": payload.locked_fields}})

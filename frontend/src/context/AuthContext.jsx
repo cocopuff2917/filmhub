@@ -24,7 +24,9 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     try {
-      const { data } = await api.post("/auth/login", { email, password });
+      await api.post("/auth/login", { email, password });
+      // Fetch enriched user (includes permissions + custom_roles)
+      const { data } = await api.get("/auth/me");
       setUser(data);
       return { ok: true };
     } catch (e) {
@@ -34,7 +36,8 @@ export function AuthProvider({ children }) {
 
   const register = async (email, password, name) => {
     try {
-      const { data } = await api.post("/auth/register", { email, password, name });
+      await api.post("/auth/register", { email, password, name });
+      const { data } = await api.get("/auth/me");
       setUser(data);
       return { ok: true };
     } catch (e) {

@@ -102,6 +102,9 @@ export default function SeriesEdit() {
   const savedFormRef = useRef(null);
 
   const isMod = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+  const perms = (user && user.permissions) || [];
+  const canLockCast = isMod || perms.includes("content.lock_cast");
+  const canProtectFields = isMod || perms.includes("content.protect_fields");
 
   useEffect(() => {
     (async () => {
@@ -521,7 +524,7 @@ export default function SeriesEdit() {
                 const actor = actors.find((a) => a.id === c.actor_id);
                 const dragging = dragIdx === i;
                 const rowLocked = (series?.locked_cast_actor_ids || []).includes(c.actor_id);
-                const rowEditable = canEditField("main_cast") && (isMod || !rowLocked);
+                const rowEditable = canEditField("main_cast") && (canLockCast || !rowLocked);
                 return (
                   <div
                     key={i}
@@ -545,13 +548,13 @@ export default function SeriesEdit() {
                       <div className="text-xs text-slate-500 truncate">as {c.character_name || "—"}</div>
                     </div>
                     <span className="text-[10px] text-slate-400 tabular-nums w-6 text-right">#{i + 1}</span>
-                    {isMod && c.actor_id && (
+                    {canLockCast && c.actor_id && (
                       <Button type="button" size="sm" variant="outline" onClick={() => toggleMainCastLock(c.actor_id)} className={`h-8 ${rowLocked ? "border-amber-400 text-amber-700 hover:bg-amber-100" : "border-slate-300 text-slate-700 hover:bg-slate-100"}`} data-testid={`cast-lock-${i}`}>
                         {rowLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                       </Button>
                     )}
                     <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!rowEditable} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
-                    {!(rowLocked && !isMod) && (
+                    {!(rowLocked && !canLockCast) && (
                       <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!rowEditable} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
                     )}
                   </div>
@@ -689,7 +692,7 @@ export default function SeriesEdit() {
                                         const actor = actors.find((a) => a.id === g.actor_id);
                                         const gKey = `${sn.season_number}:${ep.episode_number}:${g.actor_id}`;
                                         const gLocked = (series?.locked_guest_stars || []).includes(gKey);
-                                        const gEditable = canEditField("seasons") && (isMod || !gLocked);
+                                        const gEditable = canEditField("seasons") && (canLockCast || !gLocked);
                                         return (
                                           <div key={gIdx} className={`flex items-center gap-1.5 rounded-full border pl-1 pr-1 py-0.5 text-xs ${gLocked ? "bg-amber-50 border-amber-300" : "bg-white border-slate-300"}`} data-testid={`guest-chip-${sIdx}-${eIdx}-${gIdx}`}>
                                             <div className="w-5 h-5 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-[10px] text-slate-500 flex-shrink-0">
@@ -700,12 +703,12 @@ export default function SeriesEdit() {
                                             </button>
                                             {g.character_name && <span className="text-slate-400">as {g.character_name}</span>}
                                             {gLocked && <LockKeyhole className="w-3 h-3 text-amber-500" title="Locked by moderators" />}
-                                            {isMod && g.actor_id && (
+                                            {canLockCast && g.actor_id && (
                                               <button type="button" onClick={() => toggleGuestLock(sn.season_number, ep.episode_number, g.actor_id)} className={`ml-0.5 ${gLocked ? "text-amber-700 hover:text-amber-900" : "text-slate-400 hover:text-amber-600"}`} data-testid={`guest-lock-${sIdx}-${eIdx}-${gIdx}`} title={gLocked ? "Unlock guest" : "Lock guest"}>
                                                 {gLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
                                               </button>
                                             )}
-                                            {!(gLocked && !isMod) && (
+                                            {!(gLocked && !canLockCast) && (
                                               <button type="button" onClick={() => remGuest(sIdx, eIdx, gIdx)} disabled={!gEditable} className="text-slate-400 hover:text-rose-500 ml-0.5 disabled:opacity-40" data-testid={`remove-guest-${sIdx}-${eIdx}-${gIdx}`}>
                                                 <X className="w-3 h-3" />
                                               </button>

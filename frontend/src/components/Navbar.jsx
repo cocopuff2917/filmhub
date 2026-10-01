@@ -47,8 +47,8 @@ export default function Navbar() {
               <NavLink to="/browse?tab=series" className={linkClass} data-testid="nav-series">TV Series</NavLink>
               <NavLink to="/threads" className={linkClass} data-testid="nav-threads">Forum</NavLink>
               {user && <NavLink to="/watchlist" className={linkClass} data-testid="nav-watchlist">Watchlist</NavLink>}
-              {user && ["moderator", "admin"].includes(user.role) && (
-                <NavLink to="/admin" className={linkClass} data-testid="nav-admin">{user.role === "admin" ? "Admin" : "Mod"}</NavLink>
+              {user && (["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || (user.permissions || []).some((p) => ["user.suspend","content.lock_cast","content.protect_fields","moderation.messages.read_reply","content.delete","content.lock","user.view_ips","thread.moderate","comment.moderate"].includes(p))) && (
+                <NavLink to="/admin" className={linkClass} data-testid="nav-admin">{user.role === "admin" || user.effective_role === "admin" ? "Admin" : "Mod"}</NavLink>
               )}
             </nav>
           )}
@@ -96,8 +96,8 @@ export default function Navbar() {
                     <>
                       <DropdownMenuItem onClick={() => navigate(`/user/${user.id}`)} data-testid="menu-profile"><User className="w-4 h-4 mr-2" /> My Profile</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => navigate("/watchlist")} data-testid="menu-watchlist"><Bookmark className="w-4 h-4 mr-2" /> Watchlist</DropdownMenuItem>
-                      {["moderator", "admin"].includes(user.role) && (
-                        <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin"><Shield className="w-4 h-4 mr-2" /> {user.role === "admin" ? "Admin" : "Moderator"} Console</DropdownMenuItem>
+                      {(["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || (user.permissions || []).some((p) => ["user.suspend","content.lock_cast","content.protect_fields","moderation.messages.read_reply","content.delete","content.lock","user.view_ips","thread.moderate","comment.moderate"].includes(p))) && (
+                        <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin"><Shield className="w-4 h-4 mr-2" /> {user.role === "admin" || user.effective_role === "admin" ? "Admin" : "Moderator"} Console</DropdownMenuItem>
                       )}
                     </>
                   )}
