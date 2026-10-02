@@ -156,7 +156,8 @@ export default function Home() {
           return <SectionBlock key={s.id} title={s.title} items={items} testid={`section-${s.id}`} />;
         }
         const items = (sectionData[s.id] || []).slice(0, s.limit || 12);
-        return <SectionBlock key={s.id} title={s.title} items={items} testid={`section-${s.id}`} />;
+        const kind = SOURCE_ENDPOINTS[s.source]?.kind || "movie";
+        return <SectionBlock key={s.id} title={s.title} items={items} testid={`section-${s.id}`} forceKind={kind} />;
       })}
 
       {/* Weekly leaderboard — always after the first section cluster */}
@@ -171,7 +172,7 @@ export default function Home() {
   );
 }
 
-function SectionBlock({ title, items, testid }) {
+function SectionBlock({ title, items, testid, forceKind }) {
   if (!items || items.length === 0) return null;
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid={testid}>
@@ -184,11 +185,12 @@ function SectionBlock({ title, items, testid }) {
         </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
-        {items.map((it) =>
-          it.type === "series"
+        {items.map((it) => {
+          const kind = forceKind || (it.type === "series" || it.type === "movie" ? it.type : "movie");
+          return kind === "series"
             ? <SeriesCard key={`s-${it.id}`} series={it} />
-            : <MovieCard key={`m-${it.id}`} movie={it} />
-        )}
+            : <MovieCard key={`m-${it.id}`} movie={it} />;
+        })}
       </div>
     </section>
   );
