@@ -1,0 +1,29 @@
+{
+  "summary": "Frontend regression validated: Home SectionBlock now receives forceKind from SOURCE_ENDPOINTS so TV-series sections render SeriesCard regardless of backend-provided type (e.g. 'Scripted'). All critical flows pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "SeriesEdit /series/{id}/edit", "issues": ["React hydration warning: <button> nested inside another <button> in the season accordion header (SeriesEdit.jsx around line 662-668 — a Button is rendered inside the collapse-trigger button). Not a regression from this task, but logs a console error."]},
+      {"screen": "Home hero featured CTA", "issues": ["hero-featured-cta links to /movies/{id} (plural) for non-series items while MovieCard links to /movie/{id} (singular). Inconsistent path — may 404 if the /movies/:id route is not aliased. Pre-existing, not covered by this fix but worth confirming."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional) Fix nested <button> in SeriesEdit season accordion to clear hydration warning.",
+    "(Optional) Reconcile hero-featured-cta path (/movies/{id} vs /movie/{id})."
+  ],
+  "critical_code_review_comments": [
+    "Home.jsx fix is correct and minimal: forceKind is passed only for built-in sections (where kind is known from endpoint), while custom sections still rely on item.type (which is 'movie'|'series' as resolved by backend). This cleanly resolves the 'Scripted' collision.",
+    "Fallback heuristic `it.type === 'series' || it.type === 'movie' ? it.type : 'movie'` in SectionBlock is a sensible safety net for custom items whose backend type is anything else."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "admin@cineverse.com / Admin@123",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Verified: /api/series/trending and /api/series/recent items have type='Scripted' (series Type model) but Home now forces SeriesCard via forceKind='series'. Trending TV Series anchors point to /series/{id}; Trending Movies anchors point to /movie/{id}. Direct series page and SeriesEdit load without 'Failed to load' toasts.",
+  "rca of the issue": "RCA (already fixed by main agent): /series/trending etc. include a `type` field equal to Series.type model field (e.g. 'Scripted', 'Mini-Series'). Home SectionBlock heuristic `it.type === 'series'` evaluated false and fell back to MovieCard which links to /movie/{seriesId}. Opening that id as a movie 404'd and MovieDetail toasted 'Failed to load movie'. Fix: SectionBlock accepts forceKind, Home passes SOURCE_ENDPOINTS[s.source].kind for built-in sections so TV sections always render SeriesCard."
+}
