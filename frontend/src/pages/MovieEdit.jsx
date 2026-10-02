@@ -589,9 +589,6 @@ export default function MovieEdit() {
                 />
               </Field>
             </div>
-            <Field name="gallery" label={`Gallery (${form.gallery.length} images)`} locked={isFieldLocked("gallery")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("gallery")}>
-              <GalleryUpload value={form.gallery} onChange={(v) => setField("gallery", v)} testid="field-gallery" canDelete={canDelete} />
-            </Field>
           </section>
 
           {isMod && (

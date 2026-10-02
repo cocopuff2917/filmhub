@@ -156,8 +156,8 @@ export default function MovieDetail() {
   const backdrops = Array.from(new Set([
     ...(movie.backdrop_urls || []),
     ...(movie.backdrop_url ? [movie.backdrop_url] : []),
-    ...(movie.gallery || []),
   ])).filter(Boolean);
+  const gallery = (movie.gallery || []).filter(Boolean);
 
   return (
     <div className="text-white">
@@ -387,6 +387,9 @@ export default function MovieDetail() {
                 <TabsTrigger value="posters" className="rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 data-[state=active]:bg-transparent data-[state=active]:text-white text-slate-400 px-1 pb-3 pt-0">
                   Posters <span className="ml-1 text-xs text-slate-500">{posters.length}</span>
                 </TabsTrigger>
+                <TabsTrigger value="gallery" className="rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 data-[state=active]:bg-transparent data-[state=active]:text-white text-slate-400 px-1 pb-3 pt-0">
+                  Gallery <span className="ml-1 text-xs text-slate-500">{gallery.length}</span>
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="backdrops" className="mt-4">
                 {backdrops.length === 0 ? (
@@ -408,6 +411,19 @@ export default function MovieDetail() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {posters.map((img, i) => (
                       <div key={i} className="rounded-lg overflow-hidden aspect-[2/3] bg-[#1e2430] border border-white/5">
+                        <img src={fileUrl(img)} alt="" className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="gallery" className="mt-4">
+                {gallery.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500 text-sm">No gallery images yet.</div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3" data-testid="gallery-grid">
+                    {gallery.map((img, i) => (
+                      <div key={i} className="rounded-lg overflow-hidden aspect-video bg-[#1e2430] border border-white/5">
                         <img src={fileUrl(img)} alt="" className="w-full h-full object-cover" />
                       </div>
                     ))}

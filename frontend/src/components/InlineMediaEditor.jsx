@@ -24,6 +24,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
 
   const [posterUrls, setPosterUrls] = useState(entity.poster_urls || (entity.poster_url ? [entity.poster_url] : []));
   const [backdropUrls, setBackdropUrls] = useState(entity.backdrop_urls || (entity.backdrop_url ? [entity.backdrop_url] : []));
+  const [gallery, setGallery] = useState(Array.isArray(entity.gallery) ? entity.gallery : []);
   const [trailerUrl, setTrailerUrl] = useState(entity.trailer_url || "");
   const [videoUrls, setVideoUrls] = useState(Array.isArray(entity.video_urls) ? entity.video_urls : []);
   const [newVideo, setNewVideo] = useState("");
@@ -35,6 +36,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   const resetFromProps = () => {
     setPosterUrls(entity.poster_urls || (entity.poster_url ? [entity.poster_url] : []));
     setBackdropUrls(entity.backdrop_urls || (entity.backdrop_url ? [entity.backdrop_url] : []));
+    setGallery(Array.isArray(entity.gallery) ? entity.gallery : []);
     setTrailerUrl(entity.trailer_url || "");
     setVideoUrls(Array.isArray(entity.video_urls) ? entity.video_urls : []);
     setNewVideo("");
@@ -53,6 +55,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
       if (r?.data) {
         setPosterUrls(r.data.poster_urls || posterUrls);
         setBackdropUrls(r.data.backdrop_urls || backdropUrls);
+        setGallery(r.data.gallery || gallery);
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to save");
@@ -87,6 +90,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
 
   const posterLocked = locked.has("poster_url") || locked.has("poster_urls");
   const backdropLocked = locked.has("backdrop_url") || locked.has("backdrop_urls");
+  const galleryLocked = locked.has("gallery");
   const trailerLocked = locked.has("trailer_url");
   const videosLocked = locked.has("video_urls");
 
@@ -122,6 +126,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
             <TabsList className="bg-[#0d0f12] border border-white/10">
               <TabsTrigger value="poster" data-testid="media-tab-poster">Posters</TabsTrigger>
               <TabsTrigger value="backdrop" data-testid="media-tab-backdrop">Backdrops</TabsTrigger>
+              <TabsTrigger value="gallery" data-testid="media-tab-gallery">Gallery</TabsTrigger>
               <TabsTrigger value="trailer" data-testid="media-tab-trailer">Trailer</TabsTrigger>
               <TabsTrigger value="videos" data-testid="media-tab-videos">Videos</TabsTrigger>
             </TabsList>
@@ -183,6 +188,25 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
             </TabsContent>
 
             {/* TRAILER */}
+            <TabsContent value="gallery" className="mt-4 space-y-3">
+              <GalleryListEditor
+                items={gallery}
+                saving={saving}
+                locked={galleryLocked}
+                canMod={canMod}
+                onAppend={async (url) => {
+                  const next = [...gallery, url];
+                  await savePatch({ gallery: next }, "Gallery image added");
+                  setGallery(next);
+                }}
+                onRemove={async (idx) => {
+                  const next = gallery.filter((_, i) => i !== idx);
+                  await savePatch({ gallery: next }, "Gallery image removed");
+                  setGallery(next);
+                }}
+              />
+            </TabsContent>
+
             <TabsContent value="trailer" className="mt-4 space-y-3">
               {trailerLocked && <LockedNotice label="Trailer" />}
               <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-3">
@@ -361,6 +385,71 @@ function LockedNotice({ label }) {
   return (
     <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-300" data-testid="locked-notice">
       <span className="font-semibold">{label} is locked.</span> A moderator has restricted this field — only moderators or admins can change it.
+    </div>
+  );
+}
+
+// Gallery editor (no primary concept, 16:9 tiles)
+function GalleryListEditor({ items, saving, locked, canMod, onAppend, onRemove }) {
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadImage(file);
+      await onAppend(url);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-4">
+      {locked && <LockedNotice label="Gallery" />}
+      {!canMod && items.length > 0 && (
+        <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs text-sky-300">
+          You can upload additional gallery images. Only moderators can remove them.
+        </div>
+      )}
+      {items.length === 0 ? (
+        <div className="text-slate-500 text-sm">No gallery images uploaded yet.</div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="gallery-grid-editor">
+          {items.map((url, idx) => (
+            <div key={`${url}-${idx}`} className="group relative rounded-lg overflow-hidden border border-white/10 bg-black" data-testid={`gallery-tile-${idx}`}>
+              <img src={fileUrl(url)} alt="" className="w-full object-cover" style={{ aspectRatio: "16/9" }} />
+              {canMod && !locked && (
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onRemove(idx)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold disabled:opacity-50"
+                    data-testid={`gallery-remove-${idx}`}
+                  >
+                    <Trash2 className="w-3 h-3" /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div>
+        <label
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-md border border-white/15 text-white text-sm cursor-pointer hover:bg-white/10 ${(locked || uploading || saving) ? "opacity-50 cursor-not-allowed" : ""}`}
+          data-testid="gallery-upload-label"
+        >
+          {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+          {uploading ? "Uploading…" : "Upload another gallery image"}
+          <input type="file" accept="image/*" disabled={locked || uploading || saving} onChange={handleFile} className="hidden" data-testid="gallery-upload-input" />
+        </label>
+      </div>
     </div>
   );
 }
