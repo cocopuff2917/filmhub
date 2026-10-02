@@ -18,6 +18,7 @@ import DiscussionSection from "@/components/DiscussionSection";
 import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 import VideosSection from "@/components/VideosSection";
+import InlineMediaEditor from "@/components/InlineMediaEditor";
 import CollectionCard from "@/components/CollectionCard";
 
 const fmtDate = (s) => {
@@ -267,6 +268,13 @@ export default function SeriesDetail() {
 
               <div className="mt-6 flex flex-wrap gap-2">
                 {user && <Button size="sm" variant="outline" onClick={() => navigate(`/series/${id}/edit`)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-series-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>}
+                {user && (
+                  <InlineMediaEditor
+                    kind="series"
+                    entity={series}
+                    onUpdated={(patch) => setSeries((s) => ({ ...s, ...patch }))}
+                  />
+                )}
                 {user && <Button size="sm" variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-series-btn"><Flag className="w-4 h-4 mr-2" /> Report</Button>}
                 {canModerate && (
                   <>

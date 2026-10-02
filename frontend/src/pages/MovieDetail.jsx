@@ -18,6 +18,7 @@ import DiscussionSection from "@/components/DiscussionSection";
 import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 import VideosSection from "@/components/VideosSection";
+import InlineMediaEditor from "@/components/InlineMediaEditor";
 import CollectionCard from "@/components/CollectionCard";
 
 // ---------- helpers ----------
@@ -231,6 +232,13 @@ export default function MovieDetail() {
                   <Button size="sm" variant="outline" onClick={() => navigate(`/movie/${id}/edit`)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-movie-btn">
                     <Edit className="w-4 h-4 mr-2" /> Edit
                   </Button>
+                )}
+                {user && (
+                  <InlineMediaEditor
+                    kind="movie"
+                    entity={movie}
+                    onUpdated={(patch) => setMovie((m) => ({ ...m, ...patch }))}
+                  />
                 )}
                 {user && (
                   <Button size="sm" variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-movie-btn">
