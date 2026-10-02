@@ -22,6 +22,7 @@ export default function Browse() {
   const tab = params.get("tab") || "movies";
   const genre = params.get("genre") || "all";
   const year = params.get("year") || "all";
+  const minRating = params.get("min_rating") || "any";
   const sort = params.get("sort") || "recent";
 
   useEffect(() => {
@@ -34,11 +35,13 @@ export default function Browse() {
       const qv = params.get("q") || "";
       const g = params.get("genre");
       const y = params.get("year");
+      const mr = params.get("min_rating");
       const s = params.get("sort");
       const filters = {};
       if (qv) filters.q = qv;
       if (g && g !== "all") filters.genre = g;
       if (y && y !== "all") filters.year = y;
+      if (mr && mr !== "any") filters.min_rating = mr;
       if (s) filters.sort = s;
 
       try {
@@ -138,6 +141,37 @@ export default function Browse() {
             <SelectItem value="year">Release date</SelectItem>
           </SelectContent>
         </Select>
+
+        <Select value={minRating} onValueChange={(v) => setParam("min_rating", v === "any" ? "" : v)}>
+          <SelectTrigger className="w-[160px] bg-[#14181f] border-white/10 text-white" data-testid="filter-min-rating">
+            <SelectValue placeholder="Rating" />
+          </SelectTrigger>
+          <SelectContent className="bg-[#14181f] text-white border-white/10">
+            <SelectItem value="any">Any rating</SelectItem>
+            <SelectItem value="5">5★ & up</SelectItem>
+            <SelectItem value="6">6★ & up</SelectItem>
+            <SelectItem value="7">7★ & up</SelectItem>
+            <SelectItem value="8">8★ & up</SelectItem>
+            <SelectItem value="9">9★ & up</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {(params.get("q") || params.get("genre") || params.get("year") || params.get("min_rating")) && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-10 border-white/15 text-slate-300 hover:bg-white/10 hover:text-white"
+            onClick={() => {
+              const p = new URLSearchParams(params);
+              ["q", "genre", "year", "min_rating"].forEach((k) => p.delete(k));
+              setParams(p);
+              setQ("");
+            }}
+            data-testid="filter-clear-all"
+          >
+            Clear filters
+          </Button>
+        )}
 
         {params.get("q") && (
           <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25 cursor-pointer" onClick={() => setParam("q", "")}>

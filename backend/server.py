@@ -2840,6 +2840,7 @@ async def list_movies(
     q: Optional[str] = None,
     genre: Optional[str] = None,
     year: Optional[int] = None,
+    min_rating: Optional[float] = None,
     sort: Optional[str] = "recent",
     limit: Optional[int] = None,
 ):
@@ -2867,6 +2868,8 @@ async def list_movies(
     docs = []
     async for d in cursor:
         docs.append(await enrich_movie(d))
+    if min_rating is not None:
+        docs = [m for m in docs if (m.get("avg_rating") or 0) >= min_rating]
     if sort == "rating":
         docs.sort(key=lambda x: (x.get("avg_rating") or 0), reverse=True)
     elif sort == "year":
@@ -3268,6 +3271,7 @@ async def list_series(
     q: Optional[str] = None,
     genre: Optional[str] = None,
     year: Optional[int] = None,
+    min_rating: Optional[float] = None,
     sort: Optional[str] = "recent",
     limit: Optional[int] = None,
 ):
@@ -3294,7 +3298,11 @@ async def list_series(
     docs = []
     async for d in cursor:
         docs.append(await enrich_series(d, deep=False))
-    if sort == "year":
+    if min_rating is not None:
+        docs = [s for s in docs if (s.get("avg_rating") or 0) >= min_rating]
+    if sort == "rating":
+        docs.sort(key=lambda x: (x.get("avg_rating") or 0), reverse=True)
+    elif sort == "year":
         docs.sort(key=lambda x: x.get("first_air_date", ""), reverse=True)
     else:
         docs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
