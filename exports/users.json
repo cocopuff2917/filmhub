@@ -1,0 +1,433 @@
+[
+  {
+    "_id": "6ababaea36d31ff5985fd39a",
+    "email": "admin@cineverse.com",
+    "password_hash": "$2b$12$tTAxRf.uk7B5RVvmIiBzE.hT33qs95Q4uvID2ePCyOWzIVr2GBWM6",
+    "name": "Admin",
+    "role": "admin",
+    "created_at": "2026-09-28T19:07:22.484094+00:00",
+    "ips": [
+      {
+        "ip": "203.0.113.42",
+        "first_seen": "2026-09-28T21:47:10.266759+00:00",
+        "last_seen": "2026-09-28T21:47:10.266759+00:00",
+        "count": 1
+      },
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-28T22:02:20.121044+00:00",
+        "last_seen": "2026-10-02T04:03:38.528360+00:00",
+        "count": 142
+      }
+    ],
+    "bio": "ok"
+  },
+  {
+    "_id": "6ababc6e7469c60a3977a055",
+    "email": "user2929@test.com",
+    "password_hash": "$2b$12$stoQedTNndL1wqSZqCAxJuXTWDSMIreJUr2kHnUOCWAlUSgtwG5oy",
+    "name": "Test User",
+    "role": "moderator",
+    "created_at": "2026-09-28T19:13:50.164324+00:00"
+  },
+  {
+    "_id": "6ababdde7469c60a3977a05a",
+    "email": "koareba@gmail.com",
+    "password_hash": "$2b$12$imOPZNWB2QU4Xghybve89OZFnVO22k4pqCC77cagqda9DBvpJIDGy",
+    "name": "cocopuff2018",
+    "role": "admin",
+    "created_at": "2026-09-28T19:19:58.764600+00:00",
+    "ips": [
+      {
+        "ip": "172.59.109.31",
+        "first_seen": "2026-09-28T22:17:55.653822+00:00",
+        "last_seen": "2026-09-30T02:39:57.737325+00:00",
+        "count": 15
+      },
+      {
+        "ip": "172.59.108.29",
+        "first_seen": "2026-10-01T02:43:39.818906+00:00",
+        "last_seen": "2026-10-02T00:51:38.295731+00:00",
+        "count": 4
+      }
+    ]
+  },
+  {
+    "_id": "6abad75703780990b1340253",
+    "email": "xegimet610@hiredify.com",
+    "password_hash": "$2b$12$LZqNyPlZ4UYFc5UKB8ariuabQYvx7dipVAmKcod8C0Wi9V.Djwxau",
+    "name": "john doe",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:08:39.678965+00:00",
+    "suspended_at": "2026-09-28T21:28:06.933346+00:00",
+    "suspended_by": "6ababdde7469c60a3977a05a",
+    "suspended_until": "permanent",
+    "suspension_reason": ""
+  },
+  {
+    "_id": "6abadb6c91b2d484ce7a765e",
+    "email": "testuser_1790630764@test.com",
+    "password_hash": "$2b$12$/YmeOZPGuFKcSVw9I/nYMuwHkK60akGuQLhw430p7ay76TXjnYnLS",
+    "name": "Test User",
+    "role": "user",
+    "avatar_url": "http://x/a.jpg",
+    "created_at": "2026-09-28T21:26:04.732566+00:00"
+  },
+  {
+    "_id": "6abadb6d91b2d484ce7a7664",
+    "email": "suspendtest_1790630765@test.com",
+    "password_hash": "$2b$12$McBFj214Ve7sfkYZCAM9qOl0eC2BA2m72CUcrEcbcRQGZXB5tQeri",
+    "name": "Suspend Target",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:26:05.361262+00:00",
+    "suspended_at": "2026-09-28T21:26:05.409393+00:00",
+    "suspended_by": "6ababaea36d31ff5985fd39a"
+  },
+  {
+    "_id": "6abadb8ae26b5cebe32af012",
+    "email": "testuser_a1b70c6419@test.com",
+    "password_hash": "$2b$12$sRhJbZ7Htd1CIQNCRAQ.JuNGxVQbOIGeWxico/h3.sXDlR.7AHMZm",
+    "name": "Test User",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:26:34.125607+00:00"
+  },
+  {
+    "_id": "6abadb8ae26b5cebe32af013",
+    "email": "testuser_5a47f59c73@test.com",
+    "password_hash": "$2b$12$EQds/zaWuN3WqAoIJQVkSe.djpPIJu71CuWfNBx1cF1W8hLKXvE12",
+    "name": "Test User",
+    "role": "user",
+    "avatar_url": "http://x/a.jpg",
+    "created_at": "2026-09-28T21:26:34.330523+00:00"
+  },
+  {
+    "_id": "6abadb8be26b5cebe32af024",
+    "email": "suspendtest_1790630795@test.com",
+    "password_hash": "$2b$12$rE.2otbH/di6A9C45kCd6.nUXE1XBQKYnSPwv0RE6POcfp3XhPppC",
+    "name": "Suspend Target",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:26:35.596850+00:00",
+    "suspended_at": "2026-09-28T21:26:35.638443+00:00",
+    "suspended_by": "6ababaea36d31ff5985fd39a"
+  },
+  {
+    "_id": "6abadb8de26b5cebe32af02c",
+    "email": "modtest_1790630796@test.com",
+    "password_hash": "$2b$12$1JjHZUKXO3dB/BOGluCoK.wq0AUaif7/6.37ybo/t6cx24NxsYRri",
+    "name": "Mod",
+    "role": "moderator",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:26:37.259273+00:00"
+  },
+  {
+    "_id": "6abadbbae26b5cebe32af02f",
+    "email": "uifront_1790630840@test.com",
+    "password_hash": "$2b$12$mVRz1brnzBM6/SqP55zeOeQt1mGHXJb/MyXSC6vHQ1sW.9nhrzgj2",
+    "name": "UI Test",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:27:22.218619+00:00",
+    "suspended_at": "2026-09-28T22:48:48.960116+00:00",
+    "suspended_by": "6ababdde7469c60a3977a05a",
+    "suspended_by_name": "Koa Reba",
+    "suspended_until": "permanent",
+    "suspension_reason": ""
+  },
+  {
+    "_id": "6abadbd5e26b5cebe32af030",
+    "email": "uifront2_1790630868@test.com",
+    "password_hash": "$2b$12$PbFU9d1DoaaziIZR1iopuOt4Q/XyCBuMQ1CtgR5qyaT9LGD07wqyK",
+    "name": "UI Test 2",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:27:49.432292+00:00",
+    "suspended_at": "2026-09-28T21:44:28.124279+00:00",
+    "suspended_by": "6abadca9d0c6cf2b43380be3",
+    "suspended_by_name": "Banana",
+    "suspended_until": "permanent",
+    "suspension_reason": ""
+  },
+  {
+    "_id": "6abadc34e26b5cebe32af03c",
+    "email": "suspflow_1790630964@test.com",
+    "password_hash": "$2b$12$5Kjj5Il60edOTBNzth/L2OhS8xrPmT74sDwSC6C1VOKFD7o78ZGkK",
+    "name": "SuspFlow",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:29:24.305125+00:00",
+    "suspended_at": "2026-09-28T21:29:24.605009+00:00",
+    "suspended_by": "6ababaea36d31ff5985fd39a",
+    "suspended_until": "permanent",
+    "suspension_reason": "test-suspend"
+  },
+  {
+    "_id": "6abadca9d0c6cf2b43380be3",
+    "email": "koak6462@gmail.com",
+    "password_hash": "$2b$12$BIheY1pAxKxiOGB2y7mkguT8GOrVvfmRHHMmTie5FMS.n5g/fp272",
+    "name": "Banana",
+    "role": "user",
+    "avatar_url": "cineverse/uploads/admin/29216e04-8dec-4549-a019-e2fdf98694f4.webp",
+    "created_at": "2026-09-28T21:31:21.673327+00:00",
+    "ips": [
+      {
+        "ip": "172.59.109.31",
+        "first_seen": "2026-09-28T22:04:30.234163+00:00",
+        "last_seen": "2026-09-29T16:22:20.572825+00:00",
+        "count": 6
+      },
+      {
+        "ip": "172.59.108.29",
+        "first_seen": "2026-10-01T03:31:41.449199+00:00",
+        "last_seen": "2026-10-01T03:31:41.449199+00:00",
+        "count": 1
+      }
+    ],
+    "custom_role_ids": [
+      "6abb24e4bbbdfc4f0bf01111"
+    ],
+    "custom_role_id": "6abb24e4bbbdfc4f0bf01111"
+  },
+  {
+    "_id": "6abadd51dc4867738553822b",
+    "email": "testsusp@test.com",
+    "password_hash": "$2b$12$y8uj5XOk813qPiYA82VyIO7UsqqnZVpqRbOYMNwPck9gNxH5Y8ld6",
+    "name": "Test Susp",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T21:34:09.703651+00:00",
+    "suspended_at": "2026-09-28T21:34:09.896664+00:00",
+    "suspended_by": "6ababaea36d31ff5985fd39a",
+    "suspended_by_name": "Admin",
+    "suspended_until": "2026-11-12T21:34:09.896641+00:00",
+    "suspension_reason": "Custom duration test"
+  },
+  {
+    "_id": "6abae3edb48d96f603f875e9",
+    "email": "lockt@test.com",
+    "password_hash": "$2b$12$O/MIzdvkjL1A8yd0ZXlBA..MgLhCSLufPshxTUwED.RCBsXfl6IAS",
+    "name": "Lock Test",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-28T22:02:21.099360+00:00",
+    "ips": [
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-28T22:02:21.100755+00:00",
+        "last_seen": "2026-09-28T22:02:21.100755+00:00",
+        "count": 1
+      }
+    ],
+    "suspended_at": "2026-09-28T22:48:38.610545+00:00",
+    "suspended_by": "6ababdde7469c60a3977a05a",
+    "suspended_by_name": "Koa Reba",
+    "suspended_until": "permanent",
+    "suspension_reason": ""
+  },
+  {
+    "_id": "6abae440b48d96f603f875ed",
+    "email": "e5xrindo@freemailable.xyz",
+    "password_hash": "$2b$12$XGUwvh8D6asnoi1/b2CGeeqJ3faRXXP1jtLvjZZZONQoSf57ZYvFm",
+    "name": "Jake Joe",
+    "role": "user",
+    "avatar_url": "cineverse/uploads/admin/63efab09-b292-4d36-a712-30d278cfcf93.jpeg",
+    "created_at": "2026-09-28T22:03:44.542508+00:00",
+    "ips": [
+      {
+        "ip": "172.59.109.31",
+        "first_seen": "2026-09-28T22:03:44.543636+00:00",
+        "last_seen": "2026-09-29T05:16:24.511499+00:00",
+        "count": 5
+      }
+    ]
+  },
+  {
+    "_id": "6abafe3cf5d5822a96b139f1",
+    "email": "zotfkg10006@smaau.com",
+    "password_hash": "$2b$12$F6W9681MNFA.LGNQEWKnx.M05UHbGo1W0BpSsC7DKvn8GNtT3zFgO",
+    "name": "Linkere",
+    "role": "moderator",
+    "avatar_url": "cineverse/uploads/admin/3c64e5bd-915f-42a3-9868-32a6931768d9.webp",
+    "created_at": "2026-09-28T23:54:36.198566+00:00",
+    "ips": [
+      {
+        "ip": "172.59.109.31",
+        "first_seen": "2026-09-28T23:54:36.199755+00:00",
+        "last_seen": "2026-09-29T14:42:24.654613+00:00",
+        "count": 8
+      },
+      {
+        "ip": "172.59.108.29",
+        "first_seen": "2026-10-02T02:05:16.709042+00:00",
+        "last_seen": "2026-10-02T02:05:16.709042+00:00",
+        "count": 1
+      }
+    ],
+    "suspended_at": "2026-09-29T05:09:20.257672+00:00",
+    "suspended_by": "6ababdde7469c60a3977a05a",
+    "suspended_by_name": "Koa Reba"
+  },
+  {
+    "_id": "6abb29cb2c360d104fcf2a49",
+    "email": "hidden@test.com",
+    "password_hash": "$2b$12$/NYExkCk9iQkRgpMmfu3f.6xkQ3UkIGo4KnUCWnkYD5meX4vc842q",
+    "name": "Hidden Test",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-29T03:00:27.475423+00:00",
+    "ips": [
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-29T03:00:27.476437+00:00",
+        "last_seen": "2026-09-29T03:00:27.476437+00:00",
+        "count": 1
+      }
+    ],
+    "suspended_at": "2026-09-29T03:00:27.701818+00:00",
+    "suspended_by": "6ababaea36d31ff5985fd39a",
+    "suspended_by_name": "Admin"
+  },
+  {
+    "_id": "6abb3409513463c478d81c67",
+    "email": "edittest_1790653449@test.com",
+    "password_hash": "$2b$12$bUPkFJSgJ6bmk//IpDVzkuCz.AwSL7cMGezYHLgKzQxc5VzdNyp2i",
+    "name": "Renamed User",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-29T03:44:09.584367+00:00",
+    "ips": [
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-29T03:44:09.585297+00:00",
+        "last_seen": "2026-09-29T03:44:10.938976+00:00",
+        "count": 2
+      }
+    ],
+    "bio": "Just a movie fan."
+  },
+  {
+    "_id": "6abb443d4859cfda94b7d146",
+    "email": "delivered@resend.dev",
+    "password_hash": "$2b$12$g7P9zI/75VVkOzIPKFsh9OcjcCSb7sQPkD.oi2X8/4lCncsA.85ZS",
+    "name": "Reset Test",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-29T04:53:17.718664+00:00",
+    "ips": [
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-29T04:53:17.719661+00:00",
+        "last_seen": "2026-09-29T05:19:44.512199+00:00",
+        "count": 3
+      }
+    ],
+    "suspended_by_name": "Admin"
+  },
+  {
+    "_id": "6abb46e12155d4d16fb8a990",
+    "email": "targetuser@test.com",
+    "password_hash": "$2b$12$LGvaPhzu35Bgox/W4ib5me2cf4EAzz4pSppHdEIMfxeBoTiK4gZTy",
+    "name": "Target User",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-29T05:04:33.463738+00:00",
+    "ips": [
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-29T05:04:33.464682+00:00",
+        "last_seen": "2026-09-30T01:36:49.495228+00:00",
+        "count": 12
+      }
+    ],
+    "suspended_at": "2026-10-01T05:36:28.031910+00:00",
+    "suspended_by": "6ababaea36d31ff5985fd39a",
+    "suspended_by_name": "Admin"
+  },
+  {
+    "_id": "6abbcb213d3388b2abbc5f6a",
+    "email": "koadoe@gmail.com",
+    "password_hash": "$2b$12$Ze1sEXqW9BjYL6ZtDRpGr.4bLtU2VFHmJVORYyDkXseZKWuvqrd2C",
+    "name": "oogieboogie",
+    "role": "user",
+    "avatar_url": "cineverse/uploads/admin/a60f2c03-c06f-4aa4-b76f-137cfbdb3e00.jpeg",
+    "created_at": "2026-09-29T14:28:49.771168+00:00",
+    "ips": [
+      {
+        "ip": "172.59.109.31",
+        "first_seen": "2026-09-29T14:28:49.772260+00:00",
+        "last_seen": "2026-09-29T14:39:31.051479+00:00",
+        "count": 3
+      },
+      {
+        "ip": "172.59.108.29",
+        "first_seen": "2026-10-02T02:05:32.811278+00:00",
+        "last_seen": "2026-10-02T02:05:32.811278+00:00",
+        "count": 1
+      }
+    ],
+    "suspended_at": "2026-09-29T14:34:47.332352+00:00",
+    "suspended_by": "6ababdde7469c60a3977a05a",
+    "suspended_by_name": "cocopuff2018"
+  },
+  {
+    "_id": "6abbe5379317ac2a3673318b",
+    "email": "kkoa456@gmail.com",
+    "password_hash": "$2b$12$WO0jbemUDXXfRYNdhu4TQuGrbomnLislU3HIB7Ki0C81wXt6f6sT.",
+    "name": "brattyboy",
+    "role": "user",
+    "avatar_url": "cineverse/uploads/admin/b69165bd-9592-4b96-98f5-ea5b4d8b1c98.jpeg",
+    "created_at": "2026-09-29T16:20:07.071241+00:00",
+    "ips": [
+      {
+        "ip": "172.59.109.31",
+        "first_seen": "2026-09-29T16:20:07.072242+00:00",
+        "last_seen": "2026-09-29T16:20:07.072242+00:00",
+        "count": 1
+      }
+    ],
+    "bio": "gay fucker",
+    "suspended_at": "2026-09-29T16:23:33.325366+00:00",
+    "suspended_by": "6abadca9d0c6cf2b43380be3",
+    "suspended_by_name": "Banana",
+    "suspended_until": "permanent",
+    "suspension_reason": "Vandalism "
+  },
+  {
+    "_id": "6abc739954ac7f22455c1b44",
+    "email": "user@test.com",
+    "password_hash": "$2b$12$HFB5cjG7WHeAN8F0J55NTOYm6e4F5FRFeeMuOsHTz.SVtw5uRrSa2",
+    "name": "Regular User",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-09-30T02:27:37.144419+00:00",
+    "ips": [
+      {
+        "ip": "34.7.135.173",
+        "first_seen": "2026-09-30T02:27:37.145524+00:00",
+        "last_seen": "2026-10-01T04:39:52.152192+00:00",
+        "count": 8
+      }
+    ],
+    "custom_role_ids": []
+  },
+  {
+    "_id": "6abde4495650ab2e71245553",
+    "email": "koa123@gmail.com",
+    "password_hash": "$2b$12$1Id017zDk8Tp7891.zlN9uHi4Uw9fvp8GhovNujQTBHSytE/TL/bu",
+    "name": "123",
+    "role": "user",
+    "avatar_url": "",
+    "created_at": "2026-10-01T04:40:41.619897+00:00",
+    "ips": [
+      {
+        "ip": "172.59.108.29",
+        "first_seen": "2026-10-01T04:40:41.620977+00:00",
+        "last_seen": "2026-10-01T04:40:41.620977+00:00",
+        "count": 1
+      }
+    ]
+  }
+]

@@ -1,0 +1,1090 @@
+[
+  {
+    "_id": "6ababf8b7469c60a3977a05b",
+    "title": "How to Eat Fried Worms",
+    "release_date": "2006-08-25",
+    "genres": [
+      "family"
+    ],
+    "synopsis": "It is 11-year-old Billy's (Luke Benward) first day at a new school. Such an occasion is difficult enough for a boy to survive unscathed, but he inadvertently incurs the wrath of a bully and finds himself in an unappetizing predicament: He must eat 10 worms in a single day or face the consequences. A sister who likes to blab, a weak stomach, and Billy's own big mouth stack the deck against him",
+    "poster_url": "cineverse/uploads/admin/d6fe3cea-3b93-4b9a-b61e-431eaf117593.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "runtime": 124,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6ababfe57469c60a3977a05e",
+        "character_name": "Billy Forrester"
+      },
+      {
+        "actor_id": "6abac14a7469c60a3977a060",
+        "character_name": "Joe"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-28T19:27:07.154278+00:00",
+    "crew": [],
+    "keywords": [],
+    "original_language": "English",
+    "status": "Released",
+    "tagline": "AUTO_1790662556",
+    "video_urls": [
+      "https://youtu.be/9bZkp7q19f0"
+    ],
+    "collection_ids": [],
+    "locked_cast_actor_ids": [
+      "6ababfe57469c60a3977a05e",
+      "6abac14a7469c60a3977a060"
+    ],
+    "poster_urls": [
+      "cineverse/uploads/admin/d6fe3cea-3b93-4b9a-b61e-431eaf117593.jpeg"
+    ]
+  },
+  {
+    "_id": "6abac507a1ab23ad3f8d886d",
+    "title": "M3GAN 2.0",
+    "release_date": "2025-06-27",
+    "genres": [
+      "Thriller",
+      "Sci-fi"
+    ],
+    "synopsis": "Updated synopsis for change-log testing.",
+    "poster_url": "cineverse/uploads/admin/254c6aae-2d80-4749-8225-397c5ce797d1.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "https://www.youtube.com/watch?v=IYLHdEzsk1s",
+    "runtime": 123,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abaf89df5d5822a96b139d5",
+        "character_name": "M3GAN"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-28T19:50:31.753159+00:00",
+    "awards_wins": 0,
+    "crew": [],
+    "keywords": [],
+    "original_language": "English",
+    "status": "Released",
+    "tagline": "",
+    "video_urls": [],
+    "poster_urls": [
+      "cineverse/uploads/admin/254c6aae-2d80-4749-8225-397c5ce797d1.jpeg",
+      "cineverse/uploads/admin/a335d2b0-932e-4e80-829c-058f7f598bae.jpeg",
+      "cineverse/uploads/admin/8eb89065-349f-4686-afd4-9aa56ef828f6.jpeg"
+    ],
+    "backdrop_urls": []
+  },
+  {
+    "_id": "6abae393b48d96f603f875e2",
+    "title": "Charlie and the Chocolate Factory",
+    "release_date": "2005-07-10",
+    "genres": [
+      "Family",
+      "Fantasy"
+    ],
+    "synopsis": "Based on the beloved Roald Dahl tale, this comedic and fantastical film follows young Charlie Bucket (Freddie Highmore) and his Grandpa Joe (David Kelly) as they join a small group of contest winners who get to tour the magical and mysterious factory of eccentric candy maker Willy Wonka (Johnny Depp). Aided by his diminutive Oompa Loompa workers (Deep Roy), Wonka has a hidden motivation for the tour, one that he will reveal only after the children in the group show their true colors.\n",
+    "poster_url": "cineverse/uploads/admin/db560aa8-5da5-4f13-9211-3d1005034711.webp",
+    "backdrop_url": "",
+    "trailer_url": "https://www.youtube.com/watch?v=EWeSpN__EU8",
+    "runtime": 115,
+    "gallery": [
+      "cineverse/uploads/admin/40fbb74e-5bc3-45de-aa7a-862738f50f89.jpeg"
+    ],
+    "cast": [
+      {
+        "actor_id": "6abae633a479bb86e193b5f9",
+        "character_name": "Willie Wonka"
+      },
+      {
+        "actor_id": "6abae6cd15d2f76465dd2c57",
+        "character_name": "Charlie Bucket"
+      },
+      {
+        "actor_id": "6abb5488409fb6ccd8f3c4fe",
+        "character_name": "Speed Test Role"
+      },
+      {
+        "actor_id": "6abb551a409fb6ccd8f3c501",
+        "character_name": "Speed Role"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-28T22:00:51.419916+00:00",
+    "created_by": "6abadca9d0c6cf2b43380be3",
+    "locked_fields": [],
+    "awards_nominations": 12,
+    "awards_wins": 3,
+    "budget": 150000000,
+    "crew": [
+      {
+        "name": "Tim Burton",
+        "role": "Director"
+      },
+      {
+        "name": "John August",
+        "role": "Writer"
+      }
+    ],
+    "keywords": [
+      "chocolate",
+      "factory",
+      "family",
+      "wonka",
+      "fantasy"
+    ],
+    "original_language": "English",
+    "revenue": 475000000,
+    "status": "Released",
+    "tagline": "AutoSave tagline test 1790662424",
+    "video_urls": [],
+    "deleted": false,
+    "restored_at": "2026-09-29T05:21:15.715808+00:00",
+    "restored_by": "6ababaea36d31ff5985fd39a",
+    "restored_by_name": "Admin"
+  },
+  {
+    "_id": "6abb0a9d12db055b9521a146",
+    "title": "Jumanji: Open World",
+    "release_date": "2026-12-25",
+    "genres": [
+      "Comedy",
+      "Adventure"
+    ],
+    "synopsis": "The characters from the fantastical realm of Jumanji unleash chaos when they escape into the real world.\n",
+    "poster_url": "cineverse/uploads/admin/3d950f0d-b338-4243-8c52-1473497e304b.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "https://www.youtube.com/watch?v=zhApeaHMvfs",
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abb0bd512db055b9521a14a",
+        "character_name": "Ruby Roundhouse"
+      },
+      {
+        "actor_id": "6abb138cfff48ed9d57e605b",
+        "character_name": "Dr. Smolder Bravestone"
+      },
+      {
+        "actor_id": "6abb1446fff48ed9d57e6060",
+        "character_name": "Professor Shelly Oberon"
+      },
+      {
+        "actor_id": "6abb1694fff48ed9d57e606d",
+        "character_name": "Eddie"
+      },
+      {
+        "actor_id": "6abb171afff48ed9d57e6071",
+        "character_name": "Franklin 'Mouse' Finbar"
+      },
+      {
+        "actor_id": "6abb17aafff48ed9d57e6075",
+        "character_name": "Bethany"
+      },
+      {
+        "actor_id": "6abb5104ed3ef0cb72dd9880",
+        "character_name": "Jefferson"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-29T00:47:25.508371+00:00",
+    "created_by": "6ababdde7469c60a3977a05a",
+    "locked_fields": [
+      "release_date"
+    ],
+    "crew": [],
+    "keywords": [],
+    "original_language": "English",
+    "status": "In Production",
+    "tagline": "",
+    "video_urls": [],
+    "collection_ids": [
+      "6abc76c6eb4b90e7f94ef9f2"
+    ]
+  },
+  {
+    "_id": "6abb187ffff48ed9d57e6079",
+    "title": "A Minecraft Movie",
+    "release_date": "2025-04-04",
+    "genres": [],
+    "synopsis": "A mysterious portal pulls four misfits into the Overworld, a bizarre, cubic wonderland that thrives on imagination. To get back home, they'll have to master the terrain while embarking on a magical quest with an unexpected crafter named Steve.\n",
+    "poster_url": "cineverse/uploads/admin/01e1dac4-f3b4-4e6a-8002-a51c32f31520.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "https://www.youtube.com/watch?v=-AKxSyHOySk",
+    "runtime": 101,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abb1446fff48ed9d57e6060",
+        "character_name": " Steve"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-29T01:46:39.214633+00:00",
+    "created_by": "6ababdde7469c60a3977a05a",
+    "collection_ids": [
+      "6abc7430eb4b90e7f94ef9f0"
+    ]
+  },
+  {
+    "_id": "6abb1a1efff48ed9d57e607d",
+    "title": "School of Rock",
+    "release_date": "2003-10-03",
+    "genres": [
+      "Comedy",
+      "Drama"
+    ],
+    "synopsis": "Overly enthusiastic guitarist Dewey Finn (Jack Black) gets thrown out of his bar band and finds himself in desperate need of work. Posing as a substitute music teacher at an elite private elementary school, he exposes his students to the hard rock gods he idolizes and emulates -- much to the consternation of the uptight principal (Joan Cusack). As he gets his privileged and precocious charges in touch with their inner rock 'n' roll animals, he imagines redemption at a local Battle of the Bands.",
+    "poster_url": "cineverse/uploads/admin/bc1e16b6-53c4-415f-82d6-8c18e0f27a2e.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "runtime": 109,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abb1446fff48ed9d57e6060",
+        "character_name": "Dewey Finn "
+      },
+      {
+        "actor_id": "6abb1ad5fff48ed9d57e6080",
+        "character_name": "Summer Hathaway"
+      },
+      {
+        "actor_id": "6abbc9e93d3388b2abbc5f65",
+        "character_name": "Rosalie \"Roz\" Mullins,"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-29T01:53:34.041359+00:00",
+    "created_by": "6ababdde7469c60a3977a05a",
+    "crew": [],
+    "keywords": [],
+    "original_language": "English",
+    "status": "Released",
+    "tagline": "",
+    "video_urls": []
+  },
+  {
+    "_id": "6abb270bbbbdfc4f0bf01113",
+    "title": "Diary of a Wimpy Kid",
+    "release_date": "2010-03-19",
+    "genres": [],
+    "synopsis": "Middle school is not an enjoyable experience for preteen Greg Heffley (Zachary Gordon) but a horrid ordeal of social land-mines that he must bear. To do so, he devises schemes to win him the recognition and status he feels he deserves -- all of which fail miserably. Greg chronicles his misadventures, thoughts and opinions in a diary to prepare for the day that he will no longer have to put up with nonsense.\n",
+    "poster_url": "cineverse/uploads/admin/8e0542d1-7584-4838-8fbe-571f29607712.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abb3fd5135036657365ec9b",
+        "character_name": "Greg Heffley"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-29T02:48:43.617321+00:00",
+    "created_by": "6ababdde7469c60a3977a05a",
+    "crew": [],
+    "keywords": [],
+    "original_language": "English",
+    "status": "Released",
+    "tagline": "",
+    "video_urls": []
+  },
+  {
+    "_id": "6abb27e8bbbdfc4f0bf01116",
+    "title": "Miracles from Heaven",
+    "release_date": "2016-03-16",
+    "genres": [],
+    "synopsis": "Anna Beam (Kylie Rogers) lives with a rare, incurable disorder that leaves her unable to digest food. Despite the dire diagnosis, devoted mom Christy (Jennifer Garner) relentlessly searches for a way to save her beloved daughter. Everything changes in an instant when Anna tells an amazing story of a visit to heaven after surviving a headlong tumble into a tree. Her family and doctors become even more baffled when the young girl begins to show signs of recovering from her fatal condition.\n",
+    "poster_url": "cineverse/uploads/admin/136493de-8bcd-4423-9896-6982b134ea47.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "https://www.youtube.com/watch?v=CldGTG6iVrU",
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abb47332155d4d16fb8a999",
+        "character_name": "Anna Beam"
+      },
+      {
+        "actor_id": "6abb47642155d4d16fb8a99c",
+        "character_name": "Christy Beam"
+      },
+      {
+        "actor_id": "6abb4aacd704a3bffa666c88",
+        "character_name": "Angela"
+      }
+    ],
+    "is_trending": false,
+    "created_at": "2026-09-29T02:52:24.176777+00:00",
+    "created_by": "6ababdde7469c60a3977a05a",
+    "crew": [],
+    "keywords": [],
+    "original_language": "English",
+    "status": "Released",
+    "tagline": "",
+    "video_urls": []
+  },
+  {
+    "_id": "6abb4bb8ed3ef0cb72dd984e",
+    "title": "Wonder",
+    "release_date": "2017-11-17",
+    "genres": [],
+    "synopsis": "Born with facial differences that, up until now, have prevented him from going to a mainstream school, Auggie Pullman becomes the most unlikely of heroes when he enters the local fifth grade. As his family, his new classmates, and the larger community all struggle to discover their compassion and acceptance, Auggie's extraordinary journey will unite them and prove you can't blend in when you were born to stand out.",
+    "tagline": "",
+    "poster_url": "cineverse/uploads/admin/11f16f12-d5ea-43e2-9f99-6ea7f7da7a3e.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abb4bd1ed3ef0cb72dd9851",
+        "character_name": "Auggie"
+      },
+      {
+        "actor_id": "6abb4bebed3ef0cb72dd9854",
+        "character_name": "Isabel Pullman"
+      },
+      {
+        "actor_id": "6abb4c6bed3ef0cb72dd9857",
+        "character_name": "Nate Pullman"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-29T05:25:12.460475+00:00",
+    "created_by": "6abafe3cf5d5822a96b139f1"
+  },
+  {
+    "_id": "6abbc5873d3388b2abbc5f55",
+    "title": "Hocus Pocus",
+    "release_date": "1993-07-16",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "cineverse/uploads/admin/e0f9c792-43e6-4836-9dc0-d089f36d02c3.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abbc9073d3388b2abbc5f5a",
+        "character_name": "Winifred \"Winnie"
+      },
+      {
+        "actor_id": "6abbc9233d3388b2abbc5f5d",
+        "character_name": "Sarah Sanderson"
+      },
+      {
+        "actor_id": "6abbc93d3d3388b2abbc5f60",
+        "character_name": "Mary Sanderson"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-29T14:04:55.071134+00:00",
+    "created_by": "6ababdde7469c60a3977a05a"
+  },
+  {
+    "_id": "6abbced39317ac2a3673310f",
+    "title": "Home Alone",
+    "release_date": "1990-11-16",
+    "genres": [
+      "Christmas"
+    ],
+    "synopsis": "When bratty 8-year-old Kevin McCallister acts out the night before a family trip to Paris, his mother makes him sleep in the attic. After the McCallisters mistakenly leave for the airport without Kevin, he awakens to an empty house and assumes his wish to have no family has come true. But his excitement sours when he realizes that two con men plan to rob the McCallister residence, and that he alone must protect the family home.\n",
+    "tagline": "",
+    "poster_url": "cineverse/uploads/admin/10cc5c89-b80b-4dcb-87b7-beb12959c44e.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": 103,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abbcef19317ac2a36733112",
+        "character_name": "Kevin"
+      },
+      {
+        "actor_id": "6abada1b03780990b1340257",
+        "character_name": "Kate"
+      },
+      {
+        "actor_id": "6abbcf099317ac2a36733115",
+        "character_name": "Harry"
+      },
+      {
+        "actor_id": "6abbcf529317ac2a36733118",
+        "character_name": "Marv"
+      },
+      {
+        "actor_id": "6abbcf869317ac2a3673311b",
+        "character_name": "Peter"
+      },
+      {
+        "actor_id": "6abbcf9d9317ac2a3673311e",
+        "character_name": "Marley"
+      },
+      {
+        "actor_id": "6abbd15b9317ac2a36733133",
+        "character_name": "Linnie"
+      },
+      {
+        "actor_id": "6abbd1739317ac2a36733136",
+        "character_name": "Buzz"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-29T14:44:35.801608+00:00",
+    "created_by": "6abafe3cf5d5822a96b139f1"
+  },
+  {
+    "_id": "6abbd44e9317ac2a36733154",
+    "title": "Home Alone 2: Lost in New York",
+    "release_date": "1990-11-15",
+    "genres": [
+      "Family",
+      "Comedy",
+      "Christmas"
+    ],
+    "synopsis": "After snarky youth Kevin McCallister loses track of his father at the airport, he mistakenly gets on a plane headed for New York City -- while the rest of the McCallisters fly to Florida. Now alone in the Big Apple, Kevin cons his way into a room at the Plaza Hotel and begins his usual antics. But when Kevin discovers that the Sticky Bandits are on the loose, he struggles to stop them from robbing an elderly man's toy store just before Christmas.\n",
+    "tagline": "",
+    "poster_url": "cineverse/uploads/admin/da0b1fb9-f92d-4733-80d1-fa8475181d86.jpeg",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abbcef19317ac2a36733112",
+        "character_name": "Kevin"
+      },
+      {
+        "actor_id": "6abbcf099317ac2a36733115",
+        "character_name": "Harry"
+      },
+      {
+        "actor_id": "6abbcf529317ac2a36733118",
+        "character_name": "Marv"
+      },
+      {
+        "actor_id": "6abbcf869317ac2a3673311b",
+        "character_name": "Peter"
+      },
+      {
+        "actor_id": "6abada1b03780990b1340257",
+        "character_name": "Kate"
+      },
+      {
+        "actor_id": "6abbd1739317ac2a36733136",
+        "character_name": "Buzz"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-29T15:07:58.964971+00:00",
+    "created_by": "6abafe3cf5d5822a96b139f1"
+  },
+  {
+    "_id": "6abbdce19317ac2a36733170",
+    "title": "Toy Story 5",
+    "release_date": "2026-06-19",
+    "genres": [],
+    "synopsis": "Buzz, Woody, Jessie and the rest of the gang come face-to-face with Lilypad, a brand-new tablet device that arrives with her own disruptive ideas about what is best for Bonnie. Will playtime ever be the same?\n",
+    "tagline": "",
+    "poster_url": "cineverse/uploads/admin/54f272e3-992a-4de7-a576-164392aa9606.webp",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [
+      "https://www.youtube.com/watch?v=c51ND9Hdbw0"
+    ],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abbc9e93d3388b2abbc5f65",
+        "character_name": "Jessie"
+      },
+      {
+        "actor_id": "6abbdee89317ac2a36733175",
+        "character_name": "Buzz Lightyear"
+      },
+      {
+        "actor_id": "6abbdf099317ac2a36733178",
+        "character_name": "Woody"
+      },
+      {
+        "actor_id": "6abbe1ff9317ac2a3673317c",
+        "character_name": "Lilypad"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-29T15:44:33.823123+00:00",
+    "created_by": "6abafe3cf5d5822a96b139f1"
+  },
+  {
+    "_id": "6abc20e21b96aff9785fb67f",
+    "title": "ZZUniqueSearchMovie_2280f673",
+    "release_date": "2024-01-01",
+    "genres": [
+      "Drama"
+    ],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-29T20:34:42.305221+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-09-29T20:34:42.467788+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abc571f1cb96a5355f9c392",
+    "title": "Charlie and the Chocolate Factory",
+    "release_date": "2005-07-10",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-30T00:26:07.586382+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a"
+  },
+  {
+    "_id": "6abc571f1cb96a5355f9c394",
+    "title": "Dedup Movie Test",
+    "release_date": "2020-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6ababfe57469c60a3977a05e",
+        "character_name": "Hero"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-30T00:26:07.698113+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-09-30T00:26:11.559814+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abc571f1cb96a5355f9c396",
+    "title": "Dedup Movie Test",
+    "release_date": "2021-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-30T00:26:07.924492+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T05:35:25.480230+00:00",
+    "deleted_by": "6ababdde7469c60a3977a05a",
+    "deleted_by_name": "cocopuff2018"
+  },
+  {
+    "_id": "6abc5778e8fbb1444ae77b68",
+    "title": "Dedup Whitespace Test",
+    "release_date": "2022-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "created_at": "2026-09-30T00:27:36.409958+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-09-30T00:27:36.613171+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abdc5fdf627d974ce47db69",
+    "title": "LOCK_TEST_1790821885",
+    "release_date": "2024-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6ababfe57469c60a3977a05e",
+        "character_name": "Hero"
+      },
+      {
+        "actor_id": "6abac14a7469c60a3977a060",
+        "character_name": "Villain"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T02:31:25.689948+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T02:31:26.222017+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abde4185650ab2e7124554d",
+    "title": "IMG_PROTECT_1790829592",
+    "release_date": "2024-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "/uploads/original_backdrop.jpg",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T04:39:52.245873+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T04:39:53.286557+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abea9b51efcdb1b5bf882b9",
+    "title": "TEST_Movie_3276504d",
+    "release_date": "2026-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abea9b11efcdb1b5bf8823f",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T18:43:01.302198+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T18:43:01.465921+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abea9d4f9316c66a5ff12a7",
+    "title": "TEST_Movie_69488a6b",
+    "release_date": "2026-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abea9d0f9316c66a5ff122a",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T18:43:32.022082+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T18:43:32.258524+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abeaa53f9316c66a5ff1417",
+    "title": "TEST_MovieCastUI_08f4b4f7",
+    "release_date": "2026-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T18:45:39.354812+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T18:45:53.388644+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abead92f9316c66a5ff166f",
+    "title": "TEST_Movie_a45b3e2d",
+    "release_date": "2026-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abead8ef9316c66a5ff1581",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T18:59:30.404965+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T18:59:30.601088+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abeadcff9316c66a5ff1855",
+    "title": "TEST_CastBugMovie_4598c7",
+    "release_date": "2024-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abeadcff9316c66a5ff1853",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T19:00:31.134847+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T19:01:39.122211+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abeb2ccce661c813bcf1bc7",
+    "title": "TEST_Movie_e1adf5e9",
+    "release_date": "2026-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abeb2c8ce661c813bcf1adf",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T19:21:48.360546+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T19:21:48.547572+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abeb30ace661c813bcf1d9e",
+    "title": "TEST_CastBugMovie_855887d0",
+    "release_date": "2026-01-01",
+    "genres": [],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abeb309ce661c813bcf1d9c",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T19:22:50.034057+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T19:22:56.988903+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  },
+  {
+    "_id": "6abeb3d604e603f27fc5dbc8",
+    "title": "TEST_RELOAD_7nehek_Movie_X",
+    "release_date": "2025-01-01",
+    "genres": [
+      "Drama"
+    ],
+    "synopsis": "",
+    "tagline": "",
+    "poster_url": "",
+    "backdrop_url": "",
+    "trailer_url": "",
+    "video_urls": [],
+    "runtime": null,
+    "gallery": [],
+    "cast": [
+      {
+        "actor_id": "6abeb3d604e603f27fc5dbc6",
+        "character_name": "Madea"
+      }
+    ],
+    "crew": [],
+    "keywords": [],
+    "status": "Released",
+    "original_language": "English",
+    "budget": null,
+    "revenue": null,
+    "awards_wins": null,
+    "awards_nominations": null,
+    "is_trending": false,
+    "collection_ids": [],
+    "locked_cast_actor_ids": [],
+    "created_at": "2026-10-01T19:26:14.751521+00:00",
+    "created_by": "6ababaea36d31ff5985fd39a",
+    "deleted": true,
+    "deleted_at": "2026-10-01T19:26:18.024381+00:00",
+    "deleted_by": "6ababaea36d31ff5985fd39a",
+    "deleted_by_name": "Admin"
+  }
+]

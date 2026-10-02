@@ -1,0 +1,87 @@
+{
+  "exported_at": "2026-10-02T04:51:49.365753Z",
+  "database": "test_database",
+  "collections": {
+    "actors": {
+      "count": 1523,
+      "file": "actors.json"
+    },
+    "collections": {
+      "count": 3,
+      "file": "collections.json"
+    },
+    "comments": {
+      "count": 1,
+      "file": "comments.json"
+    },
+    "cron_runs": {
+      "count": 112,
+      "file": "cron_runs.json"
+    },
+    "custom_roles": {
+      "count": 2,
+      "file": "custom_roles.json"
+    },
+    "edits": {
+      "count": 3456,
+      "file": "edits.json"
+    },
+    "files": {
+      "count": 100,
+      "file": "files.json"
+    },
+    "ip_bans": {
+      "count": 0,
+      "file": "ip_bans.json"
+    },
+    "movie_views": {
+      "count": 47,
+      "file": "movie_views.json"
+    },
+    "movies": {
+      "count": 28,
+      "file": "movies.json"
+    },
+    "notifications": {
+      "count": 30,
+      "file": "notifications.json"
+    },
+    "password_resets": {
+      "count": 4,
+      "file": "password_resets.json"
+    },
+    "reviews": {
+      "count": 9,
+      "file": "reviews.json"
+    },
+    "series": {
+      "count": 21,
+      "file": "series.json"
+    },
+    "series_views": {
+      "count": 33,
+      "file": "series_views.json"
+    },
+    "site_config": {
+      "count": 1,
+      "file": "site_config.json"
+    },
+    "thread_messages": {
+      "count": 15,
+      "file": "thread_messages.json"
+    },
+    "threads": {
+      "count": 6,
+      "file": "threads.json"
+    },
+    "users": {
+      "count": 26,
+      "file": "users.json"
+    },
+    "watchlist": {
+      "count": 5,
+      "file": "watchlist.json"
+    }
+  },
+  "restore_hint": "To restore, use mongoimport: mongoimport --db <DB> --collection <name> --file exports/<name>.json --jsonArray"
+}

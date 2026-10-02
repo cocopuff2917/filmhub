@@ -1,0 +1,14 @@
+[
+  {
+    "_id": "6abae05e1196047748122b8e",
+    "entity_type": "movie",
+    "entity_id": "6abac507a1ab23ad3f8d886d",
+    "text": "Great movie, loved every second!",
+    "parent_id": null,
+    "user_id": "6ababaea36d31ff5985fd39a",
+    "user_name": "Admin",
+    "user_avatar": "",
+    "user_role": "admin",
+    "created_at": "2026-09-28T21:47:10.698982+00:00"
+  }
+]

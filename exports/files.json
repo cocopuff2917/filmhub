@@ -1,0 +1,802 @@
+[
+  {
+    "_id": "6ababf9f7469c60a3977a05c",
+    "storage_path": "cineverse/uploads/admin/d6fe3cea-3b93-4b9a-b61e-431eaf117593.jpeg",
+    "original_filename": "images - 2026-09-28T142715.919.jpeg",
+    "content_type": "image/jpeg",
+    "size": 83892,
+    "created_at": "2026-09-28T19:27:27.499006+00:00"
+  },
+  {
+    "_id": "6ababfcf7469c60a3977a05d",
+    "storage_path": "cineverse/uploads/admin/5e6b5669-ed66-4f0d-9f42-d076e475443d.jpg",
+    "original_filename": "1811641_full.jpg",
+    "content_type": "image/jpeg",
+    "size": 66880,
+    "created_at": "2026-09-28T19:28:15.051370+00:00"
+  },
+  {
+    "_id": "6abac1487469c60a3977a05f",
+    "storage_path": "cineverse/uploads/admin/9ac7317d-8e50-4708-a330-725a8e988f25.jpeg",
+    "original_filename": "images - 2026-09-28T143420.615.jpeg",
+    "content_type": "image/jpeg",
+    "size": 8948,
+    "created_at": "2026-09-28T19:34:32.568007+00:00"
+  },
+  {
+    "_id": "6abac4ffa1ab23ad3f8d886c",
+    "storage_path": "cineverse/uploads/admin/254c6aae-2d80-4749-8225-397c5ce797d1.jpeg",
+    "original_filename": "images - 2026-09-28T145009.832.jpeg",
+    "content_type": "image/jpeg",
+    "size": 29934,
+    "created_at": "2026-09-28T19:50:23.079863+00:00"
+  },
+  {
+    "_id": "6abac679a1ab23ad3f8d8870",
+    "storage_path": "cineverse/uploads/admin/b9abf195-61d9-4caa-ba61-72faaadd08e3.jpg",
+    "original_filename": "Stranger_Things_season_4.jpg",
+    "content_type": "image/jpeg",
+    "size": 132757,
+    "created_at": "2026-09-28T19:56:41.609739+00:00"
+  },
+  {
+    "_id": "6abacee66c03ba5e33d6ee89",
+    "storage_path": "cineverse/uploads/admin/be7aac0f-5bd3-4b30-8db1-e6d4febe1c4f.webp",
+    "original_filename": "LViH9fu8t.webp",
+    "content_type": "image/webp",
+    "size": 54370,
+    "created_at": "2026-09-28T20:32:38.277002+00:00"
+  },
+  {
+    "_id": "6abacffd6c03ba5e33d6ee8b",
+    "storage_path": "cineverse/uploads/admin/50922f85-f727-48cb-948b-5cc11d57fea8.webp",
+    "original_filename": "Winona_Ryder (1).webp",
+    "content_type": "image/webp",
+    "size": 1168432,
+    "created_at": "2026-09-28T20:37:17.269169+00:00"
+  },
+  {
+    "_id": "6abad0b56c03ba5e33d6ee8d",
+    "storage_path": "cineverse/uploads/admin/844b7614-a853-4a62-af81-f66ef421587c.jpeg",
+    "original_filename": "images - 2026-09-28T154011.494.jpeg",
+    "content_type": "image/jpeg",
+    "size": 31094,
+    "created_at": "2026-09-28T20:40:21.664638+00:00"
+  },
+  {
+    "_id": "6abada1903780990b1340256",
+    "storage_path": "cineverse/uploads/admin/e674a44f-89a3-4b6f-9819-a0a9c00ae7a9.jpeg",
+    "original_filename": "images - 2026-09-28T162016.282.jpeg",
+    "content_type": "image/jpeg",
+    "size": 25525,
+    "created_at": "2026-09-28T21:20:25.739883+00:00"
+  },
+  {
+    "_id": "6abadb6e91b2d484ce7a766d",
+    "storage_path": "cineverse/uploads/admin/70f3d4ec-aed6-4470-bce1-799216e3c004.txt",
+    "original_filename": "test.txt",
+    "content_type": "text/plain",
+    "size": 11,
+    "created_at": "2026-09-28T21:26:06.975006+00:00"
+  },
+  {
+    "_id": "6abadb8ce26b5cebe32af02a",
+    "storage_path": "cineverse/uploads/admin/43e0f5ef-5848-43ac-bc87-e056893b667d.txt",
+    "original_filename": "test.txt",
+    "content_type": "text/plain",
+    "size": 11,
+    "created_at": "2026-09-28T21:26:36.860361+00:00"
+  },
+  {
+    "_id": "6abadcd7dc48677385538226",
+    "storage_path": "cineverse/uploads/admin/29216e04-8dec-4549-a019-e2fdf98694f4.webp",
+    "original_filename": "A1pIXQZD86MzfP5pvr37C68YiGv.webp",
+    "content_type": "image/webp",
+    "size": 20110,
+    "created_at": "2026-09-28T21:32:07.834883+00:00"
+  },
+  {
+    "_id": "6abadd8edc4867738553822e",
+    "storage_path": "cineverse/uploads/admin/55104eab-98be-42e7-ad13-b9085bb5c9f4.webp",
+    "original_filename": "vgjd34eWfVL6GsLHwiwcAsjWLmo.webp",
+    "content_type": "image/webp",
+    "size": 82648,
+    "created_at": "2026-09-28T21:35:10.415773+00:00"
+  },
+  {
+    "_id": "6abae38bb48d96f603f875e1",
+    "storage_path": "cineverse/uploads/admin/db560aa8-5da5-4f13-9211-3d1005034711.webp",
+    "original_filename": "images (4).webp",
+    "content_type": "image/webp",
+    "size": 42558,
+    "created_at": "2026-09-28T22:00:43.521357+00:00"
+  },
+  {
+    "_id": "6abae631a479bb86e193b5f8",
+    "storage_path": "cineverse/uploads/admin/3b4434bc-0e2c-425f-a659-c8e2852854c5.webp",
+    "original_filename": "images (5).webp",
+    "content_type": "image/webp",
+    "size": 27082,
+    "created_at": "2026-09-28T22:12:01.171973+00:00"
+  },
+  {
+    "_id": "6abae6b315d2f76465dd2c56",
+    "storage_path": "cineverse/uploads/admin/2146b23f-577a-4956-96a5-a40b90aacb43.webp",
+    "original_filename": "Freddie-highmore.webp",
+    "content_type": "image/webp",
+    "size": 215558,
+    "created_at": "2026-09-28T22:14:11.991145+00:00"
+  },
+  {
+    "_id": "6abae8d315d2f76465dd2c5b",
+    "storage_path": "cineverse/uploads/admin/63efab09-b292-4d36-a712-30d278cfcf93.jpeg",
+    "original_filename": "images - 2026-09-28T172256.425.jpeg",
+    "content_type": "image/jpeg",
+    "size": 38903,
+    "created_at": "2026-09-28T22:23:15.743286+00:00"
+  },
+  {
+    "_id": "6abae92215d2f76465dd2c5c",
+    "storage_path": "cineverse/uploads/admin/d2229db0-01e9-4811-89ad-9d659abc2be6.jpeg",
+    "original_filename": "images - 2026-09-28T172422.014.jpeg",
+    "content_type": "image/jpeg",
+    "size": 41859,
+    "created_at": "2026-09-28T22:24:34.040958+00:00"
+  },
+  {
+    "_id": "6abae97a15d2f76465dd2c61",
+    "storage_path": "cineverse/uploads/admin/deeed4e3-62fb-4960-b2a2-ff830fee6b87.jpeg",
+    "original_filename": "images - 2026-09-28T172551.155.jpeg",
+    "content_type": "image/jpeg",
+    "size": 33718,
+    "created_at": "2026-09-28T22:26:02.867801+00:00"
+  },
+  {
+    "_id": "6abaea3715d2f76465dd2c67",
+    "storage_path": "cineverse/uploads/admin/f217c6be-b401-4415-81e5-074653765939.avif",
+    "original_filename": "ball-l-image.avif",
+    "content_type": "image/avif",
+    "size": 7615,
+    "created_at": "2026-09-28T22:29:11.643864+00:00"
+  },
+  {
+    "_id": "6abaeb0715d2f76465dd2c69",
+    "storage_path": "cineverse/uploads/admin/04d3e6d3-2b77-496b-828a-e5370567d08a.jpg",
+    "original_filename": "Modern_Family_season_11_poster.jpg",
+    "content_type": "image/jpeg",
+    "size": 34948,
+    "created_at": "2026-09-28T22:32:39.086121+00:00"
+  },
+  {
+    "_id": "6abaeb7d15d2f76465dd2c6d",
+    "storage_path": "cineverse/uploads/admin/016cbe73-bec4-4a40-bd79-048ee23586bf.webp",
+    "original_filename": "EdONeill.webp",
+    "content_type": "image/webp",
+    "size": 47086,
+    "created_at": "2026-09-28T22:34:37.478756+00:00"
+  },
+  {
+    "_id": "6abaec9a15d2f76465dd2c72",
+    "storage_path": "cineverse/uploads/admin/61fae8fc-9d12-4d58-a1fd-d79e76d2a2ee.webp",
+    "original_filename": "images (6).webp",
+    "content_type": "image/webp",
+    "size": 18312,
+    "created_at": "2026-09-28T22:39:22.662593+00:00"
+  },
+  {
+    "_id": "6abaed1e15d2f76465dd2c76",
+    "storage_path": "cineverse/uploads/admin/6ddbe59c-56ef-4b79-85c5-706d151c0058.jpeg",
+    "original_filename": "images - 2026-09-28T174120.422.jpeg",
+    "content_type": "image/jpeg",
+    "size": 17481,
+    "created_at": "2026-09-28T22:41:34.557968+00:00"
+  },
+  {
+    "_id": "6abaef8b15d2f76465dd2c7c",
+    "storage_path": "cineverse/uploads/admin/2088b622-bfbb-416d-9408-b685447a7cd1.webp",
+    "original_filename": "Gaten_Matarazzo_2022.webp",
+    "content_type": "image/webp",
+    "size": 98932,
+    "created_at": "2026-09-28T22:51:55.547377+00:00"
+  },
+  {
+    "_id": "6abaf02015d2f76465dd2c80",
+    "storage_path": "cineverse/uploads/admin/b6fc14f3-47f7-4c11-88c0-c6f7ef83f3ee.jpeg",
+    "original_filename": "images - 2026-09-28T175412.317.jpeg",
+    "content_type": "image/jpeg",
+    "size": 23628,
+    "created_at": "2026-09-28T22:54:24.493580+00:00"
+  },
+  {
+    "_id": "6abaf0bb15d2f76465dd2c84",
+    "storage_path": "cineverse/uploads/admin/8f49ad23-8d0e-4936-a758-31395bf9c678.jpg",
+    "original_filename": "635379_v9_bc.jpg",
+    "content_type": "image/jpeg",
+    "size": 52207,
+    "created_at": "2026-09-28T22:56:59.707074+00:00"
+  },
+  {
+    "_id": "6abaf13c15d2f76465dd2c88",
+    "storage_path": "cineverse/uploads/admin/f5a61166-c2ff-44a6-bf28-34c3242d5bac.jpeg",
+    "original_filename": "images - 2026-09-28T175855.292.jpeg",
+    "content_type": "image/jpeg",
+    "size": 22031,
+    "created_at": "2026-09-28T22:59:08.007120+00:00"
+  },
+  {
+    "_id": "6abaf15a15d2f76465dd2c8b",
+    "storage_path": "cineverse/uploads/admin/045638c8-3c46-4143-907b-bdde14d705aa.jpeg",
+    "original_filename": "images - 2026-09-28T175925.970.jpeg",
+    "content_type": "image/jpeg",
+    "size": 21525,
+    "created_at": "2026-09-28T22:59:38.434076+00:00"
+  },
+  {
+    "_id": "6abaf1ce15d2f76465dd2c8e",
+    "storage_path": "cineverse/uploads/admin/9ac4f7d9-2efa-4b33-ad64-ae954573102b.jpeg",
+    "original_filename": "images - 2026-09-28T175925.970.jpeg",
+    "content_type": "image/jpeg",
+    "size": 21525,
+    "created_at": "2026-09-28T23:01:34.428248+00:00"
+  },
+  {
+    "_id": "6abaf21f15d2f76465dd2c92",
+    "storage_path": "cineverse/uploads/admin/9d39ee88-03a7-4f75-a127-a2b8fcf03de5.webp",
+    "original_filename": "Joe_Keery_2024.webp",
+    "content_type": "image/webp",
+    "size": 167374,
+    "created_at": "2026-09-28T23:02:55.318062+00:00"
+  },
+  {
+    "_id": "6abaf31815d2f76465dd2c95",
+    "storage_path": "cineverse/uploads/admin/c09114d2-9ec9-42f8-bb67-2862527b922f.jpeg",
+    "original_filename": "images - 2026-09-28T180654.037.jpeg",
+    "content_type": "image/jpeg",
+    "size": 5981,
+    "created_at": "2026-09-28T23:07:04.564433+00:00"
+  },
+  {
+    "_id": "6abaf746f5d5822a96b139ce",
+    "storage_path": "cineverse/uploads/admin/f0556a7a-44c8-4953-a227-3a4ebb759890.png",
+    "original_filename": "Stranger-Things-Episode-1-Chapter-1-The-Vanishing-of-Will-Byers-Netflix-Title-Card-2.png",
+    "content_type": "image/png",
+    "size": 1917,
+    "created_at": "2026-09-28T23:24:54.714345+00:00"
+  },
+  {
+    "_id": "6abaf7c1f5d5822a96b139d0",
+    "storage_path": "cineverse/uploads/admin/a0f84403-3586-4432-b2f6-8baee548c825.jpeg",
+    "original_filename": "images - 2026-09-28T182643.271.jpeg",
+    "content_type": "image/jpeg",
+    "size": 12300,
+    "created_at": "2026-09-28T23:26:57.151640+00:00"
+  },
+  {
+    "_id": "6abaf899f5d5822a96b139d4",
+    "storage_path": "cineverse/uploads/admin/7a99fc1f-3933-42eb-ab87-19622f1db42f.webp",
+    "original_filename": "Jenna_Davis.webp",
+    "content_type": "image/webp",
+    "size": 151848,
+    "created_at": "2026-09-28T23:30:33.764600+00:00"
+  },
+  {
+    "_id": "6abaf941f5d5822a96b139d8",
+    "storage_path": "cineverse/uploads/admin/40fbb74e-5bc3-45de-aa7a-862738f50f89.jpeg",
+    "original_filename": "images - 2026-09-28T183306.345.jpeg",
+    "content_type": "image/jpeg",
+    "size": 57810,
+    "created_at": "2026-09-28T23:33:21.461622+00:00"
+  },
+  {
+    "_id": "6abaf9f9f5d5822a96b139dc",
+    "storage_path": "cineverse/uploads/admin/9e724523-4864-48e5-a059-66c72ebcd771.jpeg",
+    "original_filename": "the  good doctor .jpeg",
+    "content_type": "image/jpeg",
+    "size": 46843,
+    "created_at": "2026-09-28T23:36:25.793823+00:00"
+  },
+  {
+    "_id": "6abafb0df5d5822a96b139e3",
+    "storage_path": "cineverse/uploads/admin/6f49b34a-9a64-4c48-94c9-3931bf338db9.jpeg",
+    "original_filename": "images - 2026-09-28T184049.789.jpeg",
+    "content_type": "image/jpeg",
+    "size": 7027,
+    "created_at": "2026-09-28T23:41:01.016861+00:00"
+  },
+  {
+    "_id": "6abafba9f5d5822a96b139e8",
+    "storage_path": "cineverse/uploads/admin/134c4ec4-cead-4a01-8264-37c53382285b.jpeg",
+    "original_filename": "images - 2026-09-28T184326.224.jpeg",
+    "content_type": "image/jpeg",
+    "size": 20869,
+    "created_at": "2026-09-28T23:43:37.940790+00:00"
+  },
+  {
+    "_id": "6abafc6bf5d5822a96b139ec",
+    "storage_path": "cineverse/uploads/admin/66a34aa3-6762-44ac-a965-bb39c87940e0.jpeg",
+    "original_filename": "images - 2026-09-28T184639.960.jpeg",
+    "content_type": "image/jpeg",
+    "size": 21357,
+    "created_at": "2026-09-28T23:46:51.861144+00:00"
+  },
+  {
+    "_id": "6abafe52f5d5822a96b139f2",
+    "storage_path": "cineverse/uploads/admin/3c64e5bd-915f-42a3-9868-32a6931768d9.webp",
+    "original_filename": "m7WyGJRiOq88PFw7es7nAYz2Cxj.webp",
+    "content_type": "image/webp",
+    "size": 8314,
+    "created_at": "2026-09-28T23:54:58.478911+00:00"
+  },
+  {
+    "_id": "6abaff30f5d5822a96b139f5",
+    "storage_path": "cineverse/uploads/admin/dfa579c8-39e5-4c50-882e-ca788be7a0c2.jpg",
+    "original_filename": "desi-arnaz.jpg",
+    "content_type": "image/jpeg",
+    "size": 24201,
+    "created_at": "2026-09-28T23:58:40.764240+00:00"
+  },
+  {
+    "_id": "6abb0333cff6e4d2490ae041",
+    "storage_path": "cineverse/uploads/admin/41a891fd-264c-4bb4-ad94-eb6a74760c37.jpg",
+    "original_filename": "1000003627.jpg",
+    "content_type": "image/jpeg",
+    "size": 29355,
+    "created_at": "2026-09-29T00:15:47.779939+00:00"
+  },
+  {
+    "_id": "6abb04f4cff6e4d2490ae047",
+    "storage_path": "cineverse/uploads/admin/033a3b33-fac2-4e82-acea-6da1afd4de9f.webp",
+    "original_filename": "ozHPdO5jAt7ozzdZUgyRAMNPSDW.webp",
+    "content_type": "image/webp",
+    "size": 19452,
+    "created_at": "2026-09-29T00:23:16.050953+00:00"
+  },
+  {
+    "_id": "6abb0634cff6e4d2490ae04f",
+    "storage_path": "cineverse/uploads/admin/a3507891-1f69-438c-950c-d664e18f78c0.jpg",
+    "original_filename": "397746_v9_bc.jpg",
+    "content_type": "image/jpeg",
+    "size": 37957,
+    "created_at": "2026-09-29T00:28:36.676199+00:00"
+  },
+  {
+    "_id": "6abb0a9812db055b9521a145",
+    "storage_path": "cineverse/uploads/admin/3d950f0d-b338-4243-8c52-1473497e304b.jpeg",
+    "original_filename": "images - 2026-09-28T194711.053.jpeg",
+    "content_type": "image/jpeg",
+    "size": 10058,
+    "created_at": "2026-09-29T00:47:20.081603+00:00"
+  },
+  {
+    "_id": "6abb0bca12db055b9521a149",
+    "storage_path": "cineverse/uploads/admin/34482361-ada9-4790-a03c-d157a393069a.jpeg",
+    "original_filename": "images - 2026-09-28T195154.145.jpeg",
+    "content_type": "image/jpeg",
+    "size": 22779,
+    "created_at": "2026-09-29T00:52:26.403935+00:00"
+  },
+  {
+    "_id": "6abb1366fff48ed9d57e605a",
+    "storage_path": "cineverse/uploads/admin/b867da65-629b-4036-aa8a-16e8ea30695e.jpeg",
+    "original_filename": "images - 2026-09-28T202443.503.jpeg",
+    "content_type": "image/jpeg",
+    "size": 8445,
+    "created_at": "2026-09-29T01:24:54.163701+00:00"
+  },
+  {
+    "_id": "6abb145bfff48ed9d57e6062",
+    "storage_path": "cineverse/uploads/admin/154d5a5d-7400-4378-b79c-95f19936a3c0.jpeg",
+    "original_filename": "images - 2026-09-28T202840.813.jpeg",
+    "content_type": "image/jpeg",
+    "size": 29879,
+    "created_at": "2026-09-29T01:28:59.910797+00:00"
+  },
+  {
+    "_id": "6abb15c1fff48ed9d57e6066",
+    "storage_path": "cineverse/uploads/admin/85d6e57d-e2d7-478a-89a5-bfa6f06fdf82.jpeg",
+    "original_filename": "images - 2026-09-28T203445.683.jpeg",
+    "content_type": "image/jpeg",
+    "size": 8479,
+    "created_at": "2026-09-29T01:34:57.458086+00:00"
+  },
+  {
+    "_id": "6abb1690fff48ed9d57e606c",
+    "storage_path": "cineverse/uploads/admin/da63b614-4bff-43a6-ba99-0fd21c774bb7.jpeg",
+    "original_filename": "download (1).jpeg",
+    "content_type": "image/jpeg",
+    "size": 5919,
+    "created_at": "2026-09-29T01:38:24.648430+00:00"
+  },
+  {
+    "_id": "6abb1717fff48ed9d57e6070",
+    "storage_path": "cineverse/uploads/admin/29bc9c80-68d0-45e4-b1db-f797aa39762b.jpeg",
+    "original_filename": "images - 2026-09-28T204030.244.jpeg",
+    "content_type": "image/jpeg",
+    "size": 17860,
+    "created_at": "2026-09-29T01:40:39.361989+00:00"
+  },
+  {
+    "_id": "6abb17a7fff48ed9d57e6074",
+    "storage_path": "cineverse/uploads/admin/e18d6d1d-ccbe-40fb-ad61-d957ec3912bc.jpeg",
+    "original_filename": "images - 2026-09-28T204246.932.jpeg",
+    "content_type": "image/jpeg",
+    "size": 26056,
+    "created_at": "2026-09-29T01:43:03.469712+00:00"
+  },
+  {
+    "_id": "6abb1839fff48ed9d57e6078",
+    "storage_path": "cineverse/uploads/admin/01e1dac4-f3b4-4e6a-8002-a51c32f31520.jpeg",
+    "original_filename": "images - 2026-09-28T204517.415.jpeg",
+    "content_type": "image/jpeg",
+    "size": 11852,
+    "created_at": "2026-09-29T01:45:29.952630+00:00"
+  },
+  {
+    "_id": "6abb19cdfff48ed9d57e607c",
+    "storage_path": "cineverse/uploads/admin/bc1e16b6-53c4-415f-82d6-8c18e0f27a2e.jpeg",
+    "original_filename": "images - 2026-09-28T205148.267.jpeg",
+    "content_type": "image/jpeg",
+    "size": 56185,
+    "created_at": "2026-09-29T01:52:13.449497+00:00"
+  },
+  {
+    "_id": "6abb1ad0fff48ed9d57e607f",
+    "storage_path": "cineverse/uploads/admin/f7305c4d-596d-4f44-b1a3-cc326b79d65f.jpeg",
+    "original_filename": "images - 2026-09-28T205622.229.jpeg",
+    "content_type": "image/jpeg",
+    "size": 27238,
+    "created_at": "2026-09-29T01:56:32.411257+00:00"
+  },
+  {
+    "_id": "6abb1dfafff48ed9d57e6086",
+    "storage_path": "cineverse/uploads/admin/58d16372-6d2f-4646-8e3b-a5667d3d9825.jpg",
+    "original_filename": "1000003629.jpg",
+    "content_type": "image/jpeg",
+    "size": 1530817,
+    "created_at": "2026-09-29T02:10:02.192536+00:00"
+  },
+  {
+    "_id": "6abb26efbbbdfc4f0bf01112",
+    "storage_path": "cineverse/uploads/admin/8e0542d1-7584-4838-8fbe-571f29607712.jpeg",
+    "original_filename": "images - 2026-09-28T214758.767.jpeg",
+    "content_type": "image/jpeg",
+    "size": 40853,
+    "created_at": "2026-09-29T02:48:15.231571+00:00"
+  },
+  {
+    "_id": "6abb2791bbbdfc4f0bf01115",
+    "storage_path": "cineverse/uploads/admin/136493de-8bcd-4423-9896-6982b134ea47.jpeg",
+    "original_filename": "images - 2026-09-28T215045.295.jpeg",
+    "content_type": "image/jpeg",
+    "size": 50956,
+    "created_at": "2026-09-29T02:50:57.026936+00:00"
+  },
+  {
+    "_id": "6abb400b135036657365ec9f",
+    "storage_path": "cineverse/uploads/admin/2c29e81b-90f5-4789-821e-288145197d70.jpg",
+    "original_filename": "498443_v9_bb.jpg",
+    "content_type": "image/jpeg",
+    "size": 34099,
+    "created_at": "2026-09-29T04:35:23.124212+00:00"
+  },
+  {
+    "_id": "6abb43e64859cfda94b7d143",
+    "storage_path": "cineverse/uploads/admin/862db3ae-30de-421e-9d55-d67ec43c1bf7.jpeg",
+    "original_filename": "images - 2026-09-28T235133.303.jpeg",
+    "content_type": "image/jpeg",
+    "size": 42091,
+    "created_at": "2026-09-29T04:51:50.168587+00:00"
+  },
+  {
+    "_id": "6abb47a32155d4d16fb8a99f",
+    "storage_path": "cineverse/uploads/admin/661df7dc-3491-4c76-9c42-a85ae0bad62d.jpeg",
+    "original_filename": "images - 2026-09-29T000732.794.jpeg",
+    "content_type": "image/jpeg",
+    "size": 25092,
+    "created_at": "2026-09-29T05:07:47.847831+00:00"
+  },
+  {
+    "_id": "6abb47cd2155d4d16fb8a9a1",
+    "storage_path": "cineverse/uploads/admin/14540309-6f8f-4c7f-8eb8-7a72636e9321.jpeg",
+    "original_filename": "images - 2026-09-29T000813.488.jpeg",
+    "content_type": "image/jpeg",
+    "size": 27560,
+    "created_at": "2026-09-29T05:08:29.931451+00:00"
+  },
+  {
+    "_id": "6abb4bb2ed3ef0cb72dd984d",
+    "storage_path": "cineverse/uploads/admin/11f16f12-d5ea-43e2-9f99-6ea7f7da7a3e.jpeg",
+    "original_filename": "images - 2026-09-29T002454.198.jpeg",
+    "content_type": "image/jpeg",
+    "size": 77358,
+    "created_at": "2026-09-29T05:25:06.817643+00:00"
+  },
+  {
+    "_id": "6abb4ec7ed3ef0cb72dd9877",
+    "storage_path": "cineverse/uploads/admin/b84935a0-6cd7-40a3-8be2-e22ad5e75731.jpeg",
+    "original_filename": "images - 2026-09-29T003802.929.jpeg",
+    "content_type": "image/jpeg",
+    "size": 23330,
+    "created_at": "2026-09-29T05:38:15.555060+00:00"
+  },
+  {
+    "_id": "6abb4ef3ed3ef0cb72dd9879",
+    "storage_path": "cineverse/uploads/admin/127edfb2-b685-45bf-93df-efaa0daf7957.jpg",
+    "original_filename": "157064_v9_bc.jpg",
+    "content_type": "image/jpeg",
+    "size": 45827,
+    "created_at": "2026-09-29T05:38:59.873255+00:00"
+  },
+  {
+    "_id": "6abb4f2ded3ef0cb72dd987c",
+    "storage_path": "cineverse/uploads/admin/65b49578-2165-46c5-ad58-7496440ee2b9.jpg",
+    "original_filename": "MV5BMTgyOTY5NTAwMF5BMl5BanBnXkFtZTYwMzkwMDI0._V1_.jpg",
+    "content_type": "image/jpeg",
+    "size": 42660,
+    "created_at": "2026-09-29T05:39:57.985336+00:00"
+  },
+  {
+    "_id": "6abb587d409fb6ccd8f3c522",
+    "storage_path": "cineverse/uploads/admin/2c1fa7e8-05d0-4632-9a10-e102ec974522.jpeg",
+    "original_filename": "images - 2026-09-29T011917.573.jpeg",
+    "content_type": "image/jpeg",
+    "size": 35805,
+    "created_at": "2026-09-29T06:19:41.603880+00:00"
+  },
+  {
+    "_id": "6abbc04e3d3388b2abbc5f50",
+    "storage_path": "cineverse/uploads/admin/c5ee8241-6a2a-42ff-b642-daa08cb15114.webp",
+    "original_filename": "Queen_Latifah.webp",
+    "content_type": "image/webp",
+    "size": 14928,
+    "created_at": "2026-09-29T13:42:38.316522+00:00"
+  },
+  {
+    "_id": "6abbc5843d3388b2abbc5f54",
+    "storage_path": "cineverse/uploads/admin/e0f9c792-43e6-4836-9dc0-d089f36d02c3.jpeg",
+    "original_filename": "images - 2026-09-29T090440.768.jpeg",
+    "content_type": "image/jpeg",
+    "size": 34533,
+    "created_at": "2026-09-29T14:04:52.480453+00:00"
+  },
+  {
+    "_id": "6abbc97a3d3388b2abbc5f63",
+    "storage_path": "cineverse/uploads/admin/122e167c-d02c-463a-802c-8bd929ec13af.jpeg",
+    "original_filename": "images - 2026-09-29T092135.592.jpeg",
+    "content_type": "image/jpeg",
+    "size": 8508,
+    "created_at": "2026-09-29T14:21:46.926882+00:00"
+  },
+  {
+    "_id": "6abbca2b3d3388b2abbc5f68",
+    "storage_path": "cineverse/uploads/admin/af2c932a-b16d-4036-a3ca-0138b3f8bd49.jpeg",
+    "original_filename": "images - 2026-09-29T092421.989.jpeg",
+    "content_type": "image/jpeg",
+    "size": 23199,
+    "created_at": "2026-09-29T14:24:43.081717+00:00"
+  },
+  {
+    "_id": "6abbcb453d3388b2abbc5f6b",
+    "storage_path": "cineverse/uploads/admin/a60f2c03-c06f-4aa4-b76f-137cfbdb3e00.jpeg",
+    "original_filename": "images - 2026-09-29T092913.754.jpeg",
+    "content_type": "image/jpeg",
+    "size": 7960,
+    "created_at": "2026-09-29T14:29:25.380463+00:00"
+  },
+  {
+    "_id": "6abbced09317ac2a3673310e",
+    "storage_path": "cineverse/uploads/admin/10cc5c89-b80b-4dcb-87b7-beb12959c44e.jpeg",
+    "original_filename": "images - 2026-09-29T094421.610.jpeg",
+    "content_type": "image/jpeg",
+    "size": 76907,
+    "created_at": "2026-09-29T14:44:32.815419+00:00"
+  },
+  {
+    "_id": "6abbd0349317ac2a36733123",
+    "storage_path": "cineverse/uploads/admin/bd0af161-f7e2-4a30-8a36-4116a703e8f5.jpeg",
+    "original_filename": "images - 2026-09-29T095017.452.jpeg",
+    "content_type": "image/jpeg",
+    "size": 9632,
+    "created_at": "2026-09-29T14:50:28.858588+00:00"
+  },
+  {
+    "_id": "6abbd06c9317ac2a36733125",
+    "storage_path": "cineverse/uploads/admin/d83e444e-cfc9-4c7a-9c17-ea849d0f57d2.jpeg",
+    "original_filename": "images - 2026-09-29T095111.998.jpeg",
+    "content_type": "image/jpeg",
+    "size": 34403,
+    "created_at": "2026-09-29T14:51:24.460091+00:00"
+  },
+  {
+    "_id": "6abbd09a9317ac2a36733127",
+    "storage_path": "cineverse/uploads/admin/77dc3c7c-9aac-4583-b6b8-c452a6c1fb26.jpeg",
+    "original_filename": "images - 2026-09-29T095158.727.jpeg",
+    "content_type": "image/jpeg",
+    "size": 6888,
+    "created_at": "2026-09-29T14:52:10.918462+00:00"
+  },
+  {
+    "_id": "6abbd0c29317ac2a36733129",
+    "storage_path": "cineverse/uploads/admin/c579c76a-fcd3-4acc-bf03-5e0463ee7b91.jpeg",
+    "original_filename": "images - 2026-09-29T095238.461.jpeg",
+    "content_type": "image/jpeg",
+    "size": 11136,
+    "created_at": "2026-09-29T14:52:50.128328+00:00"
+  },
+  {
+    "_id": "6abbd0f79317ac2a3673312b",
+    "storage_path": "cineverse/uploads/admin/fad13b50-7a17-48f5-a6bb-6e144ca6aaf2.webp",
+    "original_filename": "jtjm9ee9mngv-roberts-blossom.webp",
+    "content_type": "image/webp",
+    "size": 48182,
+    "created_at": "2026-09-29T14:53:43.520551+00:00"
+  },
+  {
+    "_id": "6abbd10b9317ac2a3673312c",
+    "storage_path": "cineverse/uploads/admin/323cef08-57da-4801-a3bd-8b92dc1acf86.webp",
+    "original_filename": "jtjm9ee9mngv-roberts-blossom.webp",
+    "content_type": "image/webp",
+    "size": 48182,
+    "created_at": "2026-09-29T14:54:03.817383+00:00"
+  },
+  {
+    "_id": "6abbd1a49317ac2a36733139",
+    "storage_path": "cineverse/uploads/admin/09598135-338e-4395-b42f-41381dbe9d0f.webp",
+    "original_filename": "DevinRatray.webp",
+    "content_type": "image/webp",
+    "size": 26928,
+    "created_at": "2026-09-29T14:56:36.839929+00:00"
+  },
+  {
+    "_id": "6abbd25b9317ac2a3673313b",
+    "storage_path": "cineverse/uploads/admin/3450c303-aedd-45c2-9f53-55c2e00a9f14.jpg",
+    "original_filename": "MV5BYzJiMDNkNmMtMzZmMS00MmY4LWEzNTAtMDI2YTY1NjAzYmM0XkEyXkFqcGc@._V1_FMjpg_UX1000_.jpg",
+    "content_type": "image/jpeg",
+    "size": 87941,
+    "created_at": "2026-09-29T14:59:39.687152+00:00"
+  },
+  {
+    "_id": "6abbd2dd9317ac2a36733144",
+    "storage_path": "cineverse/uploads/admin/630f2efb-fa12-42cd-ab0b-9a3f23b3f10a.jpeg",
+    "original_filename": "images - 2026-09-29T100121.354.jpeg",
+    "content_type": "image/jpeg",
+    "size": 20283,
+    "created_at": "2026-09-29T15:01:49.803794+00:00"
+  },
+  {
+    "_id": "6abbd3c39317ac2a36733151",
+    "storage_path": "cineverse/uploads/admin/1b5d70d9-fabb-474e-9a30-59f9d21a56a7.webp",
+    "original_filename": "Jennifer-Aniston-Golden-Globes-2020.webp",
+    "content_type": "image/webp",
+    "size": 257256,
+    "created_at": "2026-09-29T15:05:39.286474+00:00"
+  },
+  {
+    "_id": "6abbd44c9317ac2a36733153",
+    "storage_path": "cineverse/uploads/admin/da0b1fb9-f92d-4733-80d1-fa8475181d86.jpeg",
+    "original_filename": "images - 2026-09-29T100745.626.jpeg",
+    "content_type": "image/jpeg",
+    "size": 34413,
+    "created_at": "2026-09-29T15:07:56.385239+00:00"
+  },
+  {
+    "_id": "6abbdcdf9317ac2a3673316f",
+    "storage_path": "cineverse/uploads/admin/54f272e3-992a-4de7-a576-164392aa9606.webp",
+    "original_filename": "images (8).webp",
+    "content_type": "image/webp",
+    "size": 37406,
+    "created_at": "2026-09-29T15:44:31.420416+00:00"
+  },
+  {
+    "_id": "6abbe2319317ac2a3673317f",
+    "storage_path": "cineverse/uploads/admin/b03bf854-ec36-44fa-847e-ad53d1394592.webp",
+    "original_filename": "Tim_Allen.webp",
+    "content_type": "image/webp",
+    "size": 105216,
+    "created_at": "2026-09-29T16:07:13.573123+00:00"
+  },
+  {
+    "_id": "6abbe2609317ac2a36733181",
+    "storage_path": "cineverse/uploads/admin/da77ecfb-48f7-479f-b3ae-8c046147df98.jpeg",
+    "original_filename": "images - 2026-09-29T110745.778.jpeg",
+    "content_type": "image/jpeg",
+    "size": 25408,
+    "created_at": "2026-09-29T16:08:00.233229+00:00"
+  },
+  {
+    "_id": "6abbe2829317ac2a36733183",
+    "storage_path": "cineverse/uploads/admin/ef1ac016-4a20-4027-9e6e-b75bc188d6ed.jpg",
+    "original_filename": "745970_v9_bc.jpg",
+    "content_type": "image/jpeg",
+    "size": 42890,
+    "created_at": "2026-09-29T16:08:34.052969+00:00"
+  },
+  {
+    "_id": "6abbe32c9317ac2a36733185",
+    "storage_path": "cineverse/uploads/admin/845d1dfb-684d-4683-9f92-1eb04f78fe40.jpeg",
+    "original_filename": "images - 2026-09-29T111113.224.jpeg",
+    "content_type": "image/jpeg",
+    "size": 24082,
+    "created_at": "2026-09-29T16:11:24.740585+00:00"
+  },
+  {
+    "_id": "6abbe4799317ac2a36733188",
+    "storage_path": "cineverse/uploads/admin/6882ac94-6589-4e56-9148-78baed5781bf.jpeg",
+    "original_filename": "images - 2026-09-29T111643.343.jpeg",
+    "content_type": "image/jpeg",
+    "size": 22455,
+    "created_at": "2026-09-29T16:16:57.615562+00:00"
+  },
+  {
+    "_id": "6abbe55c9317ac2a3673318c",
+    "storage_path": "cineverse/uploads/admin/b69165bd-9592-4b96-98f5-ea5b4d8b1c98.jpeg",
+    "original_filename": "images - 2026-09-29T112021.867.jpeg",
+    "content_type": "image/jpeg",
+    "size": 39062,
+    "created_at": "2026-09-29T16:20:44.088483+00:00"
+  },
+  {
+    "_id": "6abf113cc17489fc51a0f6d9",
+    "storage_path": "cineverse/uploads/admin/f7cbb79a-5baa-4404-989f-e69b8c56a0d4.jpeg",
+    "original_filename": "images - 2026-10-01T210426.783.jpeg",
+    "content_type": "image/jpeg",
+    "size": 9510,
+    "created_at": "2026-10-02T02:04:44.472829+00:00"
+  },
+  {
+    "_id": "6abf11a714fbc79962861403",
+    "storage_path": "cineverse/uploads/admin/a335d2b0-932e-4e80-829c-058f7f598bae.jpeg",
+    "original_filename": "images - 2026-10-01T210426.783.jpeg",
+    "content_type": "image/jpeg",
+    "size": 9510,
+    "created_at": "2026-10-02T02:06:31.259569+00:00"
+  },
+  {
+    "_id": "6abf11ed1d4aa92c8f0b0a66",
+    "storage_path": "cineverse/uploads/admin/0a661935-29b5-43dc-bfde-131bb27ff7d4.jpeg",
+    "original_filename": "images - 2026-10-01T210426.783.jpeg",
+    "content_type": "image/jpeg",
+    "size": 9510,
+    "created_at": "2026-10-02T02:07:41.857483+00:00"
+  },
+  {
+    "_id": "6abf13e81d4aa92c8f0b0a69",
+    "storage_path": "cineverse/uploads/admin/b6ac9721-d7af-4dc7-9eb9-6d0e767d14e4.jpeg",
+    "original_filename": "images - 2026-10-01T211553.831.jpeg",
+    "content_type": "image/jpeg",
+    "size": 26305,
+    "created_at": "2026-10-02T02:16:08.046927+00:00"
+  },
+  {
+    "_id": "6abf144f1d4aa92c8f0b0a6b",
+    "storage_path": "cineverse/uploads/admin/ebf10258-80c1-4dad-ac6e-7cf22d7bb1e8.jpeg",
+    "original_filename": "images - 2026-10-01T211553.831.jpeg",
+    "content_type": "image/jpeg",
+    "size": 26305,
+    "created_at": "2026-10-02T02:17:51.551547+00:00"
+  },
+  {
+    "_id": "6abf14701d4aa92c8f0b0a6e",
+    "storage_path": "cineverse/uploads/admin/8eb89065-349f-4686-afd4-9aa56ef828f6.jpeg",
+    "original_filename": "images - 2026-10-01T211553.831.jpeg",
+    "content_type": "image/jpeg",
+    "size": 26305,
+    "created_at": "2026-10-02T02:18:24.408676+00:00"
+  },
+  {
+    "_id": "6abf176c1d4aa92c8f0b0a71",
+    "storage_path": "cineverse/uploads/admin/b4b4b41e-a5e3-4fe6-b807-a014f4a54493.jpeg",
+    "original_filename": "images - 2026-10-01T211553.831.jpeg",
+    "content_type": "image/jpeg",
+    "size": 26305,
+    "created_at": "2026-10-02T02:31:08.869233+00:00"
+  },
+  {
+    "_id": "6abf19071d4aa92c8f0b0a73",
+    "storage_path": "cineverse/uploads/admin/fbec3fa0-4aed-41e1-8d19-0e694a9e9ba5.jpg",
+    "original_filename": "3c488075-b309-4085-8aab-4855f9666760_1066x1600.jpg",
+    "content_type": "image/jpeg",
+    "size": 226566,
+    "created_at": "2026-10-02T02:37:59.578494+00:00"
+  }
+]

@@ -1,0 +1,155 @@
+[
+  {
+    "_id": "6abae5cdb48d96f603f875ee",
+    "thread_id": "6abae3a2b48d96f603f875e4",
+    "text": "Thread closed by Banana",
+    "user_id": "6abadca9d0c6cf2b43380be3",
+    "user_name": "Banana",
+    "user_role": "moderator",
+    "user_avatar": "cineverse/uploads/admin/29216e04-8dec-4549-a019-e2fdf98694f4.webp",
+    "system": true,
+    "created_at": "2026-09-28T22:10:21.443908+00:00"
+  },
+  {
+    "_id": "6abb46e22155d4d16fb8a993",
+    "thread_id": "6abb46e12155d4d16fb8a991",
+    "text": "Understood, will fix my edits.",
+    "user_id": "6abb46e12155d4d16fb8a990",
+    "user_name": "Target User",
+    "user_avatar": "",
+    "user_role": "user",
+    "created_at": "2026-09-29T05:04:34.518681+00:00"
+  },
+  {
+    "_id": "6abb46f42155d4d16fb8a997",
+    "thread_id": "6abb46e12155d4d16fb8a991",
+    "text": "I acknowledge the suspension.",
+    "user_id": "6abb46e12155d4d16fb8a990",
+    "user_name": "Target User",
+    "user_avatar": "",
+    "user_role": "user",
+    "created_at": "2026-09-29T05:04:52.734966+00:00"
+  },
+  {
+    "_id": "6abb48522155d4d16fb8a9a7",
+    "thread_id": "6abb46e12155d4d16fb8a991",
+    "text": "Test reply from suspended user via UI.",
+    "user_id": "6abb46e12155d4d16fb8a990",
+    "user_name": "Target User",
+    "user_avatar": "",
+    "user_role": "user",
+    "created_at": "2026-09-29T05:10:42.733294+00:00"
+  },
+  {
+    "_id": "6abb48782155d4d16fb8a9a9",
+    "thread_id": "6abb483d2155d4d16fb8a9a5",
+    "text": "plz remove it",
+    "user_id": "6abafe3cf5d5822a96b139f1",
+    "user_name": "Linkere",
+    "user_avatar": "cineverse/uploads/admin/3c64e5bd-915f-42a3-9868-32a6931768d9.webp",
+    "user_role": "admin",
+    "created_at": "2026-09-29T05:11:20.243829+00:00"
+  },
+  {
+    "_id": "6abb492b2155d4d16fb8a9ad",
+    "thread_id": "6abb483d2155d4d16fb8a9a5",
+    "text": "This was a misunderstanding. I've removed the restriction",
+    "user_id": "6ababdde7469c60a3977a05a",
+    "user_name": "Koa Reba",
+    "user_avatar": "",
+    "user_role": "admin",
+    "created_at": "2026-09-29T05:14:19.641914+00:00"
+  },
+  {
+    "_id": "6abb49cbc8dde860a37a8cb6",
+    "thread_id": "6abb49762155d4d16fb8a9af",
+    "text": "ye",
+    "user_id": "6abafe3cf5d5822a96b139f1",
+    "user_name": "Linkere",
+    "user_avatar": "cineverse/uploads/admin/3c64e5bd-915f-42a3-9868-32a6931768d9.webp",
+    "user_role": "user",
+    "created_at": "2026-09-29T05:16:59.863803+00:00"
+  },
+  {
+    "_id": "6abb5975c259bd3fde148353",
+    "thread_id": "6abb483d2155d4d16fb8a9a5",
+    "text": "Thread closed by cocopuff2018",
+    "user_id": "6ababdde7469c60a3977a05a",
+    "user_name": "cocopuff2018",
+    "user_role": "admin",
+    "user_avatar": "",
+    "system": true,
+    "created_at": "2026-09-29T06:23:49.175514+00:00"
+  },
+  {
+    "_id": "6abbce459317ac2a36733108",
+    "thread_id": "6abbcd519317ac2a36733106",
+    "text": "I didn't mean to",
+    "user_id": "6abbcb213d3388b2abbc5f6a",
+    "user_name": "oogieboogie",
+    "user_avatar": "cineverse/uploads/admin/a60f2c03-c06f-4aa4-b76f-137cfbdb3e00.jpeg",
+    "user_role": "user",
+    "created_at": "2026-09-29T14:42:13.082139+00:00"
+  },
+  {
+    "_id": "6abbce6c9317ac2a3673310a",
+    "thread_id": "6abbcd519317ac2a36733106",
+    "text": "I'll give you one more chance",
+    "user_id": "6abafe3cf5d5822a96b139f1",
+    "user_name": "Linkere",
+    "user_avatar": "cineverse/uploads/admin/3c64e5bd-915f-42a3-9868-32a6931768d9.webp",
+    "user_role": "moderator",
+    "created_at": "2026-09-29T14:42:52.203192+00:00"
+  },
+  {
+    "_id": "6abbe68f9317ac2a36733195",
+    "thread_id": "6abbe63e9317ac2a36733193",
+    "text": "i didnt",
+    "user_id": "6abbe5379317ac2a3673318b",
+    "user_name": "brattyboy",
+    "user_avatar": "cineverse/uploads/admin/b69165bd-9592-4b96-98f5-ea5b4d8b1c98.jpeg",
+    "user_role": "user",
+    "created_at": "2026-09-29T16:25:51.832319+00:00"
+  },
+  {
+    "_id": "6abbe7159317ac2a36733197",
+    "thread_id": "6abbe63e9317ac2a36733193",
+    "text": "Thread closed by Banana",
+    "user_id": "6abadca9d0c6cf2b43380be3",
+    "user_name": "Banana",
+    "user_role": "moderator",
+    "user_avatar": "cineverse/uploads/admin/29216e04-8dec-4549-a019-e2fdf98694f4.webp",
+    "system": true,
+    "created_at": "2026-09-29T16:28:05.346452+00:00"
+  },
+  {
+    "_id": "6abc678620c76e6ae0f39879",
+    "thread_id": "6abb46e12155d4d16fb8a991",
+    "text": "another admin reply for masking test",
+    "user_id": "6ababaea36d31ff5985fd39a",
+    "user_name": "Admin",
+    "user_avatar": "",
+    "user_role": "admin",
+    "created_at": "2026-09-30T01:36:06.728249+00:00"
+  },
+  {
+    "_id": "6abc678620c76e6ae0f3987b",
+    "thread_id": "6abb46e12155d4d16fb8a991",
+    "text": "notification trigger msg",
+    "user_id": "6ababaea36d31ff5985fd39a",
+    "user_name": "Admin",
+    "user_avatar": "",
+    "user_role": "admin",
+    "created_at": "2026-09-30T01:36:06.791851+00:00"
+  },
+  {
+    "_id": "6abc678720c76e6ae0f3987d",
+    "thread_id": "6abb46e12155d4d16fb8a991",
+    "text": "my reply from suspended",
+    "user_id": "6abb46e12155d4d16fb8a990",
+    "user_name": "Target User",
+    "user_avatar": "",
+    "user_role": "user",
+    "created_at": "2026-09-30T01:36:07.110259+00:00"
+  }
+]

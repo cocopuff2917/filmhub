@@ -1,0 +1,65 @@
+[
+  {
+    "_id": "homepage",
+    "announcement": {
+      "enabled": false,
+      "text": "",
+      "link_url": null,
+      "link_label": null
+    },
+    "hero": {
+      "title": "A new home for movie & TV lovers",
+      "subtitle": "Discover, rate, and discuss everything from blockbusters to hidden gems.",
+      "tagline": "Community-driven. Fast. Free forever.",
+      "featured_type": null,
+      "featured_id": null
+    },
+    "sections": [
+      {
+        "id": "trending-movies",
+        "type": "built-in",
+        "title": "Trending Movies",
+        "enabled": true,
+        "source": "trending_movies",
+        "items": [],
+        "limit": 12
+      },
+      {
+        "id": "upcoming-movies",
+        "type": "built-in",
+        "title": "Upcoming Movies",
+        "enabled": true,
+        "source": "upcoming_movies",
+        "items": [],
+        "limit": 12
+      },
+      {
+        "id": "trending-series",
+        "type": "built-in",
+        "title": "Trending TV Series",
+        "enabled": true,
+        "source": "trending_series",
+        "items": [],
+        "limit": 12
+      },
+      {
+        "id": "recent-movies",
+        "type": "built-in",
+        "title": "Recently Added Movies",
+        "enabled": true,
+        "source": "recent_movies",
+        "items": [],
+        "limit": 12
+      },
+      {
+        "id": "recent-series",
+        "type": "built-in",
+        "title": "Recently Added TV Series",
+        "enabled": true,
+        "source": "recent_series",
+        "items": [],
+        "limit": 12
+      }
+    ]
+  }
+]
