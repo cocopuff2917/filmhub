@@ -149,8 +149,15 @@ export default function MovieDetail() {
   const writers = (movie.crew || []).filter((c) => c.role === "Writer");
   const hasAwards = (movie.awards_wins || 0) > 0 || (movie.awards_nominations || 0) > 0;
   const trendPoints = (stats.trend || []).map((t) => t.count);
-  const posters = (movie.gallery || []).slice(0, Math.ceil((movie.gallery?.length || 0) / 2));
-  const backdrops = (movie.gallery || []).slice(Math.ceil((movie.gallery?.length || 0) / 2));
+  const posters = Array.from(new Set([
+    ...(movie.poster_urls || []),
+    ...(movie.poster_url ? [movie.poster_url] : []),
+  ])).filter(Boolean);
+  const backdrops = Array.from(new Set([
+    ...(movie.backdrop_urls || []),
+    ...(movie.backdrop_url ? [movie.backdrop_url] : []),
+    ...(movie.gallery || []),
+  ])).filter(Boolean);
 
   return (
     <div className="text-white">

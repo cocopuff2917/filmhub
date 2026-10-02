@@ -194,8 +194,15 @@ export default function SeriesDetail() {
   const creators = series.creators || [];
   const hasAwards = (series.awards_wins || 0) > 0 || (series.awards_nominations || 0) > 0;
   const trendPoints = (stats.trend || []).map((t) => t.count);
-  const posters = (series.gallery || []).slice(0, Math.ceil((series.gallery?.length || 0) / 2));
-  const backdrops = (series.gallery || []).slice(Math.ceil((series.gallery?.length || 0) / 2));
+  const posters = Array.from(new Set([
+    ...(series.poster_urls || []),
+    ...(series.poster_url ? [series.poster_url] : []),
+  ])).filter(Boolean);
+  const backdrops = Array.from(new Set([
+    ...(series.backdrop_urls || []),
+    ...(series.backdrop_url ? [series.backdrop_url] : []),
+    ...(series.gallery || []),
+  ])).filter(Boolean);
 
   return (
     <div className="text-white">

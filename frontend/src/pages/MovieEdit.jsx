@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, GripVertical, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
+import PosterListField from "@/components/PosterListField";
 import CastEditDialog from "@/components/CastEditDialog";
 import CollectionsPicker from "@/components/CollectionsPicker";
 
@@ -145,7 +146,9 @@ export default function MovieEdit() {
           awards_wins: m.data.awards_wins ?? "",
           awards_nominations: m.data.awards_nominations ?? "",
           poster_url: m.data.poster_url || "",
+          poster_urls: m.data.poster_urls || (m.data.poster_url ? [m.data.poster_url] : []),
           backdrop_url: m.data.backdrop_url || "",
+          backdrop_urls: m.data.backdrop_urls || (m.data.backdrop_url ? [m.data.backdrop_url] : []),
           trailer_url: m.data.trailer_url || "",
           video_urls: m.data.video_urls || [],
           genres: m.data.genres || [],
@@ -210,7 +213,7 @@ export default function MovieEdit() {
     try {
       const payload = {};
       const fields = ["title", "release_date", "runtime", "synopsis", "tagline", "status", "original_language",
-        "budget", "revenue", "awards_wins", "awards_nominations", "poster_url", "backdrop_url", "trailer_url",
+        "budget", "revenue", "awards_wins", "awards_nominations", "poster_url", "poster_urls", "backdrop_url", "backdrop_urls", "trailer_url",
         "video_urls", "genres", "keywords", "cast", "crew", "gallery"];
       for (const f of fields) {
         // Skip locked fields for non-mods (server would 403 anyway)
@@ -565,9 +568,33 @@ export default function MovieEdit() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="poster_url" label="Poster" locked={isFieldLocked("poster_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("poster_url")}>
                 <ImageUpload value={form.poster_url} onChange={(v) => setField("poster_url", v)} testid="field-poster" canDelete={canDelete} />
+                <div className="mt-4">
+                  <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-2">All posters ({(form.poster_urls || []).length})</div>
+                  <PosterListField
+                    urls={form.poster_urls || []}
+                    primary={form.poster_url}
+                    aspect="2/3"
+                    canMod={isMod}
+                    disabled={!canEditField("poster_url")}
+                    testIdPrefix="edit-poster-list"
+                    onChange={({ urls, primary }) => { setField("poster_urls", urls); setField("poster_url", primary); }}
+                  />
+                </div>
               </Field>
               <Field name="backdrop_url" label="Backdrop" locked={isFieldLocked("backdrop_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("backdrop_url")}>
                 <ImageUpload value={form.backdrop_url} onChange={(v) => setField("backdrop_url", v)} testid="field-backdrop" canDelete={canDelete} />
+                <div className="mt-4">
+                  <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-2">All backdrops ({(form.backdrop_urls || []).length})</div>
+                  <PosterListField
+                    urls={form.backdrop_urls || []}
+                    primary={form.backdrop_url}
+                    aspect="16/9"
+                    canMod={isMod}
+                    disabled={!canEditField("backdrop_url")}
+                    testIdPrefix="edit-backdrop-list"
+                    onChange={({ urls, primary }) => { setField("backdrop_urls", urls); setField("backdrop_url", primary); }}
+                  />
+                </div>
               </Field>
             </div>
             <Field name="gallery" label={`Gallery (${form.gallery.length} images)`} locked={isFieldLocked("gallery")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("gallery")}>
