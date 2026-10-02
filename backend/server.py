@@ -341,7 +341,9 @@ class MovieCreate(BaseModel):
     synopsis: str = ""
     tagline: str = ""
     poster_url: str = ""
+    poster_urls: List[str] = []
     backdrop_url: str = ""
+    backdrop_urls: List[str] = []
     trailer_url: str = ""
     video_urls: List[str] = []
     runtime: Optional[int] = None
@@ -366,7 +368,9 @@ class MovieUpdate(BaseModel):
     synopsis: Optional[str] = None
     tagline: Optional[str] = None
     poster_url: Optional[str] = None
+    poster_urls: Optional[List[str]] = None
     backdrop_url: Optional[str] = None
+    backdrop_urls: Optional[List[str]] = None
     trailer_url: Optional[str] = None
     video_urls: Optional[List[str]] = None
     runtime: Optional[int] = None
@@ -438,7 +442,9 @@ class SeriesCreate(BaseModel):
     synopsis: str = ""
     tagline: str = ""
     poster_url: str = ""
+    poster_urls: List[str] = []
     backdrop_url: str = ""
+    backdrop_urls: List[str] = []
     trailer_url: str = ""
     video_urls: List[str] = []
     status: str = "Ongoing"
@@ -466,7 +472,9 @@ class SeriesUpdate(BaseModel):
     synopsis: Optional[str] = None
     tagline: Optional[str] = None
     poster_url: Optional[str] = None
+    poster_urls: Optional[List[str]] = None
     backdrop_url: Optional[str] = None
+    backdrop_urls: Optional[List[str]] = None
     trailer_url: Optional[str] = None
     video_urls: Optional[List[str]] = None
     status: Optional[str] = None
@@ -746,16 +754,17 @@ def _enforce_season_episode_integrity(existing_seasons, submitted_seasons, user)
     return merged
 
 def _enforce_image_delete_guard(old_doc: dict, update_data: dict, user: dict, single_fields: Optional[List[str]] = None, gallery_fields: Optional[List[str]] = None):
-    """Non-mods cannot delete images — silently restore any single-image field that got blanked
-    and any gallery items that were removed. Users with content.delete bypass."""
+    """Non-mods cannot DELETE or REPLACE primary images, and cannot REMOVE items from image galleries.
+    Appending new items is always allowed. Users with content.delete bypass."""
     if _has_perm(user, "content.delete"):
         return
     for f in (single_fields or []):
         if f in update_data:
             old_val = old_doc.get(f) or ""
             new_val = update_data.get(f) or ""
-            # Only guard against DELETION (clearing an existing image). Replacing with a new URL is fine.
-            if old_val and not new_val:
+            # Guard against DELETION (clearing an existing image) and REPLACEMENT (changing to a
+            # different non-empty value). Only mods can delete or replace the primary poster/backdrop.
+            if old_val and old_val != new_val:
                 update_data[f] = old_val
     for f in (gallery_fields or []):
         if f in update_data:
@@ -835,6 +844,10 @@ async def enrich_movie(doc):
         doc["avg_rating"] = None
         doc["rating_count"] = 0
     doc["collections"] = await _collections_for_ids(doc.get("collection_ids") or [])
+    # Backfill multi-image lists from legacy single fields so the UI can always render them.
+    for primary, listf in (("poster_url", "poster_urls"), ("backdrop_url", "backdrop_urls")):
+        if not doc.get(listf):
+            doc[listf] = [doc[primary]] if doc.get(primary) else []
     return doc
 
 async def enrich_series(doc, deep: bool = True):
@@ -916,6 +929,10 @@ async def enrich_series(doc, deep: bool = True):
         doc["rating_count"] = 0
     doc["collections"] = await _collections_for_ids(doc.get("collection_ids") or [])
     doc["collection_ids"] = doc.get("collection_ids") or []
+    # Backfill multi-image lists from legacy single fields.
+    for primary, listf in (("poster_url", "poster_urls"), ("backdrop_url", "backdrop_urls")):
+        if not doc.get(listf):
+            doc[listf] = [doc[primary]] if doc.get(primary) else []
     return doc
 
 # ----------- Edit Log Helper -----------
@@ -3155,7 +3172,15 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
         update_data["cast"] = _dedupe_cast(update_data["cast"])
     if "crew" in update_data:
         update_data["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["crew"]]
-    _enforce_image_delete_guard(old_doc, update_data, user, single_fields=["poster_url", "backdrop_url"], gallery_fields=["gallery"])
+    _enforce_image_delete_guard(
+        old_doc, update_data, user,
+        single_fields=["poster_url", "backdrop_url"],
+        gallery_fields=["gallery", "poster_urls", "backdrop_urls"],
+    )
+    # Auto-sync primary poster/backdrop with the first item in the multi-list when the list is set
+    for primary, listf in (("poster_url", "poster_urls"), ("backdrop_url", "backdrop_urls")):
+        if listf in update_data and update_data.get(listf):
+            update_data[primary] = update_data[listf][0]
     _check_locks(old_doc, update_data, user)
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
@@ -3491,7 +3516,14 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
             update_data["seasons"],
             user,
         )
-    _enforce_image_delete_guard(old_doc, update_data, user, single_fields=["poster_url", "backdrop_url", "network_logo_url"], gallery_fields=["gallery"])
+    _enforce_image_delete_guard(
+        old_doc, update_data, user,
+        single_fields=["poster_url", "backdrop_url", "network_logo_url"],
+        gallery_fields=["gallery", "poster_urls", "backdrop_urls"],
+    )
+    for primary, listf in (("poster_url", "poster_urls"), ("backdrop_url", "backdrop_urls")):
+        if listf in update_data and update_data.get(listf):
+            update_data[primary] = update_data[listf][0]
     _enforce_series_episode_image_guard(old_doc, update_data, user)
     # Enforce per-episode guest_star locks
     if "seasons" in update_data and not is_mod:

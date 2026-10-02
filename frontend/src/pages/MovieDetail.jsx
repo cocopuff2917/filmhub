@@ -19,6 +19,7 @@ import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 import VideosSection from "@/components/VideosSection";
 import InlineMediaEditor from "@/components/InlineMediaEditor";
+import TrailerPlayer from "@/components/TrailerPlayer";
 import CollectionCard from "@/components/CollectionCard";
 
 // ---------- helpers ----------
@@ -196,9 +197,9 @@ export default function MovieDetail() {
                   <Share2 className="w-5 h-5" />
                 </button>
                 {movie.trailer_url && (
-                  <a href={movie.trailer_url} target="_blank" rel="noreferrer">
+                  <TrailerPlayer url={movie.trailer_url} title={`${movie.title} — Trailer`} testId="play-trailer-inline">
                     <Button className="bg-white/10 hover:bg-white/15 text-white border border-white/20"><PlayCircle className="w-4 h-4 mr-2" /> Play Trailer</Button>
-                  </a>
+                  </TrailerPlayer>
                 )}
               </div>
 
@@ -421,9 +422,9 @@ export default function MovieDetail() {
         {/* SIDEBAR */}
         <aside className="space-y-6" data-testid="movie-sidebar">
           {movie.trailer_url && (
-            <a href={movie.trailer_url} target="_blank" rel="noreferrer" className="block">
+            <TrailerPlayer url={movie.trailer_url} title={`${movie.title} — Trailer`} testId="play-trailer-sidebar">
               <Button className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold h-11"><PlayCircle className="w-5 h-5 mr-2" /> Watch Trailer</Button>
-            </a>
+            </TrailerPlayer>
           )}
 
           <div className="rounded-xl bg-[#14181f] border border-white/10 divide-y divide-white/5 text-sm">

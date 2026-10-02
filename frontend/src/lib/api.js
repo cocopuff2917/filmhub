@@ -26,3 +26,11 @@ export function fileUrl(path) {
   if (path.startsWith("/api/files/")) return `${BACKEND_URL}${path}`;
   return `${API}/files/${path}`;
 }
+
+/** Upload a single image file and return the stored file key (relative path). */
+export async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+  return r.data?.path || r.data?.url || "";
+}

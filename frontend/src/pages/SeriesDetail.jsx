@@ -19,6 +19,7 @@ import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 import VideosSection from "@/components/VideosSection";
 import InlineMediaEditor from "@/components/InlineMediaEditor";
+import TrailerPlayer from "@/components/TrailerPlayer";
 import CollectionCard from "@/components/CollectionCard";
 
 const fmtDate = (s) => {
@@ -242,9 +243,9 @@ export default function SeriesDetail() {
                 <button className="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-[#14181f] text-white hover:bg-white/10 transition" title="Favorite"><Heart className="w-5 h-5" /></button>
                 <button onClick={share} className="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-[#14181f] text-white hover:bg-white/10 transition" title="Share"><Share2 className="w-5 h-5" /></button>
                 {series.trailer_url && (
-                  <a href={series.trailer_url} target="_blank" rel="noreferrer">
+                  <TrailerPlayer url={series.trailer_url} title={`${series.title} — Trailer`} testId="play-trailer-inline">
                     <Button className="bg-white/10 hover:bg-white/15 text-white border border-white/20"><PlayCircle className="w-4 h-4 mr-2" /> Play Trailer</Button>
-                  </a>
+                  </TrailerPlayer>
                 )}
               </div>
 
@@ -455,9 +456,9 @@ export default function SeriesDetail() {
         {/* SIDEBAR */}
         <aside className="space-y-6" data-testid="series-sidebar">
           {series.trailer_url && (
-            <a href={series.trailer_url} target="_blank" rel="noreferrer" className="block">
+            <TrailerPlayer url={series.trailer_url} title={`${series.title} — Trailer`} testId="play-trailer-sidebar">
               <Button className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold h-11"><PlayCircle className="w-5 h-5 mr-2" /> Watch Trailer</Button>
-            </a>
+            </TrailerPlayer>
           )}
 
           <div className="rounded-xl bg-[#14181f] border border-white/10 divide-y divide-white/5 text-sm">
