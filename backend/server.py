@@ -1192,6 +1192,37 @@ async def refresh_token(request: Request, response: Response):
     set_auth_cookies(response, access, refresh)
     return {"access_token": access, "refresh_token": refresh, "token_type": "bearer"}
 
+@api_router.get("/auth/migration/export")
+async def migration_export_users(
+    include_hashes: bool = False,
+    limit: int = 0,
+    admin: dict = Depends(get_current_admin),
+):
+    """Admin-only bulk export of all users for migration to another system.
+
+    Query params:
+      - include_hashes=true : include bcrypt password_hash so users can log in on the new system
+                              without resetting their password (bcrypt is portable).
+      - limit=N             : cap results (0 = all users).
+    """
+    projection = None if include_hashes else {"password_hash": 0}
+    cursor = db.users.find({}, projection)
+    if limit and limit > 0:
+        cursor = cursor.limit(limit)
+    out = []
+    async for u in cursor:
+        u["id"] = str(u.pop("_id"))
+        for k, v in list(u.items()):
+            if isinstance(v, ObjectId):
+                u[k] = str(v)
+        out.append(u)
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(out),
+        "include_hashes": include_hashes,
+        "users": out,
+    }
+
 
 @api_router.patch("/auth/me")
 async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_current_user)):
