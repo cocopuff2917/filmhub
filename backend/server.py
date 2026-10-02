@@ -500,6 +500,38 @@ class IpBanRequest(BaseModel):
     duration_unit: Optional[str] = None  # "hours" | "days" | "months" | "years" | "permanent"
     reason: str = ""
 
+# ---------- Homepage customization ----------
+class HomepageHero(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    tagline: Optional[str] = None
+    featured_type: Optional[str] = None   # "movie" | "series" | None
+    featured_id: Optional[str] = None
+
+class HomepageAnnouncement(BaseModel):
+    enabled: bool = False
+    text: str = ""
+    link_url: Optional[str] = None
+    link_label: Optional[str] = None
+
+class HomepageSectionItem(BaseModel):
+    type: str  # "movie" | "series"
+    id: str
+
+class HomepageSection(BaseModel):
+    id: str                              # stable identifier
+    type: str                            # "built-in" | "custom"
+    title: str
+    enabled: bool = True
+    source: Optional[str] = None         # for built-in: trending_movies | upcoming_movies | trending_series | recent_movies | recent_series
+    items: List[HomepageSectionItem] = Field(default_factory=list)  # for custom
+    limit: int = 12
+
+class HomepageConfig(BaseModel):
+    hero: HomepageHero = Field(default_factory=HomepageHero)
+    announcement: HomepageAnnouncement = Field(default_factory=HomepageAnnouncement)
+    sections: List[HomepageSection] = Field(default_factory=list)
+
 class RoleUpdate(BaseModel):
     role: str  # user / moderator / admin
 
@@ -1971,6 +2003,125 @@ async def lift_ip_ban(ban_id: str, mod: dict = Depends(get_current_moderator)):
     await db.ip_bans.delete_one({"_id": doc["_id"]})
     await log_edit(mod, "ip-ban", ban_id, "delete", doc.get("ip", ""),
                    f"Lifted ban on {doc.get('ip', '')}")
+    return {"ok": True}
+
+# ============================================================================
+# Homepage customization (admin-managed)
+# ============================================================================
+_DEFAULT_HOMEPAGE = {
+    "hero": {
+        "title": "A new home for movie & TV lovers",
+        "subtitle": "Discover, rate, and discuss everything from blockbusters to hidden gems.",
+        "tagline": "Community-driven. Fast. Free forever.",
+        "featured_type": None,
+        "featured_id": None,
+    },
+    "announcement": {
+        "enabled": False,
+        "text": "",
+        "link_url": None,
+        "link_label": None,
+    },
+    "sections": [
+        {"id": "trending-movies", "type": "built-in", "title": "Trending Movies", "enabled": True, "source": "trending_movies", "items": [], "limit": 12},
+        {"id": "upcoming-movies", "type": "built-in", "title": "Upcoming Movies", "enabled": True, "source": "upcoming_movies", "items": [], "limit": 12},
+        {"id": "trending-series", "type": "built-in", "title": "Trending TV Series", "enabled": True, "source": "trending_series", "items": [], "limit": 12},
+        {"id": "recent-movies", "type": "built-in", "title": "Recently Added Movies", "enabled": True, "source": "recent_movies", "items": [], "limit": 12},
+        {"id": "recent-series", "type": "built-in", "title": "Recently Added TV Series", "enabled": True, "source": "recent_series", "items": [], "limit": 12},
+    ],
+}
+
+async def _get_homepage_config() -> dict:
+    doc = await db.site_config.find_one({"_id": "homepage"})
+    if not doc:
+        return _DEFAULT_HOMEPAGE
+    doc.pop("_id", None)
+    # Deep-merge with defaults so new fields always exist
+    merged = {**_DEFAULT_HOMEPAGE, **doc}
+    merged["hero"] = {**_DEFAULT_HOMEPAGE["hero"], **(doc.get("hero") or {})}
+    merged["announcement"] = {**_DEFAULT_HOMEPAGE["announcement"], **(doc.get("announcement") or {})}
+    if not doc.get("sections"):
+        merged["sections"] = _DEFAULT_HOMEPAGE["sections"]
+    return merged
+
+async def _enrich_homepage_items(sections: list) -> list:
+    """Expand custom-section item references into enriched movie/series objects."""
+    out = []
+    for s in sections:
+        s = dict(s)
+        if s.get("type") == "custom":
+            resolved = []
+            for ref in s.get("items", []) or []:
+                try:
+                    if ref.get("type") == "movie":
+                        d = await db.movies.find_one({"_id": ObjectId(ref["id"])})
+                        if d and not d.get("deleted"):
+                            item = await enrich_movie(d)
+                            item["type"] = "movie"
+                            resolved.append(item)
+                    elif ref.get("type") == "series":
+                        d = await db.series.find_one({"_id": ObjectId(ref["id"])})
+                        if d and not d.get("deleted"):
+                            item = await enrich_series(d, deep=False)
+                            item["type"] = "series"
+                            resolved.append(item)
+                except Exception:
+                    continue
+            s["resolved_items"] = resolved[: s.get("limit", 12)]
+        out.append(s)
+    return out
+
+async def _resolve_featured(hero: dict) -> dict:
+    """Attach the full featured item (if any) to the hero block."""
+    hero = dict(hero or {})
+    ft, fid = hero.get("featured_type"), hero.get("featured_id")
+    if ft and fid:
+        try:
+            if ft == "movie":
+                d = await db.movies.find_one({"_id": ObjectId(fid)})
+                if d and not d.get("deleted"):
+                    item = await enrich_movie(d)
+                    item["type"] = "movie"
+                    hero["featured"] = item
+            elif ft == "series":
+                d = await db.series.find_one({"_id": ObjectId(fid)})
+                if d and not d.get("deleted"):
+                    item = await enrich_series(d, deep=False)
+                    item["type"] = "series"
+                    hero["featured"] = item
+        except Exception:
+            pass
+    return hero
+
+@api_router.get("/homepage/config")
+async def get_homepage_config():
+    """Public — returns the live homepage config with featured item + custom-section items resolved."""
+    cfg = await _get_homepage_config()
+    cfg["hero"] = await _resolve_featured(cfg.get("hero") or {})
+    cfg["sections"] = await _enrich_homepage_items(cfg.get("sections") or [])
+    return cfg
+
+@api_router.put("/homepage/config")
+async def update_homepage_config(payload: HomepageConfig, admin: dict = Depends(get_current_admin)):
+    doc = payload.dict()
+    # Enforce uniqueness of section ids
+    seen = set()
+    cleaned_sections = []
+    for s in doc.get("sections", []):
+        sid = (s.get("id") or "").strip()
+        if not sid or sid in seen:
+            # auto-generate unique id if missing or dup
+            sid = f"section-{len(cleaned_sections)+1}-{int(datetime.now(timezone.utc).timestamp()*1000)%100000}"
+        seen.add(sid)
+        s["id"] = sid
+        cleaned_sections.append(s)
+    doc["sections"] = cleaned_sections
+    await db.site_config.update_one(
+        {"_id": "homepage"},
+        {"$set": doc},
+        upsert=True,
+    )
+    await log_edit(admin, "homepage", "homepage", "update", "Homepage", f"Updated homepage config ({len(cleaned_sections)} sections)")
     return {"ok": True}
 
 @api_router.get("/moderation/users/{user_id}/ips")

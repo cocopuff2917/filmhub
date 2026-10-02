@@ -16,6 +16,7 @@ import ActorForm from "@/components/forms/ActorForm";
 import SeriesForm from "@/components/forms/SeriesForm";
 import MessageUserDialog from "@/components/MessageUserDialog";
 import { DashboardTab, ReportsTab, SuspensionsTab, EditHistoryTab, IpBansTab } from "@/components/admin/ModerationTabs";
+import HomepageTab from "@/components/admin/HomepageTab";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -61,6 +62,7 @@ export default function Admin() {
           <TabsTrigger value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>
           <TabsTrigger value="trash" data-testid="tab-trash">Trash</TabsTrigger>
           <TabsTrigger value="collections" data-testid="tab-collections">Collections</TabsTrigger>
+          {canManageRoles && <TabsTrigger value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
           {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
         </TabsList>
         <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>
@@ -75,6 +77,7 @@ export default function Admin() {
         <TabsContent value="ipbans" className="mt-6"><IpBansTab /></TabsContent>
         <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
         <TabsContent value="collections" className="mt-6"><CollectionsTab /></TabsContent>
+        {canManageRoles && <TabsContent value="homepage" className="mt-6"><HomepageTab /></TabsContent>}
         {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
       </Tabs>
     </div>

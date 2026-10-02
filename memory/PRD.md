@@ -113,6 +113,13 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
   - New Admin tab **IP Bans** provides create form + searchable table with "Lift" action.
 - **Mod-on-mod protection**: moderators can no longer suspend or unsuspend other moderators (`403 "Only admins can suspend/unsuspend moderators"`). Admins retain full authority. Mods can also no longer suspend themselves.
 - **Related content split by type**: `/movies/{id}/similar` returns movies only; `/series/{id}/similar` returns TV series only. Scoring now also considers shared collection membership (+10 bonus for collection-mates). Default `limit` reduced to **10**. Genre matching is now **case-insensitive**. Frontend `SimilarSection` renders dynamic title ("Related Movies" / "Related TV Series"), always shows the section (empty state included), and caps at 10 cards.
+- **Homepage customization (admin)**: new `site_config` doc (`_id: "homepage"`) + endpoints `GET /api/homepage/config` (public, auto-defaults, resolves featured item + custom section items) and `PUT /api/homepage/config` (admin only). The homepage model supports:
+  - Hero text (title, subtitle, tagline)
+  - Featured hero item (movie or series — backdrop + CTA button)
+  - Announcement banner (toggle, text, link URL, link label — dismissible per session on the client)
+  - Dynamic sections (built-in: trending_movies, upcoming_movies, trending_series, recent_movies, recent_series — plus admin-authored custom sections with hand-picked movies/series)
+  - Per-section rename, enabled toggle, limit (1–30), move up/down, delete
+  New admin tab **Homepage** (`[data-testid=tab-homepage]`) exposes the entire editor. `Home.jsx` now fetches `/homepage/config` and renders dynamically.
 
 ## Credentials
 - Admin: admin@cineverse.com / Admin@123
