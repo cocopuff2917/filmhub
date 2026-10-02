@@ -1066,7 +1066,10 @@ async def register(payload: RegisterRequest, request: Request, response: Respons
     access = create_access_token(str(user_id), email)
     refresh = create_refresh_token(str(user_id))
     set_auth_cookies(response, access, refresh)
-    return {"id": str(user_id), "email": email, "name": payload.name, "role": "user", "avatar_url": ""}
+    return {
+        "id": str(user_id), "email": email, "name": payload.name, "role": "user", "avatar_url": "",
+        "access_token": access, "refresh_token": refresh, "token_type": "bearer",
+    }
 
 @api_router.post("/auth/login")
 async def login(payload: LoginRequest, request: Request, response: Response):
@@ -1115,6 +1118,9 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         "is_suspended": is_suspended,
         "suspension_reason": user.get("suspension_reason") if is_suspended else None,
         "suspension_until": sus if is_suspended else None,
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
     }
 
 @api_router.post("/auth/logout")
@@ -1157,6 +1163,35 @@ async def me(user: dict = Depends(get_current_user_allow_suspended)):
 async def update_avatar(payload: AvatarUpdate, user: dict = Depends(get_current_user)):
     await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": {"avatar_url": payload.avatar_url}})
     return {"ok": True, "avatar_url": payload.avatar_url}
+
+@api_router.get("/auth/session")
+async def session_alias(user: dict = Depends(get_current_user_allow_suspended)):
+    # Alias of /auth/me — convenient endpoint name for cross-site clients.
+    return await me(user)  # type: ignore[misc]
+
+@api_router.post("/auth/refresh")
+async def refresh_token(request: Request, response: Response):
+    token = request.cookies.get("refresh_token")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="No refresh token provided")
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    access = create_access_token(str(user["_id"]), user.get("email", ""))
+    refresh = create_refresh_token(str(user["_id"]))
+    set_auth_cookies(response, access, refresh)
+    return {"access_token": access, "refresh_token": refresh, "token_type": "bearer"}
+
 
 @api_router.patch("/auth/me")
 async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_current_user)):
@@ -4398,12 +4433,23 @@ async def ip_edit_ban_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+_cors_origins = {
+    os.environ.get("FRONTEND_URL", "http://localhost:3000"),
+    "https://bounce-fling-92327284.figma.site",
+    "https://filmhub-918.emergent.host",
+}
+_extra = os.environ.get("EXTRA_CORS_ORIGINS", "")
+for _o in [o.strip() for o in _extra.split(",") if o.strip()]:
+    _cors_origins.add(_o)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=[os.environ.get("FRONTEND_URL", "http://localhost:3000")],
+    allow_origins=sorted(_cors_origins),
+    allow_origin_regex=r"https://.*\.figma\.site",
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Authorization"],
 )
 
 @app.on_event("shutdown")
