@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Users, Film, Tv, UserRound, Layers, Trash2, Ban, FileWarning,
-  Clock, Activity, TrendingUp, History, RotateCcw, ArrowRight,
+  Clock, Activity, TrendingUp, History, RotateCcw, ArrowRight, Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -466,3 +466,203 @@ export function EditHistoryTab() {
     </div>
   );
 }
+
+// =====================================================
+// IP BANS TAB
+// =====================================================
+export function IpBansTab() {
+  const [rows, setRows] = useState([]);
+  const [q, setQ] = useState("");
+  const [includeExpired, setIncludeExpired] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Create form
+  const [ip, setIp] = useState("");
+  const [scope, setScope] = useState("both");
+  const [unit, setUnit] = useState("permanent");
+  const [amount, setAmount] = useState(1);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get(`/moderation/ip-bans?include_expired=${includeExpired}${q ? `&q=${encodeURIComponent(q)}` : ""}&limit=500`);
+      setRows(r.data);
+    } catch { toast.error("Failed to load IP bans"); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [includeExpired]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!ip.trim()) { toast.error("IP address is required"); return; }
+    setSaving(true);
+    try {
+      const payload = { ip: ip.trim(), scope, reason };
+      if (unit === "permanent") {
+        payload.duration_unit = "permanent";
+      } else {
+        payload.duration_unit = unit;
+        payload.duration = Number(amount);
+      }
+      await api.post("/moderation/ip-bans", payload);
+      toast.success("IP banned");
+      setIp(""); setReason(""); setAmount(1);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to ban IP");
+    }
+    setSaving(false);
+  };
+
+  const lift = async (id, bannedIp) => {
+    if (!window.confirm(`Lift ban on ${bannedIp}?`)) return;
+    try {
+      await api.delete(`/moderation/ip-bans/${id}`);
+      toast.success("Ban lifted");
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const scopePill = (s) => s === "register" ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/40"
+    : s === "edit" ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+    : "bg-rose-500/15 text-rose-300 border-rose-500/40";
+
+  return (
+    <div className="space-y-5" data-testid="ipbans-tab">
+      <h3 className="text-white font-heading text-lg flex items-center gap-2">
+        <Shield className="w-5 h-5 text-rose-300" /> IP Bans
+      </h3>
+
+      {/* Create form */}
+      <form onSubmit={submit} className="rounded-xl border border-white/10 bg-[#0d0f12] p-4 grid grid-cols-1 md:grid-cols-6 gap-3" data-testid="ipban-create-form">
+        <Input
+          value={ip}
+          onChange={(e) => setIp(e.target.value)}
+          placeholder="IP address, e.g. 203.0.113.42"
+          className="md:col-span-2 bg-[#14181f] border-white/10 text-white h-9"
+          data-testid="ipban-ip-input"
+          required
+        />
+        <Select value={scope} onValueChange={setScope}>
+          <SelectTrigger className="bg-[#14181f] border-white/10 text-white h-9" data-testid="ipban-scope"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-[#0d0f12] border-white/10 text-white">
+            <SelectItem value="register">Block registration</SelectItem>
+            <SelectItem value="edit">Block edits</SelectItem>
+            <SelectItem value="both">Block both</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={unit} onValueChange={setUnit}>
+          <SelectTrigger className="bg-[#14181f] border-white/10 text-white h-9" data-testid="ipban-unit"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-[#0d0f12] border-white/10 text-white">
+            <SelectItem value="hours">Hours</SelectItem>
+            <SelectItem value="days">Days</SelectItem>
+            <SelectItem value="months">Months</SelectItem>
+            <SelectItem value="years">Years</SelectItem>
+            <SelectItem value="permanent">Permanent</SelectItem>
+          </SelectContent>
+        </Select>
+        {unit !== "permanent" && (
+          <Input
+            type="number"
+            min={1}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Amount"
+            className="bg-[#14181f] border-white/10 text-white h-9"
+            data-testid="ipban-amount"
+          />
+        )}
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason (optional)"
+          className={`${unit === "permanent" ? "md:col-span-2" : "md:col-span-1"} bg-[#14181f] border-white/10 text-white h-9`}
+          data-testid="ipban-reason"
+        />
+        <div className="md:col-span-6 flex items-center justify-end">
+          <Button
+            type="submit"
+            disabled={saving}
+            size="sm"
+            className="h-9 bg-rose-500 hover:bg-rose-600 text-white font-semibold"
+            data-testid="ipban-submit"
+          >
+            {saving ? "Banning…" : "Ban IP"}
+          </Button>
+        </div>
+      </form>
+
+      {/* Filter row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <Input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && load()}
+          placeholder="Search IP, reason, or moderator…"
+          className="w-64 bg-[#0d0f12] border-white/10 text-white h-8"
+          data-testid="ipban-search"
+        />
+        <Button size="sm" variant="outline" className="h-8 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={load}>Search</Button>
+        <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={includeExpired}
+            onChange={(e) => setIncludeExpired(e.target.checked)}
+            className="accent-amber-500"
+            data-testid="ipban-include-expired"
+          />
+          Include expired
+        </label>
+        <span className="text-xs text-slate-500 ml-auto">{rows.length} shown</span>
+      </div>
+
+      {/* List */}
+      <div className="rounded-xl border border-white/10 bg-[#0d0f12] overflow-hidden">
+        {loading ? (
+          <div className="p-6 text-slate-400 text-sm">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="p-6 text-slate-500 text-sm">No IP bans.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-white/5 text-slate-400 text-[11px] uppercase tracking-widest">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium">IP</th>
+                <th className="text-left px-4 py-2 font-medium">Scope</th>
+                <th className="text-left px-4 py-2 font-medium">Reason</th>
+                <th className="text-left px-4 py-2 font-medium">Until</th>
+                <th className="text-left px-4 py-2 font-medium">By</th>
+                <th className="text-left px-4 py-2 font-medium">Created</th>
+                <th className="text-right px-4 py-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {rows.map((b) => (
+                <tr key={b.id} className="hover:bg-white/5" data-testid={`ipban-row-${b.id}`}>
+                  <td className="px-4 py-2.5 text-white font-mono">{b.ip}</td>
+                  <td className="px-4 py-2.5"><Badge className={`${scopePill(b.scope)} text-[10px] uppercase`}>{b.scope}</Badge></td>
+                  <td className="px-4 py-2.5 text-slate-300 max-w-[260px] truncate">{b.reason || "—"}</td>
+                  <td className="px-4 py-2.5 text-slate-300">
+                    {b.until === "permanent"
+                      ? <Badge className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-500/40">permanent</Badge>
+                      : b.until?.slice(0, 10) || "—"}
+                    {!b.is_active && <Badge className="ml-2 text-[10px] bg-white/5 text-slate-400 border-white/10">expired</Badge>}
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-400">{b.created_by_name || "—"}</td>
+                  <td className="px-4 py-2.5 text-slate-500 text-[11px]">{b.created_at ? timeAgo(b.created_at) : "—"}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    <Button size="sm" variant="outline" className="h-7 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" onClick={() => lift(b.id, b.ip)} data-testid={`ipban-lift-${b.id}`}>
+                      <RotateCcw className="w-3 h-3 mr-1" /> Lift
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+

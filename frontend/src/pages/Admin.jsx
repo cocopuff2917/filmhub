@@ -15,7 +15,7 @@ import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
 import SeriesForm from "@/components/forms/SeriesForm";
 import MessageUserDialog from "@/components/MessageUserDialog";
-import { DashboardTab, ReportsTab, SuspensionsTab, EditHistoryTab } from "@/components/admin/ModerationTabs";
+import { DashboardTab, ReportsTab, SuspensionsTab, EditHistoryTab, IpBansTab } from "@/components/admin/ModerationTabs";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -58,6 +58,7 @@ export default function Admin() {
           <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
           <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
           <TabsTrigger value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
+          <TabsTrigger value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>
           <TabsTrigger value="trash" data-testid="tab-trash">Trash</TabsTrigger>
           <TabsTrigger value="collections" data-testid="tab-collections">Collections</TabsTrigger>
           {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
@@ -71,6 +72,7 @@ export default function Admin() {
         <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
         <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
         <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
+        <TabsContent value="ipbans" className="mt-6"><IpBansTab /></TabsContent>
         <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
         <TabsContent value="collections" className="mt-6"><CollectionsTab /></TabsContent>
         {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}

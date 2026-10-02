@@ -106,6 +106,13 @@ Modern movie & TV series database (IMDb/TMDB style, dark theme) with home, movie
 - **Full name → Username**: user-facing label changed everywhere ("Full Name" on Register, "Email" on Login → "Email or Username"). Username format is enforced (2–40 chars; letters, numbers, `.`, `_`, `-`) and must be case-insensitively unique.
 - **Username change cooldown**: users can only change their username **once every 30 days**. `GET /auth/me` exposes `name_last_changed_at` and `name_change_available_at` for UI gating. The Edit Profile dialog disables the input and shows the next-eligible date when within the cooldown.
 - **Login with username or email**: `POST /auth/login` now accepts `identifier` (preferred) OR legacy `email`. Identifiers containing `@` are matched against `email`; otherwise against `name` (case-insensitive). Backward-compatible with existing clients.
+- **Admin panel expansion**: added four new tabs — **Dashboard** (10 stat cards + recent edits + active suspensions), **Reports** (threads category=report with open/closed filter + Close/Reopen), **Suspensions** (searchable, include-expired toggle, quick Unsuspend), **Edit History** (filter by entity type, action, date range, free text). Backed by new endpoints `GET /api/moderation/stats` and `GET /api/moderation/suspensions`, and enhanced `GET /api/edits` filters.
+- **IP bans**: new `ip_bans` collection and endpoints `POST/GET/DELETE /api/moderation/ip-bans`. Scope can be `register`, `edit`, or `both`. Duration units: hours, days, months, years, permanent. Enforcement:
+  - Global middleware blocks all write methods on `/api/*` (except login/logout/refresh/password-reset/register) when caller IP has an active `edit`/`both` ban → `403` with explicit reason + expiry.
+  - Register endpoint has its own inline `register`/`both` ban check → `403` with explicit reason.
+  - New Admin tab **IP Bans** provides create form + searchable table with "Lift" action.
+- **Mod-on-mod protection**: moderators can no longer suspend or unsuspend other moderators (`403 "Only admins can suspend/unsuspend moderators"`). Admins retain full authority. Mods can also no longer suspend themselves.
+- **Related content split by type**: `/movies/{id}/similar` returns movies only; `/series/{id}/similar` returns TV series only. Scoring now also considers shared collection membership (+10 bonus for collection-mates). Default `limit` reduced to **10**. Genre matching is now **case-insensitive**. Frontend `SimilarSection` renders dynamic title ("Related Movies" / "Related TV Series"), always shows the section (empty state included), and caps at 10 cards.
 
 ## Credentials
 - Admin: admin@cineverse.com / Admin@123

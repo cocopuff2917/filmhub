@@ -493,6 +493,13 @@ class SuspendRequest(BaseModel):
     duration_unit: Optional[str] = None  # "minutes" | "hours" | "days" | "permanent"
     reason: str = ""
 
+class IpBanRequest(BaseModel):
+    ip: str
+    scope: str = "both"  # "register" | "edit" | "both"
+    duration: Optional[int] = None
+    duration_unit: Optional[str] = None  # "hours" | "days" | "months" | "years" | "permanent"
+    reason: str = ""
+
 class RoleUpdate(BaseModel):
     role: str  # user / moderator / admin
 
@@ -976,6 +983,14 @@ async def _username_taken(username: str, exclude_user_id: Optional[str] = None) 
 # ----------- Auth Routes -----------
 @api_router.post("/auth/register")
 async def register(payload: RegisterRequest, request: Request, response: Response):
+    # IP ban check — block registration from banned IPs
+    reg_ip = get_client_ip(request)
+    ban = await _active_ip_ban(reg_ip, ("register", "both"))
+    if ban:
+        msg = f"Your IP ({reg_ip}) is banned from creating accounts."
+        if ban.get("reason"):
+            msg += f" Reason: {ban['reason']}."
+        raise HTTPException(status_code=403, detail=msg)
     email = payload.email.lower()
     username = payload.name.strip()
     if not USERNAME_RE.match(username):
@@ -1775,6 +1790,11 @@ async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depend
         raise HTTPException(status_code=404, detail="User not found")
     if target.get("role") == "admin":
         raise HTTPException(status_code=403, detail="Cannot suspend admin")
+    # Moderators cannot suspend other moderators — only admins can.
+    if target.get("role") == "moderator" and not _is_admin_role(mod):
+        raise HTTPException(status_code=403, detail="Only admins can suspend moderators")
+    if str(target["_id"]) == str(mod.get("id")):
+        raise HTTPException(status_code=400, detail="You cannot suspend yourself")
 
     # Normalize into (unit, amount)
     unit = (payload.duration_unit or "").lower() or None
@@ -1840,6 +1860,9 @@ async def unsuspend_user(user_id: str, mod: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
+    # Moderators cannot unsuspend other moderators — only admins can.
+    if target.get("role") == "moderator" and not _is_admin_role(mod):
+        raise HTTPException(status_code=403, detail="Only admins can unsuspend moderators")
     await db.users.update_one({"_id": target["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
     await log_edit(mod, "user", user_id, "unsuspend", target.get("name", ""), "Suspension lifted")
     return {"ok": True}
@@ -1852,6 +1875,103 @@ async def set_user_role(user_id: str, payload: RoleUpdate, admin: dict = Depends
     target = await db.users.find_one({"_id": ObjectId(user_id)})
     await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Role set to {payload.role}")
     return {"ok": True, "role": payload.role}
+
+# ============================================================================
+# IP Ban (moderator/admin tool)
+# ============================================================================
+_IP_BAN_SCOPES = ("register", "edit", "both")
+
+async def _active_ip_ban(ip: str, scope_matches: tuple) -> Optional[dict]:
+    if not ip:
+        return None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = await db.ip_bans.find_one({
+        "ip": ip,
+        "scope": {"$in": list(scope_matches)},
+        "$or": [{"until": "permanent"}, {"until": {"$gt": now_iso}}],
+    }, sort=[("created_at", -1)])
+    return doc
+
+@api_router.get("/moderation/ip-bans")
+async def list_ip_bans(mod: dict = Depends(get_current_moderator), include_expired: bool = False, q: Optional[str] = None, limit: int = 200):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    base: dict = {}
+    if not include_expired:
+        base = {"$or": [{"until": "permanent"}, {"until": {"$gt": now_iso}}]}
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        f = {"$or": [{"ip": rx}, {"reason": rx}, {"created_by_name": rx}]}
+        base = {"$and": [base, f]} if base else f
+    out = []
+    async for d in db.ip_bans.find(base).sort("created_at", -1).limit(limit):
+        is_active = d.get("until") == "permanent" or (d.get("until") and d["until"] > now_iso)
+        out.append({
+            "id": str(d["_id"]),
+            "ip": d.get("ip"),
+            "scope": d.get("scope", "both"),
+            "reason": d.get("reason", ""),
+            "created_by_name": d.get("created_by_name"),
+            "created_at": d.get("created_at"),
+            "until": d.get("until"),
+            "is_active": bool(is_active),
+        })
+    return out
+
+@api_router.post("/moderation/ip-bans")
+async def create_ip_ban(payload: IpBanRequest, mod: dict = Depends(get_current_moderator)):
+    ip = (payload.ip or "").strip()
+    if not ip:
+        raise HTTPException(status_code=400, detail="IP address is required")
+    if payload.scope not in _IP_BAN_SCOPES:
+        raise HTTPException(status_code=400, detail="scope must be one of register | edit | both")
+
+    unit = (payload.duration_unit or "").lower() or None
+    amount = payload.duration
+    if unit == "permanent" or (unit is None and amount is None):
+        until = "permanent"
+        duration_label = "permanently"
+    else:
+        if amount is None or amount <= 0:
+            raise HTTPException(status_code=400, detail="Duration must be a positive number")
+        if unit == "hours":
+            delta = timedelta(hours=amount); duration_label = f"for {amount} hour{'s' if amount != 1 else ''}"
+        elif unit == "days":
+            delta = timedelta(days=amount); duration_label = f"for {amount} day{'s' if amount != 1 else ''}"
+        elif unit == "months":
+            delta = timedelta(days=30 * amount); duration_label = f"for {amount} month{'s' if amount != 1 else ''}"
+        elif unit == "years":
+            delta = timedelta(days=365 * amount); duration_label = f"for {amount} year{'s' if amount != 1 else ''}"
+        else:
+            raise HTTPException(status_code=400, detail="duration_unit must be hours | days | months | years | permanent")
+        until = (datetime.now(timezone.utc) + delta).isoformat()
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "ip": ip,
+        "scope": payload.scope,
+        "reason": payload.reason or "",
+        "created_by": mod["id"],
+        "created_by_name": mod.get("name"),
+        "created_at": now_iso,
+        "until": until,
+    }
+    r = await db.ip_bans.insert_one(doc)
+    await log_edit(mod, "ip-ban", str(r.inserted_id), "create", ip,
+                   f"IP {ip} banned ({payload.scope}) {duration_label}: {payload.reason or '(no reason)'}")
+    return {"ok": True, "id": str(r.inserted_id), "until": until}
+
+@api_router.delete("/moderation/ip-bans/{ban_id}")
+async def lift_ip_ban(ban_id: str, mod: dict = Depends(get_current_moderator)):
+    try:
+        doc = await db.ip_bans.find_one({"_id": ObjectId(ban_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Ban not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Ban not found")
+    await db.ip_bans.delete_one({"_id": doc["_id"]})
+    await log_edit(mod, "ip-ban", ban_id, "delete", doc.get("ip", ""),
+                   f"Lifted ban on {doc.get('ip', '')}")
+    return {"ok": True}
 
 @api_router.get("/moderation/users/{user_id}/ips")
 async def get_user_ips(user_id: str, mod: dict = Depends(get_current_moderator)):
@@ -2089,6 +2209,11 @@ def _is_mod_role(user: dict) -> bool:
         return True
     # A granular-permission user with read_reply can view every direct thread like a mod.
     return "moderation.messages.read_reply" in (user.get("permissions") or [])
+
+def _is_admin_role(user: dict) -> bool:
+    if not user:
+        return False
+    return user.get("effective_role") == "admin" or user.get("role") == "admin"
 
 async def _get_suspended_user_ids() -> list:
     """Return string ids of users whose suspension is currently active."""
@@ -2730,9 +2855,15 @@ def _year_from(s: Optional[str]) -> Optional[int]:
     except Exception:
         return None
 
-def _score_related(base_genres: set, base_actors: set, base_year: Optional[int],
-                   d_genres: set, d_actors: set, d_year: Optional[int]) -> int:
-    score = len(d_genres & base_genres) * 2 + len(d_actors & base_actors) * 3
+def _score_related(base_genres: set, base_actors: set, base_year: Optional[int], base_collections: set,
+                   d_genres: set, d_actors: set, d_year: Optional[int], d_collections: set) -> int:
+    # Case-insensitive genre comparison
+    bg_lc = {g.lower() for g in base_genres if g}
+    dg_lc = {g.lower() for g in d_genres if g}
+    score = len(dg_lc & bg_lc) * 2 + len(d_actors & base_actors) * 3
+    if base_collections and d_collections and (base_collections & d_collections):
+        # Collection mates get a big boost so they bubble to the top.
+        score += 10
     if base_year is not None and d_year is not None:
         diff = abs(base_year - d_year)
         if diff == 0:
@@ -2743,44 +2874,71 @@ def _score_related(base_genres: set, base_actors: set, base_year: Optional[int],
             score += 1
     return score
 
-async def _collect_related(base_genres: list, base_actors: list, base_year: Optional[int],
-                           exclude_movie_id=None, exclude_series_id=None):
-    """Search both movies and series for items sharing genres/actors, score and return sorted list."""
+def _ci_genre_or(genre_set: set) -> list:
+    """Return a list of case-insensitive regex filters for the given genre names."""
+    out = []
+    for g in genre_set:
+        if g:
+            out.append({"genres": {"$regex": f"^{re.escape(g)}$", "$options": "i"}})
+    return out
+
+async def _collect_related_movies(base_genres: list, base_actors: list, base_year: Optional[int],
+                                  base_collections: list, exclude_movie_id=None):
+    """Return a list of scored movies sharing genres/actors/collection with the base."""
     genre_set = set(base_genres or [])
     actor_set = set(base_actors or [])
-    if not genre_set and not actor_set:
+    coll_set = set(base_collections or [])
+
+    or_filters = []
+    if genre_set:
+        or_filters.extend(_ci_genre_or(genre_set))
+    if actor_set:
+        or_filters.append({"cast.actor_id": {"$in": list(actor_set)}})
+    if coll_set:
+        or_filters.append({"collection_ids": {"$in": list(coll_set)}})
+    if not or_filters:
         return []
 
-    # Movies candidates
-    m_or = []
-    if genre_set:
-        m_or.append({"genres": {"$in": list(genre_set)}})
-    if actor_set:
-        m_or.append({"cast.actor_id": {"$in": list(actor_set)}})
-    m_filter = {"$or": m_or}
+    m_filter = {"$or": or_filters}
     if exclude_movie_id is not None:
         m_filter = {"$and": [{"_id": {"$ne": exclude_movie_id}}, m_filter]}
 
-    # Series candidates
-    s_or = []
+    scored = []
+    async for d in db.movies.find(_alive(m_filter)).limit(120):
+        d_genres = set(d.get("genres") or [])
+        d_actors = {c.get("actor_id") for c in (d.get("cast") or []) if c.get("actor_id")}
+        d_colls = set(d.get("collection_ids") or [])
+        d_year = _year_from(d.get("release_date"))
+        score = _score_related(genre_set, actor_set, base_year, coll_set, d_genres, d_actors, d_year, d_colls)
+        if score > 0:
+            scored.append((score, d))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
+async def _collect_related_series(base_genres: list, base_actors: list, base_year: Optional[int],
+                                  base_collections: list, exclude_series_id=None):
+    """Return a list of scored TV series sharing genres/actors/collection with the base."""
+    genre_set = set(base_genres or [])
+    actor_set = set(base_actors or [])
+    coll_set = set(base_collections or [])
+
+    or_filters = []
     if genre_set:
-        s_or.append({"genres": {"$in": list(genre_set)}})
+        or_filters.extend(_ci_genre_or(genre_set))
     if actor_set:
-        s_or.append({"main_cast.actor_id": {"$in": list(actor_set)}})
-        s_or.append({"seasons.episodes.guest_stars.actor_id": {"$in": list(actor_set)}})
-    s_filter = {"$or": s_or}
+        or_filters.append({"main_cast.actor_id": {"$in": list(actor_set)}})
+        or_filters.append({"seasons.episodes.guest_stars.actor_id": {"$in": list(actor_set)}})
+    if coll_set:
+        or_filters.append({"collection_ids": {"$in": list(coll_set)}})
+    if not or_filters:
+        return []
+
+    s_filter = {"$or": or_filters}
     if exclude_series_id is not None:
         s_filter = {"$and": [{"_id": {"$ne": exclude_series_id}}, s_filter]}
 
     scored = []
-    async for d in db.movies.find(_alive(m_filter)).limit(80):
-        d_genres = set(d.get("genres") or [])
-        d_actors = {c.get("actor_id") for c in (d.get("cast") or []) if c.get("actor_id")}
-        d_year = _year_from(d.get("release_date"))
-        score = _score_related(genre_set, actor_set, base_year, d_genres, d_actors, d_year)
-        if score > 0:
-            scored.append((score, "movie", d))
-    async for d in db.series.find(_alive(s_filter)).limit(80):
+    async for d in db.series.find(_alive(s_filter)).limit(120):
         d_genres = set(d.get("genres") or [])
         d_actors = {c.get("actor_id") for c in (d.get("main_cast") or []) if c.get("actor_id")}
         for season in (d.get("seasons") or []):
@@ -2788,15 +2946,16 @@ async def _collect_related(base_genres: list, base_actors: list, base_year: Opti
                 for g in (ep.get("guest_stars") or []):
                     if g.get("actor_id"):
                         d_actors.add(g.get("actor_id"))
+        d_colls = set(d.get("collection_ids") or [])
         d_year = _year_from(d.get("first_air_date"))
-        score = _score_related(genre_set, actor_set, base_year, d_genres, d_actors, d_year)
+        score = _score_related(genre_set, actor_set, base_year, coll_set, d_genres, d_actors, d_year, d_colls)
         if score > 0:
-            scored.append((score, "series", d))
+            scored.append((score, d))
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored
 
 @api_router.get("/movies/{movie_id}/similar")
-async def similar_movies(movie_id: str, limit: int = 12):
+async def similar_movies(movie_id: str, limit: int = 10):
     try:
         base = await db.movies.find_one({"_id": ObjectId(movie_id)})
     except Exception:
@@ -2806,15 +2965,12 @@ async def similar_movies(movie_id: str, limit: int = 12):
     genres = base.get("genres") or []
     cast_actor_ids = [c.get("actor_id") for c in (base.get("cast") or []) if c.get("actor_id")]
     base_year = _year_from(base.get("release_date"))
-    scored = await _collect_related(genres, cast_actor_ids, base_year, exclude_movie_id=base["_id"])
+    base_collections = base.get("collection_ids") or []
+    scored = await _collect_related_movies(genres, cast_actor_ids, base_year, base_collections, exclude_movie_id=base["_id"])
     out = []
-    for _s, kind, d in scored[:limit]:
-        if kind == "movie":
-            item = await enrich_movie(d)
-            item["type"] = "movie"
-        else:
-            item = await enrich_series(d, deep=False)
-            item["type"] = "series"
+    for _s, d in scored[:limit]:
+        item = await enrich_movie(d)
+        item["type"] = "movie"
         out.append(item)
     return out
 
@@ -3125,7 +3281,7 @@ async def series_stats(series_id: str):
     }
 
 @api_router.get("/series/{series_id}/similar")
-async def similar_series(series_id: str, limit: int = 12):
+async def similar_series(series_id: str, limit: int = 10):
     try:
         base = await db.series.find_one({"_id": ObjectId(series_id)})
     except Exception:
@@ -3141,15 +3297,12 @@ async def similar_series(series_id: str, limit: int = 12):
                 if g.get("actor_id"):
                     main_cast_ids.append(g.get("actor_id"))
     base_year = _year_from(base.get("first_air_date"))
-    scored = await _collect_related(genres, main_cast_ids, base_year, exclude_series_id=base["_id"])
+    base_collections = base.get("collection_ids") or []
+    scored = await _collect_related_series(genres, main_cast_ids, base_year, base_collections, exclude_series_id=base["_id"])
     out = []
-    for _s, kind, d in scored[:limit]:
-        if kind == "movie":
-            item = await enrich_movie(d)
-            item["type"] = "movie"
-        else:
-            item = await enrich_series(d, deep=False)
-            item["type"] = "series"
+    for _s, d in scored[:limit]:
+        item = await enrich_series(d, deep=False)
+        item["type"] = "series"
         out.append(item)
     return out
 
@@ -4014,6 +4167,45 @@ async def sitemap():
     return FastAPIResponse(content=xml, media_type="application/xml")
 
 app.include_router(api_router)
+
+# ----------- IP Edit-Ban Middleware -----------
+# Blocks write operations (POST/PATCH/PUT/DELETE) from IPs with an active edit-scope ban.
+# Login/logout and password-reset endpoints are exempt so a user doesn't get locked out of
+# their own account due to a shared-network ban. Register has its own ban check inline.
+_IP_EDIT_BAN_EXEMPT_PREFIXES = (
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/refresh",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/change-password",
+    "/api/auth/register",  # handled inline
+)
+
+@app.middleware("http")
+async def ip_edit_ban_middleware(request: Request, call_next):
+    try:
+        method = request.method.upper()
+        path = request.url.path or ""
+        if method in ("GET", "HEAD", "OPTIONS") or not path.startswith("/api/"):
+            return await call_next(request)
+        if any(path.startswith(p) for p in _IP_EDIT_BAN_EXEMPT_PREFIXES):
+            return await call_next(request)
+        ip = get_client_ip(request)
+        ban = await _active_ip_ban(ip, ("edit", "both"))
+        if ban:
+            from fastapi.responses import JSONResponse
+            msg = f"Your IP ({ip}) is banned from making changes."
+            if ban.get("reason"):
+                msg += f" Reason: {ban['reason']}."
+            if ban.get("until") and ban.get("until") != "permanent":
+                msg += f" Expires: {ban['until'][:19].replace('T', ' ')} UTC."
+            return JSONResponse(status_code=403, content={"detail": msg})
+    except Exception:
+        # Never block requests due to middleware errors — fall through
+        pass
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
