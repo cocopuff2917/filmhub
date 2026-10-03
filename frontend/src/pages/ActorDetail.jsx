@@ -12,12 +12,23 @@ import EditHistoryPanel from "@/components/EditHistoryPanel";
 import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 
+function parseLocalDate(str) {
+  // Parse "YYYY-MM-DD" (or "YYYY-MM-DDTHH:MM..." leading date) as a LOCAL date so
+  // Date-only values don't shift a day under non-UTC timezones.
+  if (!str || typeof str !== "string") return null;
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 function computeAge(dobStr, dodStr) {
-  if (!dobStr) return null;
-  const dob = new Date(dobStr);
-  if (isNaN(dob.getTime())) return null;
-  const endRef = dodStr ? new Date(dodStr) : new Date();
-  if (isNaN(endRef.getTime())) return null;
+  const dob = parseLocalDate(dobStr);
+  if (!dob) return null;
+  const endRef = dodStr ? parseLocalDate(dodStr) : new Date();
+  if (!endRef) return null;
   let age = endRef.getFullYear() - dob.getFullYear();
   const m = endRef.getMonth() - dob.getMonth();
   if (m < 0 || (m === 0 && endRef.getDate() < dob.getDate())) age--;
@@ -26,8 +37,8 @@ function computeAge(dobStr, dodStr) {
 
 function formatDate(str) {
   if (!str) return "";
-  const d = new Date(str);
-  if (isNaN(d.getTime())) return str;
+  const d = parseLocalDate(str);
+  if (!d) return str;
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
