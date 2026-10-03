@@ -4158,6 +4158,87 @@ async def run_backup_now(_admin: dict = Depends(get_current_admin)):
     manifest = await _run_backup()
     return {"ok": True, "manifest": manifest}
 
+class BackupRestoreRequest(BaseModel):
+    name: str
+    confirm: str
+    collections: Optional[List[str]] = None  # None = all collections present in snapshot
+
+def _parse_mongo_value(v):
+    """Convert JSON-serialized Mongo values back to native types where possible."""
+    from bson import ObjectId as _OID
+    if isinstance(v, str) and len(v) == 24:
+        try:
+            return _OID(v)
+        except Exception:
+            return v
+    return v
+
+@api_router.post("/admin/backups/restore")
+async def restore_backup(payload: BackupRestoreRequest, admin: dict = Depends(get_current_admin)):
+    """Admin: restore DB from a snapshot. DESTRUCTIVE — drops & refills collections.
+
+    Guardrails:
+      - Requires confirm == "RESTORE".
+      - Automatically writes a safety backup BEFORE restoring, so the pre-restore
+        state is itself recoverable.
+      - Can restrict to specific `collections` (default: every collection in the snapshot).
+    """
+    if payload.confirm != "RESTORE":
+        raise HTTPException(status_code=400, detail='Set "confirm":"RESTORE" to proceed')
+    snap_dir = BACKUPS_DIR / payload.name
+    if not snap_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Snapshot not found: {payload.name}")
+
+    # Take a safety snapshot first
+    safety = await _run_backup()
+
+    # Determine which collection files to restore
+    all_files = {p.stem: p for p in snap_dir.glob("*.json") if p.name != "_manifest.json"}
+    if payload.collections:
+        selected = {n: all_files[n] for n in payload.collections if n in all_files}
+        missing = [n for n in payload.collections if n not in all_files]
+    else:
+        selected = all_files
+        missing = []
+
+    report = {}
+    for name, fp in selected.items():
+        try:
+            with fp.open("r", encoding="utf-8") as f:
+                docs = json.load(f)
+            # Convert id strings back to ObjectId
+            for d in docs:
+                if "_id" in d:
+                    d["_id"] = _parse_mongo_value(d["_id"])
+            await db[name].drop()
+            if docs:
+                await db[name].insert_many(docs)
+            report[name] = {"ok": True, "inserted": len(docs)}
+        except Exception as e:
+            report[name] = {"ok": False, "error": str(e)}
+
+    try:
+        await db.edits.insert_one({
+            "entity_type": "system",
+            "action": "restore",
+            "entity_title": f"Restored from {payload.name}",
+            "note": f"Admin restored DB from snapshot {payload.name}. Safety backup: {safety.get('created_at')}",
+            "by_user_id": admin.get("id"),
+            "by_user_name": admin.get("name"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "restored_from": payload.name,
+        "safety_backup": safety,
+        "collections": report,
+        "missing_requested": missing,
+    }
+
+
 
 # ----------- Reviews -----------
 @api_router.post("/movies/{movie_id}/reviews")
