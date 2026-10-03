@@ -6,3 +6,10 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: hourly-backup
+    description: "Snapshots all MongoDB collections to /app/backups every hour (keeps last 24)"
+    cron: "0 * * * *"
+    endpoint: "{{BASE_URL}}/api/cron/backup"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

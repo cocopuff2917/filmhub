@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import os
+import json
 import uuid
 import logging
 import bcrypt
@@ -4033,6 +4034,130 @@ async def cron_lift_suspensions(request: Request, authorization: Optional[str] =
     import asyncio
     asyncio.create_task(_lift_expired_suspensions())
     return {"ok": True, "queued": True}
+
+# ----------- Scheduled: hourly DB backup -----------
+BACKUPS_DIR = Path("/app/backups")
+BACKUPS_RETAIN = 24  # keep last N hourly snapshots
+
+def _json_default(obj):
+    from bson import ObjectId as _OID
+    if isinstance(obj, _OID):
+        return str(obj)
+    if isinstance(obj, (datetime,)):
+        return obj.isoformat()
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            return obj.hex()
+    raise TypeError(f"Not serializable: {type(obj)}")
+
+async def _run_backup() -> dict:
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_dir = BACKUPS_DIR / stamp
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    collections = await db.list_collection_names()
+    summary = {}
+    for name in sorted(collections):
+        docs = []
+        async for d in db[name].find({}):
+            docs.append(d)
+        fp = out_dir / f"{name}.json"
+        with fp.open("w", encoding="utf-8") as f:
+            json.dump(docs, f, default=_json_default, ensure_ascii=False)
+        summary[name] = len(docs)
+
+    manifest = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "database": os.environ['DB_NAME'],
+        "counts": summary,
+        "total_docs": sum(summary.values()),
+    }
+    with (out_dir / "_manifest.json").open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+    # Rolling retention — keep the newest BACKUPS_RETAIN directories only.
+    try:
+        entries = sorted(
+            [p for p in BACKUPS_DIR.iterdir() if p.is_dir()],
+            key=lambda p: p.name,
+            reverse=True,
+        )
+        for old in entries[BACKUPS_RETAIN:]:
+            for f in old.iterdir():
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+            try:
+                old.rmdir()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Backup retention cleanup failed: {e}")
+
+    try:
+        await db.cron_runs.insert_one({
+            "job": "backup",
+            "at": manifest["created_at"],
+            "path": str(out_dir),
+            "total_docs": manifest["total_docs"],
+            "collections": summary,
+        })
+    except Exception:
+        pass
+    return manifest
+
+@api_router.post("/cron/backup")
+async def cron_backup(request: Request, authorization: Optional[str] = Header(default=None)):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    _verify_cron_auth(authorization)
+    run_id = request.headers.get("X-Webhook-Id") or ""
+    if run_id:
+        try:
+            already = await db.cron_runs.find_one({"run_id": run_id, "job": "backup"})
+        except Exception:
+            already = None
+        if already:
+            return {"ok": True, "duplicate": True}
+        try:
+            await db.cron_runs.insert_one({
+                "run_id": run_id,
+                "job": "backup",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+    import asyncio
+    asyncio.create_task(_run_backup())
+    return {"ok": True, "queued": True}
+
+@api_router.get("/admin/backups")
+async def list_backups(_admin: dict = Depends(get_current_admin)):
+    """Admin: list available hourly backup snapshots on disk."""
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for p in sorted(BACKUPS_DIR.iterdir(), reverse=True):
+        if not p.is_dir():
+            continue
+        manifest = p / "_manifest.json"
+        info = {"name": p.name, "path": str(p)}
+        if manifest.exists():
+            try:
+                info.update(json.loads(manifest.read_text()))
+            except Exception:
+                pass
+        out.append(info)
+    return {"retain": BACKUPS_RETAIN, "count": len(out), "backups": out}
+
+@api_router.post("/admin/backups/run")
+async def run_backup_now(_admin: dict = Depends(get_current_admin)):
+    """Admin: trigger an immediate backup (does not wait for the hourly cron)."""
+    manifest = await _run_backup()
+    return {"ok": True, "manifest": manifest}
+
 
 # ----------- Reviews -----------
 @api_router.post("/movies/{movie_id}/reviews")
