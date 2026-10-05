@@ -13,6 +13,7 @@ export default function ActorCard({ actor, testid }) {
       <div className="aspect-square bg-[#1e2430] overflow-hidden">
         <ImageWithFallback
           src={photo}
+          fallbackSrc={fileUrl(actor.photo_url, "jpeg")}
           alt={actor.name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           loading="lazy"

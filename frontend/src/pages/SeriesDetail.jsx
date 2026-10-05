@@ -327,6 +327,7 @@ export default function SeriesDetail() {
                     <div className="aspect-[3/4] bg-[#1e2430] overflow-hidden">
                       <ImageWithFallback
                         src={fileUrl(c.actor.photo_url)}
+                        fallbackSrc={fileUrl(c.actor.photo_url, "jpeg")}
                         alt={c.actor.name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}

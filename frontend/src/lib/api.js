@@ -20,11 +20,11 @@ export function formatApiErrorDetail(detail) {
   return String(detail);
 }
 
-export function fileUrl(path) {
+export function fileUrl(path, format) {
   if (!path) return "";
   if (path.startsWith("http")) return path;
-  if (path.startsWith("/api/files/")) return `${BACKEND_URL}${path}`;
-  return `${API}/files/${path}`;
+  const url = path.startsWith("/api/files/") ? `${BACKEND_URL}${path}` : `${API}/files/${path}`;
+  return format ? `${url}?format=${encodeURIComponent(format)}` : url;
 }
 
 /** Upload a single image file and return the stored file key (relative path). */

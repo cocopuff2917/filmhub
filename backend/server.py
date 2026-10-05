@@ -16,6 +16,7 @@ import hmac
 import re
 import ipaddress
 import httpx
+from io import BytesIO
 from html import escape
 from html.parser import HTMLParser
 from urllib.parse import urlparse
@@ -27,6 +28,8 @@ from fastapi.responses import Response as FastAPIResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
+from PIL import Image, ImageOps
+from pillow_avif import AvifImagePlugin
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, BeforeValidator
 from bson import ObjectId
 
@@ -4366,11 +4369,30 @@ async def upload_file(file: UploadFile = File(...), _user: dict = Depends(get_cu
     return {"path": result["path"], "url": f"/api/files/{result['path']}"}
 
 @api_router.get("/files/{path:path}")
-async def download_file(path: str):
+async def download_file(path: str, image_format: Optional[str] = Query(default=None, alias="format")):
     try:
         data, content_type = get_object(path)
     except Exception:
         raise HTTPException(status_code=404, detail="File not found")
+    if image_format == "jpeg":
+        try:
+            with Image.open(BytesIO(data)) as source:
+                image = ImageOps.exif_transpose(source)
+                if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+                    rgba = image.convert("RGBA")
+                    converted = Image.new("RGB", rgba.size, "white")
+                    converted.paste(rgba, mask=rgba.getchannel("A"))
+                else:
+                    converted = image.convert("RGB")
+                output = BytesIO()
+                converted.save(output, format="JPEG", quality=88, optimize=True)
+            return FastAPIResponse(
+                content=output.getvalue(),
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        except Exception:
+            raise HTTPException(status_code=415, detail="Image cannot be converted")
     return FastAPIResponse(content=data, media_type=content_type)
 
 # ----------- Startup -----------
