@@ -29,7 +29,13 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
 from PIL import Image, ImageOps
-from pillow_avif import AvifImagePlugin
+# AVIF support is optional — importing the plugin registers the codec with Pillow.
+# Guarded so a missing wheel on the deploy platform never crashes backend boot.
+try:
+    from pillow_avif import AvifImagePlugin  # noqa: F401
+except Exception as _avif_err:  # pragma: no cover
+    import logging as _l
+    _l.getLogger(__name__).warning("pillow_avif unavailable: %s. AVIF image decoding disabled.", _avif_err)
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, BeforeValidator
 from bson import ObjectId
 
@@ -4707,8 +4713,6 @@ async def ip_edit_ban_middleware(request: Request, call_next):
 
 _cors_origins = {
     os.environ.get("FRONTEND_URL", "http://localhost:3000"),
-    "https://bounce-fling-92327284.figma.site",
-    "https://filmhub-918.emergent.host",
 }
 _extra = os.environ.get("EXTRA_CORS_ORIGINS", "")
 for _o in [o.strip() for o in _extra.split(",") if o.strip()]:
