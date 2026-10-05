@@ -204,7 +204,7 @@ export default function ActorDetail() {
             {actor.guest_episodes.map((ge, i) => (
               <Link key={i} to={`/series/${ge.series_id}`} className="flex items-center gap-4 rounded-xl bg-[#14181f] border border-white/10 p-4 hover:border-amber-500/40 hover:bg-amber-500/5 transition">
                 <div className="w-12 h-16 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
-                  {ge.series_poster_url && <img src={fileUrl(ge.series_poster_url)} alt="" className="w-full h-full object-cover" />}
+                  {ge.series_poster_url && <img src={fileUrl(ge.series_poster_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
@@ -231,7 +231,7 @@ export default function ActorDetail() {
           <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {actor.gallery.map((img, i) => (
               <div key={i} className="rounded-xl overflow-hidden aspect-square bg-[#1e2430] border border-white/5">
-                <img src={fileUrl(img)} alt="" className="w-full h-full object-cover" />
+                <img src={fileUrl(img)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
               </div>
             ))}
           </div>

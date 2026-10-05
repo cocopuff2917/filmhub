@@ -21,6 +21,7 @@ import VideosSection from "@/components/VideosSection";
 import InlineMediaEditor from "@/components/InlineMediaEditor";
 import TrailerPlayer from "@/components/TrailerPlayer";
 import CollectionCard from "@/components/CollectionCard";
+import ImageWithFallback from "@/components/ImageWithFallback";
 
 const fmtDate = (s) => {
   if (!s) return "";
@@ -324,7 +325,12 @@ export default function SeriesDetail() {
                 {series.main_cast.map((c, idx) => (
                   <Link to={`/actor/${c.actor.id}`} key={idx} className="group block flex-shrink-0 w-[140px] rounded-xl overflow-hidden bg-[#14181f] border border-white/5 snap-start hover:border-amber-500/30 transition" data-testid={`series-cast-${c.actor.id}`}>
                     <div className="aspect-[3/4] bg-[#1e2430] overflow-hidden">
-                      {c.actor.photo_url ? <img src={fileUrl(c.actor.photo_url)} alt={c.actor.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}
+                      <ImageWithFallback
+                        src={fileUrl(c.actor.photo_url)}
+                        alt={c.actor.name}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}
+                      />
                     </div>
                     <div className="p-2.5">
                       <div className="font-semibold text-sm line-clamp-1 group-hover:text-amber-400 transition-colors">{c.actor.name}</div>

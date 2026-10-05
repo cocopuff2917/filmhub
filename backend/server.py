@@ -26,6 +26,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Respons
 from fastapi.responses import Response as FastAPIResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, BeforeValidator
 from bson import ObjectId
 
@@ -548,6 +549,7 @@ class AvatarUpdate(BaseModel):
     avatar_url: str
 
 class ProfileUpdate(BaseModel):
+    email: Optional[EmailStr] = None
     name: Optional[str] = Field(default=None, min_length=2, max_length=40)
     bio: Optional[str] = Field(default=None, max_length=500)
 
@@ -1228,6 +1230,14 @@ async def migration_export_users(
 @api_router.patch("/auth/me")
 async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_current_user)):
     update = {}
+    if payload.email is not None:
+        new_email = str(payload.email).strip().lower()
+        current_email = (user.get("email") or "").lower()
+        if new_email != current_email:
+            existing = await db.users.find_one({"email": new_email, "_id": {"$ne": ObjectId(user["id"])}})
+            if existing:
+                raise HTTPException(status_code=400, detail="Email is already registered")
+            update["email"] = new_email
     if payload.name is not None:
         new_name = payload.name.strip()
         # Only validate if the username actually changed (case-insensitive compare)
@@ -1266,7 +1276,10 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
         update["bio"] = payload.bio.strip()
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
-    await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": update})
+    try:
+        await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": update})
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail="Email is already registered")
     return {"ok": True, **update}
 
 @api_router.post("/auth/me/password")

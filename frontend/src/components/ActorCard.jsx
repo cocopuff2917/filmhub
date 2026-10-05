@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { fileUrl } from "@/lib/api";
+import ImageWithFallback from "@/components/ImageWithFallback";
 
 export default function ActorCard({ actor, testid }) {
   const photo = actor.photo_url ? fileUrl(actor.photo_url) : null;
@@ -10,13 +11,14 @@ export default function ActorCard({ actor, testid }) {
       data-testid={testid || `actor-card-${actor.id}`}
     >
       <div className="aspect-square bg-[#1e2430] overflow-hidden">
-        {photo ? (
-          <img src={photo} alt={actor.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-3xl">
-            {actor.name?.[0]}
-          </div>
-        )}
+        <ImageWithFallback
+          src={photo}
+          alt={actor.name}
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          loading="lazy"
+          decoding="async"
+          fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-3xl">{actor.name?.[0]}</div>}
+        />
       </div>
       <div className="p-3">
         <div className="font-semibold text-white text-sm line-clamp-1 group-hover:text-amber-400 transition-colors">{actor.name}</div>

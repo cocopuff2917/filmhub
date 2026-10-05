@@ -13,6 +13,7 @@ import ImageUpload from "@/components/ImageUpload";
 
 export default function EditProfileDialog({ open, onOpenChange, profile, onSaved }) {
   const { user: me, refresh } = useAuth();
+  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -29,18 +30,21 @@ export default function EditProfileDialog({ open, onOpenChange, profile, onSaved
 
   useEffect(() => {
     if (open && profile) {
+      setEmail(me?.email || profile.email || "");
       setName(profile.name || "");
       setBio(profile.bio || "");
       setAvatarUrl(profile.avatar_url || "");
       setCurrentPw(""); setNewPw(""); setConfirmPw("");
     }
-  }, [open, profile]);
+  }, [open, profile, me?.email]);
 
   const saveProfile = async (e) => {
     e.preventDefault();
     setSavingProfile(true);
     try {
       const changes = {};
+      const newEmail = email.trim().toLowerCase();
+      if (newEmail !== (me?.email || profile.email || "").toLowerCase()) changes.email = newEmail;
       if (name.trim() !== (profile.name || "")) changes.name = name.trim();
       if (bio !== (profile.bio || "")) changes.bio = bio;
       if (Object.keys(changes).length > 0) {
@@ -99,6 +103,21 @@ export default function EditProfileDialog({ open, onOpenChange, profile, onSaved
                   <Label className="text-slate-300 text-xs uppercase tracking-widest">Avatar</Label>
                   <div className="mt-1"><ImageUpload value={avatarUrl} onChange={setAvatarUrl} shape="circle" testid="profile-avatar-upload" /></div>
                 </div>
+              </div>
+
+              <div>
+                <Label className="text-slate-300 text-xs uppercase tracking-widest">Email</Label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1.5 bg-[#0d0f12] border-white/10 text-white"
+                  placeholder="you@example.com"
+                  maxLength={254}
+                  autoComplete="email"
+                  required
+                  data-testid="profile-email-input"
+                />
               </div>
 
               <div>

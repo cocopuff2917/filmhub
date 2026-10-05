@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
+import ImageWithFallback from "@/components/ImageWithFallback";
 
 export default function MovieCard({ movie, testid }) {
   const year = movie.release_date ? movie.release_date.slice(0, 4) : "";
@@ -13,18 +14,14 @@ export default function MovieCard({ movie, testid }) {
       data-testid={testid || `movie-card-${movie.id}`}
     >
       <div className="relative aspect-[2/3] overflow-hidden bg-[#1e2430]">
-        {poster ? (
-          <img
-            src={poster}
-            alt={movie.title}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-2xl">
-            NO POSTER
-          </div>
-        )}
+        <ImageWithFallback
+          src={poster}
+          alt={movie.title}
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          loading="lazy"
+          decoding="async"
+          fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-2xl">NO POSTER</div>}
+        />
         {movie.avg_rating != null && (
           <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur px-2 py-1 rounded-full">
             <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />

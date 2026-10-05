@@ -179,6 +179,19 @@ class TestUserProfile:
         me = user_session.get(f"{API}/auth/me").json()
         assert me["avatar_url"] == "http://x/a.jpg"
 
+    def test_update_email(self, user_session):
+        new_email = f"profile_{uuid.uuid4().hex[:10]}@test.com"
+        r = user_session.patch(f"{API}/auth/me", json={"email": new_email.upper()})
+        assert r.status_code == 200, r.text
+        assert r.json()["email"] == new_email
+        assert user_session.get(f"{API}/auth/me").json()["email"] == new_email
+
+        duplicate = user_session.patch(f"{API}/auth/me", json={"email": ADMIN_EMAIL.upper()})
+        assert duplicate.status_code == 400
+
+        login = _login(_session(), new_email, user_session.user_password)
+        assert login.status_code == 200, login.text
+
 
 # ---------------- Moderation / Suspension ----------------
 class TestModeration:
