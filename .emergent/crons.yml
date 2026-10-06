@@ -13,3 +13,10 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: daily-cleanup
+    description: "Daily disk cleanup: prunes expired reset tokens, old cron runs, old notifications, 30d+ soft-deletes"
+    cron: "15 3 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/cleanup"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

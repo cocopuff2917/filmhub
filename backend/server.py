@@ -4197,6 +4197,96 @@ async def list_backups(_admin: dict = Depends(get_current_admin)):
         out.append(info)
     return {"retain": BACKUPS_RETAIN, "count": len(out), "backups": out}
 
+# ----------- Scheduled: daily disk cleanup -----------
+async def _run_cleanup() -> dict:
+    """Prune ephemeral/expired records so local disk stays flat. All operations
+    are safe — they only touch records that are already expired or soft-deleted
+    beyond retention."""
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    cron_cutoff = (now - timedelta(days=7)).isoformat()
+    notif_cutoff = (now - timedelta(days=90)).isoformat()
+    purge_cutoff = (now - timedelta(days=30)).isoformat()
+
+    results = {}
+
+    # 1. Expired or used password reset tokens
+    try:
+        r = await db.password_resets.delete_many({
+            "$or": [
+                {"used": True},
+                {"expires_at": {"$lt": now_iso}},
+            ]
+        })
+        results["password_resets_deleted"] = r.deleted_count
+    except Exception as e:
+        results["password_resets_error"] = str(e)
+
+    # 2. Old cron run idempotency records (>7 days)
+    try:
+        r = await db.cron_runs.delete_many({"at": {"$lt": cron_cutoff}})
+        results["cron_runs_deleted"] = r.deleted_count
+    except Exception as e:
+        results["cron_runs_error"] = str(e)
+
+    # 3. Old notifications (>90 days)
+    try:
+        r = await db.notifications.delete_many({"created_at": {"$lt": notif_cutoff}})
+        results["notifications_deleted"] = r.deleted_count
+    except Exception as e:
+        results["notifications_error"] = str(e)
+
+    # 4. Soft-deleted movies/series/actors older than 30 days — permanent purge
+    for coll in ("movies", "series", "actors"):
+        try:
+            r = await db[coll].delete_many({
+                "deleted": True,
+                "deleted_at": {"$lt": purge_cutoff},
+            })
+            results[f"{coll}_purged"] = r.deleted_count
+        except Exception as e:
+            results[f"{coll}_purge_error"] = str(e)
+
+    try:
+        await db.cron_runs.insert_one({
+            "job": "cleanup",
+            "at": now_iso,
+            "results": results,
+        })
+    except Exception:
+        pass
+    return {"ran_at": now_iso, "results": results}
+
+@api_router.post("/cron/cleanup")
+async def cron_cleanup(request: Request, authorization: Optional[str] = Header(default=None)):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    _verify_cron_auth(authorization)
+    run_id = request.headers.get("X-Webhook-Id") or ""
+    if run_id:
+        try:
+            already = await db.cron_runs.find_one({"run_id": run_id, "job": "cleanup"})
+        except Exception:
+            already = None
+        if already:
+            return {"ok": True, "duplicate": True}
+        try:
+            await db.cron_runs.insert_one({
+                "run_id": run_id,
+                "job": "cleanup",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+    import asyncio
+    asyncio.create_task(_run_cleanup())
+    return {"ok": True, "queued": True}
+
+@api_router.post("/admin/cleanup/run")
+async def run_cleanup_now(_admin: dict = Depends(get_current_admin)):
+    """Admin: trigger the disk cleanup immediately."""
+    report = await _run_cleanup()
+    return {"ok": True, **report}
+
 @api_router.post("/admin/backups/run")
 async def run_backup_now(_admin: dict = Depends(get_current_admin)):
     """Admin: trigger an immediate backup (does not wait for the hourly cron)."""
