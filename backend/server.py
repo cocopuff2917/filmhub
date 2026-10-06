@@ -29,13 +29,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
 from PIL import Image, ImageOps
-# AVIF support is optional — importing the plugin registers the codec with Pillow.
-# Guarded so a missing wheel on the deploy platform never crashes backend boot.
-try:
-    from pillow_avif import AvifImagePlugin  # noqa: F401
-except Exception as _avif_err:  # pragma: no cover
-    import logging as _l
-    _l.getLogger(__name__).warning("pillow_avif unavailable: %s. AVIF image decoding disabled.", _avif_err)
+from pillow_avif import AvifImagePlugin
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, BeforeValidator
 from bson import ObjectId
 
@@ -1173,7 +1167,24 @@ async def me(user: dict = Depends(get_current_user_allow_suspended)):
 
 @api_router.patch("/auth/me/avatar")
 async def update_avatar(payload: AvatarUpdate, user: dict = Depends(get_current_user)):
-    await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": {"avatar_url": payload.avatar_url}})
+    avatar_url = payload.avatar_url
+    user_id = user["id"]
+    await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"avatar_url": avatar_url}})
+
+    for collection, avatar_field in (
+        (db.edits, "user_avatar"),
+        (db.comments, "user_avatar"),
+        (db.threads, "user_avatar"),
+        (db.thread_messages, "user_avatar"),
+    ):
+        await collection.update_many(
+            {"user_id": user_id},
+            {"$set": {avatar_field: avatar_url}},
+        )
+    await db.notifications.update_many(
+        {"from_user_id": user_id},
+        {"$set": {"from_user_avatar": avatar_url}},
+    )
     return {"ok": True, "avatar_url": payload.avatar_url}
 
 @api_router.get("/auth/session")
@@ -1289,6 +1300,18 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
         await db.users.update_one({"_id": ObjectId(user["id"])}, {"$set": update})
     except DuplicateKeyError:
         raise HTTPException(status_code=400, detail="Email is already registered")
+    if "name" in update:
+        user_id = user["id"]
+        new_name = update["name"]
+        for collection in (db.edits, db.comments, db.threads, db.thread_messages):
+            await collection.update_many(
+                {"user_id": user_id},
+                {"$set": {"user_name": new_name}},
+            )
+        await db.notifications.update_many(
+            {"from_user_id": user_id},
+            {"$set": {"from_user_name": new_name}},
+        )
     return {"ok": True, **update}
 
 @api_router.post("/auth/me/password")
@@ -4713,6 +4736,8 @@ async def ip_edit_ban_middleware(request: Request, call_next):
 
 _cors_origins = {
     os.environ.get("FRONTEND_URL", "http://localhost:3000"),
+    "https://bounce-fling-92327284.figma.site",
+    "https://filmhub-918.emergent.host",
 }
 _extra = os.environ.get("EXTRA_CORS_ORIGINS", "")
 for _o in [o.strip() for o in _extra.split(",") if o.strip()]:

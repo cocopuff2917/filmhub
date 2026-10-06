@@ -144,16 +144,16 @@ export default function SeriesDetail() {
   const [historyKey, setHistoryKey] = useState(0);
 
   const load = async () => {
-    try {
-      const [s, st, rv] = await Promise.all([
-        api.get(`/series/${id}`),
-        api.get(`/series/${id}/stats`).catch(() => ({ data: { trend: [], contributors: [], content_score: 0, total_views: 0 } })),
-        api.get(`/series/${id}/reviews`).catch(() => ({ data: [] })),
-      ]);
-      setSeries(s.data);
-      setStats(st.data);
-      setReviews(rv.data);
-    } catch { toast.error("Failed to load series"); }
+    const seriesRequest = api.get(`/series/${id}`)
+      .then((response) => setSeries(response.data))
+      .catch(() => toast.error("Failed to load series"));
+    const statsRequest = api.get(`/series/${id}/stats`)
+      .then((response) => setStats(response.data))
+      .catch(() => {});
+    const reviewsRequest = api.get(`/series/${id}/reviews`)
+      .then((response) => setReviews(response.data))
+      .catch(() => {});
+    await Promise.all([seriesRequest, statsRequest, reviewsRequest]);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 

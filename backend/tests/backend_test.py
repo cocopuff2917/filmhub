@@ -192,6 +192,25 @@ class TestUserProfile:
         login = _login(_session(), new_email, user_session.user_password)
         assert login.status_code == 200, login.text
 
+    def test_username_update_updates_existing_comment(self, user_session):
+        entity_id = f"username-update-{uuid.uuid4().hex[:8]}"
+        comment = user_session.post(f"{API}/comments", json={
+            "entity_type": "movie",
+            "entity_id": entity_id,
+            "text": "Username propagation test",
+        })
+        assert comment.status_code == 200, comment.text
+
+        new_name = f"updated_{uuid.uuid4().hex[:8]}"
+        update = user_session.patch(f"{API}/auth/me", json={"name": new_name})
+        assert update.status_code == 200, update.text
+
+        comments = user_session.get(f"{API}/comments", params={
+            "entity_type": "movie",
+            "entity_id": entity_id,
+        }).json()
+        assert comments[0]["user_name"] == new_name
+
 
 # ---------------- Moderation / Suspension ----------------
 class TestModeration:

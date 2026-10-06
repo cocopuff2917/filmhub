@@ -17,6 +17,7 @@ export default function Browse() {
   const [series, setSeries] = useState([]);
   const [actors, setActors] = useState([]);
   const [genres, setGenres] = useState([]);
+  const [loadedTabs, setLoadedTabs] = useState({});
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(params.get("q") || "");
   const tab = params.get("tab") || "movies";
@@ -30,8 +31,10 @@ export default function Browse() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     (async () => {
       setLoading(true);
+      setLoadedTabs({});
       const qv = params.get("q") || "";
       const g = params.get("genre");
       const y = params.get("year");
@@ -45,28 +48,33 @@ export default function Browse() {
       if (s) filters.sort = s;
 
       try {
-        const [m, se] = await Promise.all([
-          api.get("/movies", { params: filters }),
-          api.get("/series", { params: filters }),
-        ]);
-        setMovies(m.data);
-        setSeries(se.data);
-      } catch {}
-
-      if (qv) {
-        try {
-          const a = await api.get("/actors", { params: { q: qv } });
-          setActors(a.data);
-        } catch {}
-      } else {
-        try {
-          const a = await api.get("/actors");
-          setActors(a.data);
-        } catch {}
+        const options = { params: filters, signal: controller.signal };
+        if (tab === "series") {
+          const response = await api.get("/series", options);
+          setSeries(response.data);
+        } else if (tab === "actors") {
+          const response = await api.get("/actors", {
+            params: qv ? { q: qv } : {},
+            signal: controller.signal,
+          });
+          setActors(response.data);
+        } else {
+          const response = await api.get("/movies", options);
+          setMovies(response.data);
+        }
+        setLoadedTabs((loaded) => ({ ...loaded, [tab]: true }));
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          if (tab === "series") setSeries([]);
+          else if (tab === "actors") setActors([]);
+          else setMovies([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
-      setLoading(false);
     })();
-  }, [params]);
+    return () => controller.abort();
+  }, [params, tab]);
 
   const setParam = (key, value) => {
     const p = new URLSearchParams(params);
@@ -182,9 +190,9 @@ export default function Browse() {
 
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v)} className="mt-8">
         <TabsList className="bg-[#14181f] border border-white/10">
-          <TabsTrigger value="movies" data-testid="browse-tab-movies">Movies ({movies.length})</TabsTrigger>
-          <TabsTrigger value="series" data-testid="browse-tab-series">TV Series ({series.length})</TabsTrigger>
-          <TabsTrigger value="actors" data-testid="browse-tab-actors">Actors ({actors.length})</TabsTrigger>
+          <TabsTrigger value="movies" data-testid="browse-tab-movies">Movies{loadedTabs.movies ? ` (${movies.length})` : ""}</TabsTrigger>
+          <TabsTrigger value="series" data-testid="browse-tab-series">TV Series{loadedTabs.series ? ` (${series.length})` : ""}</TabsTrigger>
+          <TabsTrigger value="actors" data-testid="browse-tab-actors">Actors{loadedTabs.actors ? ` (${actors.length})` : ""}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="movies" className="mt-6">
