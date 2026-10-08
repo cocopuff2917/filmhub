@@ -4,19 +4,25 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash, Layers, Plus } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash, Layers, Plus, Search, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import MovieForm from "@/components/forms/MovieForm";
 import ActorForm from "@/components/forms/ActorForm";
 import SeriesForm from "@/components/forms/SeriesForm";
 import MessageUserDialog from "@/components/MessageUserDialog";
+import ImageUpload from "@/components/ImageUpload";
 import { DashboardTab, ReportsTab, SuspensionsTab, EditHistoryTab, IpBansTab } from "@/components/admin/ModerationTabs";
 import HomepageTab from "@/components/admin/HomepageTab";
+import ContributorGuidelinesTab from "@/components/admin/ContributorGuidelinesTab";
+import UsernameCooldownTab from "@/components/admin/UsernameCooldownTab";
+import CrewJobsTab from "@/components/admin/CrewJobsTab";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -40,60 +46,127 @@ export default function Admin() {
   if (!hasAnyModPerm) return null;
 
   const canManageRoles = user.role === "admin" || user.effective_role === "admin";
+  const canManageCrewJobs = [user.role, user.effective_role].some((role) => ["moderator", "admin"].includes(role));
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
-        <Shield className="w-4 h-4" /> {user.role === "admin" ? "Admin" : "Moderator"} Console
-      </div>
-      <h1 className="mt-2 font-heading text-4xl font-bold text-white">Manage Catalog</h1>
+    <div className="admin-shell min-h-screen text-white">
+      <section className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_20%),linear-gradient(120deg,#0a0d12_0%,#10151d_45%,#0a0d12_100%)]">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-amber-300 font-semibold">
+            <Shield className="w-4 h-4" /> {user.role === "admin" ? "Admin" : "Moderator"} Console
+          </div>
+          <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="font-display text-4xl tracking-[0.14em] text-white md:text-5xl">MANAGE</h1>
+              <p className="mt-2 max-w-xl text-sm text-slate-300">Keep the catalog, users, and moderation workflow running under the CineVerse brand.</p>
+            </div>
+            <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-amber-200">
+              moderation tools
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <Tabs defaultValue="dashboard" className="mt-8">
-        <TabsList className="bg-[#14181f] border border-white/10 flex-wrap h-auto gap-1">
-          <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="reports" data-testid="tab-reports">Reports</TabsTrigger>
-          <TabsTrigger value="suspensions" data-testid="tab-suspensions">Suspensions</TabsTrigger>
-          <TabsTrigger value="edits" data-testid="tab-edits">Edit History</TabsTrigger>
-          <TabsTrigger value="movies" data-testid="tab-movies">Movies</TabsTrigger>
-          <TabsTrigger value="series" data-testid="tab-series">TV Series</TabsTrigger>
-          <TabsTrigger value="actors" data-testid="tab-actors">Actors</TabsTrigger>
-          <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
-          <TabsTrigger value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
-          <TabsTrigger value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>
-          <TabsTrigger value="trash" data-testid="tab-trash">Trash</TabsTrigger>
-          <TabsTrigger value="collections" data-testid="tab-collections">Collections</TabsTrigger>
-          {canManageRoles && <TabsTrigger value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
-          {canManageRoles && <TabsTrigger value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
-        </TabsList>
-        <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>
-        <TabsContent value="reports" className="mt-6"><ReportsTab /></TabsContent>
-        <TabsContent value="suspensions" className="mt-6"><SuspensionsTab /></TabsContent>
-        <TabsContent value="edits" className="mt-6"><EditHistoryTab /></TabsContent>
-        <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
-        <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" /></TabsContent>
-        <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
-        <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
-        <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
-        <TabsContent value="ipbans" className="mt-6"><IpBansTab /></TabsContent>
-        <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
-        <TabsContent value="collections" className="mt-6"><CollectionsTab /></TabsContent>
-        {canManageRoles && <TabsContent value="homepage" className="mt-6"><HomepageTab /></TabsContent>}
-        {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
-      </Tabs>
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <Tabs defaultValue="dashboard" className="mt-2">
+          <TabsList className="admin-tab-list h-auto">
+            <TabsTrigger className="admin-tab-trigger" value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="reports" data-testid="tab-reports">Reports</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="suspensions" data-testid="tab-suspensions">Suspensions</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="edits" data-testid="tab-edits">Edit History</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="movies" data-testid="tab-movies">Movies</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="series" data-testid="tab-series">TV Series</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="actors" data-testid="tab-actors">Actors</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="users" data-testid="tab-users">Users</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="trash" data-testid="tab-trash">Trash</TabsTrigger>
+            <TabsTrigger className="admin-tab-trigger" value="collections" data-testid="tab-collections">Collections</TabsTrigger>
+            {canManageCrewJobs && <TabsTrigger className="admin-tab-trigger" value="crew-jobs" data-testid="tab-crew-jobs">Crew Jobs</TabsTrigger>}
+            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
+            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="guidelines" data-testid="tab-guidelines">Guidelines</TabsTrigger>}
+            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="username-cooldown" data-testid="tab-username-cooldown">Username Cooldown</TabsTrigger>}
+            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
+          </TabsList>
+          <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>
+          <TabsContent value="reports" className="mt-6"><ReportsTab /></TabsContent>
+          <TabsContent value="suspensions" className="mt-6"><SuspensionsTab /></TabsContent>
+          <TabsContent value="edits" className="mt-6"><EditHistoryTab /></TabsContent>
+          <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
+          <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" /></TabsContent>
+          <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
+          <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
+          <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
+          <TabsContent value="ipbans" className="mt-6"><IpBansTab /></TabsContent>
+          <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
+          <TabsContent value="collections" className="mt-6"><CollectionsTab /></TabsContent>
+          {canManageCrewJobs && <TabsContent value="crew-jobs" className="mt-6"><CrewJobsTab /></TabsContent>}
+          {canManageRoles && <TabsContent value="homepage" className="mt-6"><HomepageTab /></TabsContent>}
+          {canManageRoles && <TabsContent value="guidelines" className="mt-6"><ContributorGuidelinesTab /></TabsContent>}
+          {canManageRoles && <TabsContent value="username-cooldown" className="mt-6"><UsernameCooldownTab /></TabsContent>}
+          {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
+        </Tabs>
+      </div>
     </div>
   );
 }
 
 function EntityAdmin({ kind }) {
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [editing, setEditing] = useState(null);
   const [mode, setMode] = useState("list"); // list | form
+  const [tmdbOpen, setTmdbOpen] = useState(false);
+  const [tmdbEnabled, setTmdbEnabled] = useState(false);
+  const [tmdbSettingLoading, setTmdbSettingLoading] = useState(true);
+  const [tmdbSettingSaving, setTmdbSettingSaving] = useState(false);
+  const [tmdbQuery, setTmdbQuery] = useState("");
+  const [tmdbResults, setTmdbResults] = useState([]);
+  const [tmdbSearching, setTmdbSearching] = useState(false);
+  const [tmdbImporting, setTmdbImporting] = useState(null);
+  const [tmdbBackfilling, setTmdbBackfilling] = useState(false);
 
   const endpoint = kind === "movie" ? "/movies" : kind === "series" ? "/series" : "/actors";
   const label = kind === "movie" ? "Movie" : kind === "series" ? "Series" : "Actor";
+  const supportsTMDB = kind === "movie" || kind === "series";
+  const canManageTMDB = [user?.role, user?.effective_role].includes("admin");
 
   const load = async () => { const r = await api.get(endpoint); setItems(r.data); };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [kind]);
+  useEffect(() => {
+    if (!supportsTMDB) {
+      setTmdbSettingLoading(false);
+      return undefined;
+    }
+    let active = true;
+    api.get("/moderation/tmdb/settings")
+      .then((response) => { if (active) setTmdbEnabled(!!response.data.enabled); })
+      .catch((error) => {
+        if (active) {
+          setTmdbEnabled(false);
+          toast.error(error.response?.data?.detail || "Could not load TMDB import setting");
+        }
+      })
+      .finally(() => { if (active) setTmdbSettingLoading(false); });
+    return () => { active = false; };
+  }, [supportsTMDB]);
+
+  const updateTMDBSetting = async (enabled) => {
+    setTmdbSettingSaving(true);
+    try {
+      const response = await api.put("/moderation/tmdb/settings", { enabled });
+      setTmdbEnabled(!!response.data.enabled);
+      if (!response.data.enabled) {
+        setTmdbOpen(false);
+        setTmdbResults([]);
+      }
+      toast.success(response.data.enabled ? "TMDB imports enabled" : "TMDB imports paused");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update TMDB import setting");
+    } finally {
+      setTmdbSettingSaving(false);
+    }
+  };
 
   const del = async (id) => {
     if (!window.confirm(`Delete this ${label.toLowerCase()}?`)) return;
@@ -102,6 +175,53 @@ function EntityAdmin({ kind }) {
   };
 
   const onSaved = () => { setMode("list"); setEditing(null); load(); };
+
+  const searchTMDB = async (event) => {
+    event.preventDefault();
+    const query = tmdbQuery.trim();
+    if (!query) return;
+    setTmdbSearching(true);
+    setTmdbResults([]);
+    try {
+      const response = await api.get("/moderation/tmdb/search", { params: { kind, q: query } });
+      setTmdbResults(response.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "TMDB search failed");
+    } finally {
+      setTmdbSearching(false);
+    }
+  };
+
+  const importTMDB = async (result) => {
+    setTmdbImporting(result.tmdb_id);
+    try {
+      await api.post("/moderation/tmdb/import", { kind, tmdb_id: result.tmdb_id });
+      toast.success(`${label} imported from TMDB`);
+      setTmdbOpen(false);
+      setTmdbResults([]);
+      setTmdbQuery("");
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || `Failed to import ${label.toLowerCase()}`);
+    } finally {
+      setTmdbImporting(null);
+    }
+  };
+
+  const backfillTMDBCast = async () => {
+    setTmdbBackfilling(true);
+    try {
+      const response = await api.post("/moderation/tmdb/backfill-cast", { kind, limit: 10 });
+      const { checked, updated, added_cast_members: added, removed_cast_members: removed, errors } = response.data;
+      const message = `Cineverse BOT checked ${checked} ${label.toLowerCase()}s, corrected ${updated}, added ${added} cast members, and removed ${removed} inaccurate cast members`;
+      toast.success(errors ? `${message}; ${errors} failed` : message);
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Cast backfill failed");
+    } finally {
+      setTmdbBackfilling(false);
+    }
+  };
 
   if (mode === "form") {
     return (
@@ -120,11 +240,88 @@ function EntityAdmin({ kind }) {
     <Card className="bg-[#14181f] border-white/10 text-white">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>All {label}s ({items.length})</CardTitle>
-        <Button onClick={() => { setEditing(null); setMode("form"); }} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`admin-new-${kind}`}>
-          + New {label}
-        </Button>
+        <div className="flex items-center gap-2">
+          {supportsTMDB && (
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              <div className="flex items-center gap-2 text-xs text-slate-300" data-testid={`tmdb-import-status-${kind}`}>
+                <span>{tmdbEnabled ? "TMDB imports on" : "TMDB imports paused"}</span>
+                {canManageTMDB && (
+                  <Switch
+                    checked={tmdbEnabled}
+                    onCheckedChange={updateTMDBSetting}
+                    disabled={tmdbSettingLoading || tmdbSettingSaving}
+                    aria-label="Enable TMDB imports"
+                    data-testid="tmdb-import-enabled-toggle"
+                  />
+                )}
+              </div>
+              {canManageTMDB && (
+                <Button
+                  variant="outline"
+                  onClick={backfillTMDBCast}
+                  disabled={tmdbBackfilling || tmdbSettingLoading}
+                  title="Audit and correct existing cast and TV details using TMDB"
+                  className="border-white/20 text-white hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  data-testid={`tmdb-backfill-cast-${kind}`}
+                >
+                  <Users className="mr-2 h-4 w-4" /> {tmdbBackfilling ? "Auditing..." : "Audit TMDB Data"}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => setTmdbOpen((open) => !open)}
+                disabled={!tmdbEnabled || tmdbSettingLoading}
+                title={tmdbEnabled ? "Import from TMDB" : "TMDB imports are paused by an administrator"}
+                className="border-white/20 text-white hover:bg-white/10 hover:text-white disabled:opacity-50"
+                data-testid={`admin-import-${kind}-tmdb`}
+              >
+                <Download className="w-4 h-4 mr-2" /> Import from TMDB
+              </Button>
+            </div>
+          )}
+          <Button onClick={() => { setEditing(null); setMode("form"); }} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`admin-new-${kind}`}>
+            + New {label}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
+        {tmdbOpen && (kind === "movie" || kind === "series") && (
+          <div className="mb-5 rounded-md border border-white/10 bg-[#0d0f12] p-4" data-testid={`tmdb-import-panel-${kind}`}>
+            <form onSubmit={searchTMDB} className="flex gap-2">
+              <Input
+                value={tmdbQuery}
+                onChange={(event) => setTmdbQuery(event.target.value)}
+                placeholder={`Search TMDB for a ${label.toLowerCase()}...`}
+                className="bg-[#14181f] border-white/10 text-white"
+                aria-label={`Search TMDB for ${label.toLowerCase()}`}
+                data-testid={`tmdb-search-input-${kind}`}
+              />
+              <Button type="submit" disabled={tmdbSearching || !tmdbQuery.trim()} className="bg-amber-500 hover:bg-amber-600 text-black" data-testid={`tmdb-search-button-${kind}`}>
+                <Search className="w-4 h-4 mr-2" /> {tmdbSearching ? "Searching..." : "Search"}
+              </Button>
+            </form>
+            {tmdbResults.length > 0 && (
+              <div className="mt-4 divide-y divide-white/10">
+                {tmdbResults.map((result) => (
+                  <div key={result.tmdb_id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" data-testid={`tmdb-result-${kind}-${result.tmdb_id}`}>
+                    <div className="h-16 w-11 flex-shrink-0 overflow-hidden rounded bg-white/5">
+                      {result.poster_url && <img src={result.poster_url} alt="" className="h-full w-full object-cover" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-white">{result.title}</div>
+                      <div className="text-xs text-slate-400">{result.date || "Release date unknown"}</div>
+                      {result.overview && <p className="mt-1 line-clamp-2 text-xs text-slate-400">{result.overview}</p>}
+                    </div>
+                    <Button size="sm" onClick={() => importTMDB(result)} disabled={tmdbImporting !== null} className="flex-shrink-0 bg-amber-500 hover:bg-amber-600 text-black" data-testid={`tmdb-import-result-${kind}-${result.tmdb_id}`}>
+                      {tmdbImporting === result.tmdb_id ? "Importing..." : "Import"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!tmdbSearching && tmdbQuery.trim() && tmdbResults.length === 0 && <div className="mt-4 text-sm text-slate-400">No matches found.</div>}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {items.map((it) => (
             <div key={it.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-${kind}-row-${it.id}`}>
@@ -212,6 +409,7 @@ function UsersTab({ currentRole }) {
   const [customRoles, setCustomRoles] = useState([]);
   const [query, setQuery] = useState("");
   const [suspendTarget, setSuspendTarget] = useState(null);
+  const [profileTarget, setProfileTarget] = useState(null);
   const [duration, setDuration] = useState("7");       // preset dropdown value
   const [customAmount, setCustomAmount] = useState(""); // numeric input for Custom…
   const [customUnit, setCustomUnit] = useState("days"); // minutes | hours | days
@@ -292,6 +490,17 @@ function UsersTab({ currentRole }) {
     await api.post(`/moderation/users/${uid}/unsuspend`); toast.success("Unsuspended"); load();
   };
 
+  const restoreAccount = async (uid) => {
+    if (!window.confirm("Restore this account? The user will be able to sign in again.")) return;
+    try {
+      await api.post(`/moderation/users/${uid}/restore`);
+      toast.success("Account restored");
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not restore account");
+    }
+  };
+
   const setRole = async (uid, role) => {
     try { await api.patch(`/moderation/users/${uid}/role`, { role }); toast.success(`Role set to ${role}`); load(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
@@ -316,6 +525,14 @@ function UsersTab({ currentRole }) {
       toast.success(crids.length ? "Custom roles updated" : "Custom roles cleared");
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+  const saveUserProfile = async (uid, changes) => {
+    try {
+      await api.patch(`/moderation/users/${uid}/profile`, changes);
+      toast.success("User profile updated");
+      setProfileTarget(null);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to update profile"); }
   };
   const toggleCustomRole = (uid, u, crid) => {
     const current = (u.custom_role_ids && u.custom_role_ids.length) ? u.custom_role_ids : (u.custom_role ? [u.custom_role.id] : []);
@@ -354,10 +571,24 @@ function UsersTab({ currentRole }) {
                   {u.ip_count > 0 && (
                     <span className="text-[10px] text-slate-500 uppercase tracking-widest">{u.ip_count} IP{u.ip_count !== 1 && "s"}</span>
                   )}
+                  {u.is_deleted && <Badge className="bg-rose-500/15 text-rose-200 border-rose-500/40">Deleted{u.deleted_at ? ` ${u.deleted_at.slice(0, 10)}` : ""}</Badge>}
                   {isSuspended(u) && <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/40">Suspended{u.suspended_until === "permanent" ? " (permanent)" : ` until ${u.suspended_until?.slice(0,10)}`}</Badge>}
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {u.is_deleted ? (
+                  currentRole === "admin" && (
+                    <Button size="sm" variant="outline" onClick={() => restoreAccount(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`restore-account-${u.id}`}>
+                      <RotateCcw className="w-4 h-4 mr-1" /> Restore Account
+                    </Button>
+                  )
+                ) : (
+                  <>
+                {currentRole === "admin" && (
+                  <Button size="sm" variant="outline" onClick={() => setProfileTarget(u)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-user-profile-${u.id}`}>
+                    <Edit className="w-4 h-4 mr-1" /> Profile
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={() => toggleIps(u.id)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`ips-toggle-${u.id}`}>
                   <Network className="w-4 h-4 mr-1" /> IPs
                   {ipOpen[u.id] ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
@@ -401,6 +632,8 @@ function UsersTab({ currentRole }) {
                       <Ban className="w-4 h-4 mr-1" /> Suspend
                     </Button>
                   )
+                )}
+                  </>
                 )}
               </div>
             </div>
@@ -519,6 +752,11 @@ function UsersTab({ currentRole }) {
             </DialogContent>
           </Dialog>
         )}
+        <AdminUserProfileDialog
+          target={profileTarget}
+          onOpenChange={(open) => { if (!open) setProfileTarget(null); }}
+          onSave={saveUserProfile}
+        />
       </CardContent>
       <MessageUserDialog
         open={!!messageTarget}
@@ -527,6 +765,71 @@ function UsersTab({ currentRole }) {
         onSent={() => { setMessageTarget(null); load(); }}
       />
     </Card>
+  );
+}
+
+function AdminUserProfileDialog({ target, onOpenChange, onSave }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [bio, setBio] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!target) return;
+    setName(target.name || "");
+    setEmail(target.email || "");
+    setBio(target.bio || "");
+    setAvatarUrl(target.avatar_url || "");
+  }, [target]);
+
+  const save = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    await onSave(target.id, {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      bio,
+      avatar_url: avatarUrl,
+    });
+    setSaving(false);
+  };
+
+  return (
+    <Dialog open={!!target} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-[#14181f] border-white/10 text-white max-w-lg" data-testid="admin-edit-user-profile-dialog">
+        <DialogHeader>
+          <DialogTitle>Edit profile: {target?.name}</DialogTitle>
+          <DialogDescription className="text-slate-400">Changes apply to this user’s profile and existing forum/contributor activity.</DialogDescription>
+        </DialogHeader>
+        {target && (
+          <form onSubmit={save} className="space-y-4">
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-400">Profile picture</label>
+              <div className="mt-2"><ImageUpload value={avatarUrl} onChange={setAvatarUrl} shape="circle" testid="admin-user-avatar-upload" /></div>
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-400">Username</label>
+              <Input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={40} pattern="[A-Za-z0-9._-]{2,40}" required className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="admin-user-name-input" />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-400">Email</label>
+              <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={254} required className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="admin-user-email-input" />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-400">Bio</label>
+              <Textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={500} rows={4} className="mt-1 bg-[#0d0f12] border-white/10 text-white" data-testid="admin-user-bio-input" />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
+              <Button type="submit" disabled={saving || !target} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="admin-save-user-profile-btn">
+                {saving ? "Saving…" : "Save profile"}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

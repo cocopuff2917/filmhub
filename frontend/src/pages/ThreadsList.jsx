@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MessageSquare } from "lucide-react";
+import { Lock, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import ForumSidebar from "@/components/ForumSidebar";
 
@@ -73,110 +73,134 @@ export default function ThreadsList() {
   }, [filtered]);
 
   return (
-    <div className="flex flex-col lg:flex-row bg-[#0a0d14] min-h-[calc(100vh-64px)]" data-testid="threads-list-page">
-      <ForumSidebar activeCategory={category} onNewDiscussion={() => setCreateOpen(true)} />
-
-      <main className="flex-1 min-w-0 px-4 sm:px-8 py-8">
-        <h1 className="font-heading text-3xl text-white font-bold mb-6" data-testid="threads-heading">CineVerse Forum</h1>
-
-        {/* Search row */}
-        <div className="flex flex-col sm:flex-row items-stretch gap-2 mb-6">
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search the forums..."
-            className="flex-1 bg-[#0d1220] border-white/10 text-white placeholder:text-slate-500"
-            data-testid="forum-search-input"
-          />
-          <Select value={category} onValueChange={(v) => setParam("category", v)}>
-            <SelectTrigger className="w-full sm:w-40 bg-[#0d1220] border-white/10 text-white" data-testid="forum-category-filter">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent className="bg-[#14181f] text-white border-white/10">
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="support">Support</SelectItem>
-              <SelectItem value="general">General</SelectItem>
-              <SelectItem value="report">Reports</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={status} onValueChange={(v) => setParam("status", v)}>
-            <SelectTrigger className="w-full sm:w-36 bg-[#0d1220] border-white/10 text-white" data-testid="forum-status-filter">
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent className="bg-[#14181f] text-white border-white/10">
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            onClick={load}
-            className="bg-white/10 hover:bg-white/15 text-white border border-white/10"
-            data-testid="forum-search-btn"
-          >
-            Search
-          </Button>
-        </div>
-
-        {loading ? (
-          <div className="text-slate-500 text-sm">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-white/10 bg-[#0d1220]/50 py-16 text-center text-slate-500 text-sm">
-            No threads yet. Start the conversation!
+    <div className="min-h-[calc(100vh-64px)] bg-[#0a0d14] text-white" data-testid="threads-list-page">
+      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_20%),linear-gradient(120deg,#0a0d14_0%,#10151d_45%,#0a0d14_100%)]">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-amber-300 font-semibold">
+            <MessageSquare className="w-4 h-4" /> community
           </div>
-        ) : (
-          grouped.map(([cat, rows]) => (
-            <section key={cat} className="rounded-lg overflow-hidden border border-white/5 mb-8" data-testid={`forum-section-${cat}`}>
-              <div className="px-5 py-3 bg-white/[0.04] border-b border-white/5">
-                <span className="text-sm text-slate-400">Support</span>
-                <span className="mx-2 text-slate-500">›</span>
-                <span className="text-sm font-semibold text-white">{catLabel[cat] || "General"}</span>
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="font-display text-4xl tracking-[0.14em] text-white md:text-5xl" data-testid="threads-heading">FORUM</h1>
+              <p className="mt-2 max-w-xl text-sm text-slate-300">Discuss favorites, flag issues, and keep the CineVerse conversation moving.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="rounded-full border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-amber-200 transition hover:bg-amber-500/15"
+            >
+              start a thread
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:flex-row lg:px-8">
+        <ForumSidebar activeCategory={category} onNewDiscussion={() => setCreateOpen(true)} />
+
+        <main className="flex-1 min-w-0">
+          <div className="rounded-2xl border border-white/10 bg-[#10151d]/80 p-4 shadow-[0_18px_40px_rgba(0,0,0,0.15)]">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search the forums..."
+                className="flex-1 bg-[#0d1220] border-white/10 text-white placeholder:text-slate-500"
+                data-testid="forum-search-input"
+              />
+              <Select value={category} onValueChange={(v) => setParam("category", v)}>
+                <SelectTrigger className="w-full sm:w-40 bg-[#0d1220] border-white/10 text-white" data-testid="forum-category-filter">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#14181f] text-white border-white/10">
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="support">Support</SelectItem>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="report">Reports</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={status} onValueChange={(v) => setParam("status", v)}>
+                <SelectTrigger className="w-full sm:w-36 bg-[#0d1220] border-white/10 text-white" data-testid="forum-status-filter">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#14181f] text-white border-white/10">
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={load}
+                className="bg-amber-500 hover:bg-amber-600 text-black font-semibold border border-amber-500"
+                data-testid="forum-search-btn"
+              >
+                Search
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-6">
+            {loading ? (
+              <div className="rounded-2xl border border-white/10 bg-[#10151d]/70 px-6 py-12 text-center text-slate-400 text-sm">Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/10 bg-[#10151d]/60 py-16 text-center text-slate-500 text-sm">
+                No threads yet. Start the conversation!
               </div>
-              <ul className="divide-y divide-white/5 bg-[#0d1220]/40">
-                {rows.map((t) => (
-                  <li key={t.id}>
-                    <Link
-                      to={`/threads/${t.id}`}
-                      className="flex items-start gap-4 px-5 py-4 hover:bg-white/[0.03] transition"
-                      data-testid={`thread-row-${t.id}`}
-                    >
-                      <div className="w-10 h-10 rounded-full overflow-hidden bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400 flex-shrink-0">
-                        {t.user_avatar ? (
-                          <img src={fileUrl(t.user_avatar)} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          (t.user_name?.[0] || "?")
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-white truncate">{t.title}</div>
-                        <div className="mt-0.5 text-xs text-slate-500">
-                          <span className="text-slate-400">{t.user_name}</span> replied
-                          <span className="mx-1">·</span>
-                          <span className="underline decoration-dotted">{timeAgo(t.last_activity_at || t.created_at)}</span>
-                        </div>
-                        {t.body && (
-                          <p className="mt-2 text-sm text-slate-400 line-clamp-1">{t.body}</p>
-                        )}
-                        <div className="mt-2 flex items-center gap-3 text-xs">
-                          {t.status === "closed" ? (
-                            <span className="uppercase font-bold text-slate-500 line-through" data-testid={`thread-status-${t.id}`}>Closed</span>
-                          ) : (
-                            <span className="uppercase font-bold text-emerald-400" data-testid={`thread-status-${t.id}`}>Open</span>
-                          )}
-                          <span className="text-slate-600">·</span>
-                          <span className="inline-flex items-center gap-1 text-slate-500">
-                            <MessageSquare className="w-3.5 h-3.5" /> {t.message_count || 0}
-                          </span>
-                        </div>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))
-        )}
-      </main>
+            ) : (
+              grouped.map(([cat, rows]) => (
+                <section key={cat} className="overflow-hidden rounded-2xl border border-white/10 bg-[#10151d]/80 shadow-[0_18px_40px_rgba(0,0,0,0.15)]" data-testid={`forum-section-${cat}`}>
+                  <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.03] px-5 py-3">
+                    <div className="text-sm uppercase tracking-[0.18em] text-slate-400">{catLabel[cat] || "General"}</div>
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-amber-300">{rows.length} threads</span>
+                  </div>
+                  <ul className="divide-y divide-white/5">
+                    {rows.map((t) => (
+                      <li key={t.id}>
+                        <Link
+                          to={`/threads/${t.id}`}
+                          className="flex items-start gap-4 px-5 py-4 transition hover:bg-white/[0.03]"
+                          data-testid={`thread-row-${t.id}`}
+                        >
+                          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-[#1e2430] text-xs text-slate-300">
+                            {t.user_avatar ? (
+                              <img src={fileUrl(t.user_avatar)} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              (t.user_name?.[0] || "?")
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-semibold text-white">{t.title}</div>
+                            <div className="mt-0.5 text-xs text-slate-500">
+                              <span className="text-slate-400">{t.user_name}</span>
+                              <span className="mx-1">·</span>
+                              <span className="underline decoration-dotted">{timeAgo(t.last_activity_at || t.created_at)}</span>
+                              {t.is_private && <span className="ml-2 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-300"><Lock className="w-3 h-3" /> Private</span>}
+                            </div>
+                            {t.body && (
+                              <p className="mt-2 line-clamp-1 text-sm text-slate-400">{t.body}</p>
+                            )}
+                            <div className="mt-2 flex items-center gap-3 text-xs">
+                              {t.status === "closed" ? (
+                                <span className="uppercase font-bold text-slate-500 line-through" data-testid={`thread-status-${t.id}`}>Closed</span>
+                              ) : (
+                                <span className="uppercase font-bold text-emerald-400" data-testid={`thread-status-${t.id}`}>Open</span>
+                              )}
+                              <span className="text-slate-600">·</span>
+                              <span className="inline-flex items-center gap-1 text-slate-500">
+                                <MessageSquare className="w-3.5 h-3.5" /> {t.message_count || 0}
+                              </span>
+                            </div>
+                          </div>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))
+            )}
+          </div>
+        </main>
+      </div>
 
       <NewThreadDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={(t) => navigate(`/threads/${t.id}`)} />
     </div>

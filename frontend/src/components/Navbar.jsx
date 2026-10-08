@@ -30,14 +30,14 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/5 glass" data-testid="app-header">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0d12]/80 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.18)]" data-testid="app-header">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-6 h-16">
           <Link to={user && user.is_suspended ? "/inbox" : "/"} className="flex items-center gap-2 flex-shrink-0" data-testid="nav-logo">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.4)]">
+            <div className="brand-mark w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 flex items-center justify-center">
               <Film className="w-5 h-5 text-black" strokeWidth={2.5} />
             </div>
-            <div className="font-display text-2xl tracking-widest text-white">CINE<span className="text-amber-400">VERSE</span></div>
+            <div className="font-display text-xl sm:text-2xl text-white"><span className="brand-word">CINE</span><span className="text-amber-400">VERSE</span></div>
           </Link>
 
           {!(user && user.is_suspended) && (
@@ -46,6 +46,7 @@ export default function Navbar() {
               <NavLink to="/browse" className={linkClass} data-testid="nav-browse">Browse</NavLink>
               <NavLink to="/browse?tab=series" className={linkClass} data-testid="nav-series">TV Series</NavLink>
               <NavLink to="/threads" className={linkClass} data-testid="nav-threads">Forum</NavLink>
+              <NavLink to="/contributor-guidelines" className={linkClass} data-testid="nav-guidelines">Guidelines</NavLink>
               {user && <NavLink to="/watchlist" className={linkClass} data-testid="nav-watchlist">Watchlist</NavLink>}
               {user && (["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || (user.permissions || []).some((p) => ["user.suspend","content.lock_cast","content.protect_fields","moderation.messages.read_reply","content.delete","content.lock","user.view_ips","thread.moderate","comment.moderate"].includes(p))) && (
                 <NavLink to="/admin" className={linkClass} data-testid="nav-admin">{user.role === "admin" || user.effective_role === "admin" ? "Admin" : "Mod"}</NavLink>

@@ -3,11 +3,15 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/sonner";
 
 const Home = lazy(() => import("@/pages/Home"));
 const MovieDetail = lazy(() => import("@/pages/MovieDetail"));
 const SeriesDetail = lazy(() => import("@/pages/SeriesDetail"));
+const NetworkDetail = lazy(() => import("@/pages/NetworkDetail"));
+const KeywordDetail = lazy(() => import("@/pages/KeywordDetail"));
+const Credits = lazy(() => import("@/pages/Credits"));
 const ActorDetail = lazy(() => import("@/pages/ActorDetail"));
 const UserProfile = lazy(() => import("@/pages/UserProfile"));
 const ThreadsList = lazy(() => import("@/pages/ThreadsList"));
@@ -23,11 +27,13 @@ const MovieEdit = lazy(() => import("@/pages/MovieEdit"));
 const SeriesEdit = lazy(() => import("@/pages/SeriesEdit"));
 const Inbox = lazy(() => import("@/pages/Inbox"));
 const CollectionDetail = lazy(() => import("@/pages/CollectionDetail"));
+const ContributorGuidelines = lazy(() => import("@/pages/ContributorGuidelines"));
 
 // Suspended users are restricted to /inbox, direct thread views, notifications, and auth.
 const SUSPENDED_ALLOW = [
   /^\/inbox$/,
   /^\/threads\/[^/]+$/,
+  /^\/user\/[^/]+$/,
   /^\/login$/,
   /^\/register$/,
   /^\/forgot-password$/,
@@ -49,28 +55,35 @@ function SuspendedGuard({ children }) {
 function AppRoutes() {
   return (
     <SuspendedGuard>
-      <Suspense fallback={<main className="max-w-7xl mx-auto px-4 py-20 text-slate-500">Loading...</main>}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/browse" element={<Browse />} />
-          <Route path="/movie/:id" element={<MovieDetail />} />
-          <Route path="/movie/:id/edit" element={<MovieEdit />} />
-          <Route path="/series/:id" element={<SeriesDetail />} />
-          <Route path="/series/:id/edit" element={<SeriesEdit />} />
-          <Route path="/actor/:id" element={<ActorDetail />} />
-          <Route path="/collection/:id" element={<CollectionDetail />} />
-          <Route path="/user/:id" element={<UserProfile />} />
-          <Route path="/threads" element={<ThreadsList />} />
-          <Route path="/threads/:id" element={<ThreadDetail />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/watchlist" element={<Watchlist />} />
-          <Route path="/admin" element={<Admin />} />
-        </Routes>
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense fallback={<main className="max-w-7xl mx-auto px-4 py-20 text-slate-500">Loading...</main>}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/browse" element={<Browse />} />
+            <Route path="/movie/:id" element={<MovieDetail />} />
+            <Route path="/movie/:id/credits" element={<Credits kind="movie" />} />
+            <Route path="/movie/:id/edit" element={<MovieEdit />} />
+            <Route path="/series/:id" element={<SeriesDetail />} />
+            <Route path="/network/:network" element={<NetworkDetail />} />
+            <Route path="/keyword/:keyword" element={<KeywordDetail />} />
+            <Route path="/series/:id/credits" element={<Credits kind="series" />} />
+            <Route path="/series/:id/edit" element={<SeriesEdit />} />
+            <Route path="/actor/:id" element={<ActorDetail />} />
+            <Route path="/collection/:id" element={<CollectionDetail />} />
+            <Route path="/contributor-guidelines" element={<ContributorGuidelines />} />
+            <Route path="/user/:id" element={<UserProfile />} />
+            <Route path="/threads" element={<ThreadsList />} />
+            <Route path="/threads/:id" element={<ThreadDetail />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/admin" element={<Admin />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     </SuspendedGuard>
   );
 }
@@ -78,7 +91,7 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <div className="App">
+      <div className="App app-shell">
         <BrowserRouter>
           <Navbar />
           <AppRoutes />

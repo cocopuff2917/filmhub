@@ -1,5 +1,6 @@
 """Tests for new moderator/admin panel endpoints: stats, suspensions, edits filters."""
 import os
+import uuid
 import pytest
 import requests
 
@@ -112,3 +113,72 @@ class TestRegressionSmoke:
         r = admin_session.get(f"{BASE_URL}/api/threads?category=report&status=open", timeout=15)
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+
+
+def test_tmdb_imports_can_be_paused_and_only_admin_can_enable(admin_session):
+    api = f"{BASE_URL}/api"
+    setting_path = f"{api}/moderation/tmdb/settings"
+    previous = admin_session.get(setting_path, timeout=15)
+    assert previous.status_code == 200, previous.text
+    previous_enabled = previous.json()["enabled"]
+
+    email = f"tmdb_toggle_{uuid.uuid4().hex[:12]}@test.com"
+    password = "Test@1234"
+    registered = requests.post(
+        f"{api}/auth/register",
+        json={"email": email, "password": password, "name": f"Tmdb_{uuid.uuid4().hex[:8]}"},
+        timeout=15,
+    )
+    assert registered.status_code == 200, registered.text
+    user_id = registered.json()["id"]
+    promoted = admin_session.patch(f"{api}/moderation/users/{user_id}/role", json={"role": "moderator"}, timeout=15)
+    assert promoted.status_code == 200, promoted.text
+
+    moderator = requests.Session()
+    logged_in = moderator.post(f"{api}/auth/login", json={"email": email, "password": password}, timeout=15)
+    assert logged_in.status_code == 200, logged_in.text
+
+    try:
+        paused = admin_session.put(setting_path, json={"enabled": False}, timeout=15)
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["enabled"] is False
+
+        assert moderator.get(setting_path, timeout=15).json()["enabled"] is False
+        denied_toggle = moderator.put(setting_path, json={"enabled": True}, timeout=15)
+        assert denied_toggle.status_code == 403
+
+        denied_search = moderator.get(
+            f"{api}/moderation/tmdb/search", params={"kind": "movie", "q": "Example"}, timeout=15
+        )
+        assert denied_search.status_code == 403
+        denied_import = moderator.post(
+            f"{api}/moderation/tmdb/import", json={"kind": "movie", "tmdb_id": 1}, timeout=15
+        )
+        assert denied_import.status_code == 403
+    finally:
+        restored = admin_session.put(setting_path, json={"enabled": previous_enabled}, timeout=15)
+        assert restored.status_code == 200, restored.text
+        demoted = admin_session.patch(f"{api}/moderation/users/{user_id}/role", json={"role": "user"}, timeout=15)
+        assert demoted.status_code == 200, demoted.text
+
+
+def test_tmdb_cast_backfill_requires_admin():
+    response = requests.post(
+        f"{BASE_URL}/api/moderation/tmdb/backfill-cast",
+        json={"kind": "movie", "limit": 1},
+        timeout=15,
+    )
+    assert response.status_code in (401, 403)
+
+
+def test_tmdb_cast_backfill_validates_kind_and_batch_limit(admin_session):
+    endpoint = f"{BASE_URL}/api/moderation/tmdb/backfill-cast"
+    invalid_kind = admin_session.post(endpoint, json={"kind": "actor", "limit": 1}, timeout=15)
+    assert invalid_kind.status_code == 400, invalid_kind.text
+    invalid_limit = admin_session.post(endpoint, json={"kind": "movie", "limit": 26}, timeout=15)
+    assert invalid_limit.status_code == 422, invalid_limit.text
+
+
+def test_tmdb_cast_cron_requires_shared_secret():
+    response = requests.post(f"{BASE_URL}/api/cron/tmdb-cast-backfill", timeout=15)
+    assert response.status_code == 401, response.text

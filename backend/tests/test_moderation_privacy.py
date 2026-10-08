@@ -224,6 +224,43 @@ def test_suspended_user_cannot_post_on_public_thread(sus_session_and_ids, admin_
     assert r.status_code == 403, f"expected 403 on public thread, got {r.status_code}: {r.text}"
 
 
+def test_thread_message_can_only_be_edited_by_author(admin_session):
+    owner = _session()
+    owner_email = f"message_owner_{uuid.uuid4().hex[:8]}@test.com"
+    password = "Test@1234"
+    registered = _register(owner, owner_email, password, "Message Owner")
+    assert registered.status_code == 200, registered.text
+
+    outsider = _session()
+    outsider_email = f"message_outsider_{uuid.uuid4().hex[:8]}@test.com"
+    outsider_registered = _register(outsider, outsider_email, password, "Message Outsider")
+    assert outsider_registered.status_code == 200, outsider_registered.text
+
+    thread_response = owner.post(f"{API}/threads", json={
+        "title": "Editable message test",
+        "body": "Thread for message edit authorization.",
+        "category": "general",
+    }, timeout=15)
+    assert thread_response.status_code == 200, thread_response.text
+    thread_id = thread_response.json()["id"]
+
+    message_response = owner.post(f"{API}/threads/{thread_id}/messages", json={"text": "Original text"}, timeout=15)
+    assert message_response.status_code == 200, message_response.text
+    message_id = message_response.json()["id"]
+    endpoint = f"{API}/threads/{thread_id}/messages/{message_id}"
+
+    denied = outsider.patch(endpoint, json={"text": "Unauthorized edit"}, timeout=15)
+    assert denied.status_code == 403
+
+    edited = owner.patch(endpoint, json={"text": "Updated text"}, timeout=15)
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["text"] == "Updated text"
+
+    fetched = owner.get(f"{API}/threads/{thread_id}", timeout=15)
+    assert fetched.status_code == 200
+    assert any(message["id"] == message_id and message["text"] == "Updated text" for message in fetched.json()["messages"])
+
+
 # ---------- Regression ----------
 
 def test_regression_admin_login_me():

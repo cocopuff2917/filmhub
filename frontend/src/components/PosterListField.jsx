@@ -2,6 +2,7 @@ import { useState } from "react";
 import { fileUrl, uploadImage } from "@/lib/api";
 import { Loader2, Star, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
+import ImageWithFallback from "@/components/ImageWithFallback";
 
 /**
  * Mini-gallery of poster/backdrop URLs with "Make primary", "Delete" (mod-only),
@@ -68,12 +69,13 @@ export default function PosterListField({ urls = [], primary = "", aspect = "2/3
               className="group relative rounded-lg overflow-hidden border border-white/10 bg-black"
               data-testid={`${testIdPrefix}-tile-${idx}`}
             >
-              <img
+              <ImageWithFallback
                 src={fileUrl(url)}
                 alt=""
                 className="w-full object-cover"
                 style={{ aspectRatio: aspect }}
                 loading="lazy"
+                fallback={<div className="flex w-full items-center justify-center text-xs text-slate-500" style={{ aspectRatio: aspect }}>Preview unavailable</div>}
               />
               {url === primary && (
                 <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider" data-testid={`${testIdPrefix}-primary-${idx}`}>

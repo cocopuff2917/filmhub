@@ -9,5 +9,5 @@ Disallow: /inbox
 Disallow: /reset-password
 Disallow: /forgot-password
 
-# Sitemap (dynamically generated from the catalog)
-Sitemap: /api/sitemap.xml
+# Sitemap is generated from the active catalog by the backend.
+Sitemap: https://filmhub-918.emergent.host/api/sitemap.xml

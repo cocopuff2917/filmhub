@@ -8,15 +8,20 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
+import { useAuth } from "@/context/AuthContext";
 
 const STATUSES = ["Released", "In Production", "Post Production", "Rumored", "Canceled"];
 const CREW_ROLES = ["Director", "Writer", "Producer", "Cinematographer", "Composer", "Editor"];
 
 export default function MovieForm({ movie, onSaved, onCancel }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const canEditImdb = ["admin", "moderator"].includes(user?.effective_role || user?.role);
   const [actors, setActors] = useState([]);
   const empty = {
-    title: "", release_date: "", genres: "", synopsis: "", tagline: "",
+    title: "", imdb_id: "", release_date: "", genres: "", synopsis: "", tagline: "",
     poster_url: "", backdrop_url: "", trailer_url: "", video_urls: "",
     runtime: "", is_trending: false, cast: [], crew: [], gallery: [],
     keywords: "", status: "Released", original_language: "English",
@@ -32,6 +37,7 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
     if (movie) {
       setForm({
         title: movie.title || "",
+        imdb_id: movie.imdb_id || "",
         release_date: movie.release_date || "",
         genres: (movie.genres || []).join(", "),
         synopsis: movie.synopsis || "",
@@ -63,6 +69,7 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
     e.preventDefault();
     const payload = {
       ...form,
+      ...(canEditImdb && !movie?.id ? { imdb_id: form.imdb_id || null } : {}),
       genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
       keywords: form.keywords.split(",").map((g) => g.trim()).filter(Boolean),
       video_urls: form.video_urls.split("\n").map((u) => u.trim()).filter(Boolean),
@@ -74,6 +81,7 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
       cast: form.cast.filter((c) => c.actor_id && c.character_name),
       crew: form.crew.filter((c) => c.name && c.role),
     };
+    if (movie?.id || !canEditImdb) delete payload.imdb_id;
     try {
       let result;
       if (movie?.id) {
@@ -85,7 +93,14 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
       }
       onSaved && onSaved(result);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to save");
+      const detail = e.response?.data?.detail;
+      if (detail && typeof detail === "object") {
+        toast.error(detail.message || "This IMDb ID already exists", {
+          action: detail.url ? { label: "Edit existing", onClick: () => navigate(detail.url) } : undefined,
+        });
+      } else {
+        toast.error(detail || "Failed to save");
+      }
     }
   };
 
@@ -103,6 +118,10 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
         <Label className="text-slate-300">Title</Label>
         <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-title-input" />
       </div>
+      {!movie?.id && canEditImdb && <div>
+        <Label className="text-slate-300">IMDb ID</Label>
+        <Input required pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-imdb-input" />
+      </div>}
       <div>
         <Label className="text-slate-300">Tagline</Label>
         <Input value={form.tagline} onChange={(e) => setForm({ ...form, tagline: e.target.value })} placeholder="They're back with a twist!" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-tagline-input" />

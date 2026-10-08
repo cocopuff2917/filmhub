@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export default function ImageWithFallback({ src, fallbackSrc, alt = "", className, fallback, ...imageProps }) {
+export default function ImageWithFallback({ src, fallbackSrc, alt = "", className, fallback, referrerPolicy = "no-referrer", loading = "lazy", decoding = "async", ...imageProps }) {
   const [failedSources, setFailedSources] = useState([]);
   const displaySrc = failedSources.includes(src) && fallbackSrc ? fallbackSrc : src;
 
@@ -12,6 +12,9 @@ export default function ImageWithFallback({ src, fallbackSrc, alt = "", classNam
       src={displaySrc}
       alt={alt}
       className={className}
+      referrerPolicy={referrerPolicy}
+      loading={loading}
+      decoding={decoding}
       onError={() => setFailedSources((sources) => sources.includes(displaySrc) ? sources : [...sources, displaySrc])}
     />
   );

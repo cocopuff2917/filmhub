@@ -12,6 +12,7 @@ Spec being tested:
   original episode_count (total episodes) wins.
 """
 import os
+import uuid
 import pytest
 import requests
 
@@ -107,6 +108,7 @@ def test_series_get_includes_collection_ids(admin_session, created_ids):
     lead = _make_actor(admin_session, created_ids, "Lead1")
     payload = {
         "title": "TEST_Series_CollectionIds",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [{"actor_id": lead, "character_name": "Lead"}],
         "seasons": [{"season_number": 1, "episodes": [{"episode_number": 1, "name": "P", "guest_stars": []}]}],
     }
@@ -133,6 +135,7 @@ def test_main_cast_entries_have_episode_count_equal_to_total(admin_session, crea
     }]
     r = admin_session.post(f"{API}/series", json={
         "title": "TEST_Series_MainCastCount",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [
             {"actor_id": a1, "character_name": "A"},
             {"actor_id": a2, "character_name": "B"},
@@ -162,6 +165,7 @@ def test_recurring_guest_promoted_at_threshold_6_episodes(admin_session, created
     eps = _episodes(6, [[(guest, "Buddy")] for _ in range(6)])
     r = admin_session.post(f"{API}/series", json={
         "title": "TEST_Series_RecurringPromo6",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [{"actor_id": lead, "character_name": "Lead"}],
         "seasons": [{"season_number": 1, "episodes": eps}],
     }, timeout=20)
@@ -192,6 +196,7 @@ def test_guest_below_threshold_not_promoted(admin_session, created_ids):
     eps = _episodes(4, [[(guest, "Pal")] for _ in range(4)])
     r = admin_session.post(f"{API}/series", json={
         "title": "TEST_Series_BelowThreshold4",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [{"actor_id": lead, "character_name": "Lead"}],
         "seasons": [{"season_number": 1, "episodes": eps}],
     }, timeout=20)
@@ -213,6 +218,7 @@ def test_actor_in_main_and_guest_not_duplicated(admin_session, created_ids):
     eps = _episodes(6, [[(lead, "AltName")] for _ in range(6)])
     r = admin_session.post(f"{API}/series", json={
         "title": "TEST_Series_NoDup",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [{"actor_id": lead, "character_name": "Lead"}],
         "seasons": [{"season_number": 1, "episodes": eps}],
     }, timeout=20)
@@ -255,6 +261,7 @@ def test_ordering_originals_then_recurring_sorted_desc(admin_session, created_id
 
     r = admin_session.post(f"{API}/series", json={
         "title": "TEST_Series_Ordering",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [
             {"actor_id": lead1, "character_name": "O1"},
             {"actor_id": lead2, "character_name": "O2"},
@@ -289,6 +296,7 @@ def test_collection_ids_create_regression(admin_session, created_ids):
     lead = _make_actor(admin_session, created_ids, "LeadF")
     r = admin_session.post(f"{API}/series", json={
         "title": "TEST_Series_WithColl",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
         "main_cast": [{"actor_id": lead, "character_name": "Lead"}],
         "seasons": [{"season_number": 1, "episodes": [{"episode_number": 1, "name": "e", "guest_stars": []}]}],
         "collection_ids": [cid],
@@ -299,3 +307,59 @@ def test_collection_ids_create_regression(admin_session, created_ids):
 
     data = admin_session.get(f"{API}/series/{sid}", timeout=15).json()
     assert cid in (data.get("collection_ids") or []), f"collection_ids: {data.get('collection_ids')}"
+
+
+def test_network_filter_and_related_series(admin_session, created_ids):
+    network = f"TEST Network {uuid.uuid4().hex}"
+    series_ids = {}
+    for key, title, show_network, air_date in [
+        ("base", "NetworkBase", network, "1980-01-01"),
+        ("same", "NetworkMatch", network, "2025-01-01"),
+        ("other", "NetworkOther", f"Other {network}", "2025-01-01"),
+    ]:
+        response = admin_session.post(f"{API}/series", json={
+            "title": f"TEST_{title}_{uuid.uuid4().hex}",
+            "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+            "network": show_network,
+            "first_air_date": air_date,
+        }, timeout=20)
+        assert response.status_code in (200, 201), response.text
+        series_ids[key] = response.json()["id"]
+        created_ids["series"].append(series_ids[key])
+
+    choices = admin_session.get(f"{API}/series/networks", timeout=15)
+    assert choices.status_code == 200, choices.text
+    assert network in choices.json()
+
+    filtered = admin_session.get(f"{API}/series", params={"network": network.swapcase()}, timeout=15)
+    assert filtered.status_code == 200, filtered.text
+    filtered_ids = {item["id"] for item in filtered.json()}
+    assert series_ids["base"] in filtered_ids
+    assert series_ids["same"] in filtered_ids
+    assert series_ids["other"] not in filtered_ids
+
+    related = admin_session.get(f"{API}/series/{series_ids['base']}/similar", timeout=15)
+    assert related.status_code == 200, related.text
+    related_ids = {item["id"] for item in related.json()}
+    assert series_ids["same"] in related_ids
+    assert series_ids["other"] not in related_ids
+
+
+def test_linked_movie_crew_appears_on_actor_profile(admin_session, created_ids):
+    actor_id = _make_actor(admin_session, created_ids, "MakeupArtist")
+    response = admin_session.post(f"{API}/movies", json={
+        "title": f"TEST_CrewCredit_{uuid.uuid4().hex}",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        "release_date": "2025-01-01",
+        "crew": [{"actor_id": actor_id, "name": "", "role": "Makeup Artist"}],
+    }, timeout=20)
+    assert response.status_code in (200, 201), response.text
+    movie_id = response.json()["id"]
+    created_ids["movies"].append(movie_id)
+
+    movie = admin_session.get(f"{API}/movies/{movie_id}", timeout=15).json()
+    assert movie["crew"][0]["actor"]["id"] == actor_id
+    assert movie["crew"][0]["role"] == "Makeup Artist"
+
+    actor = admin_session.get(f"{API}/actors/{actor_id}", timeout=15).json()
+    assert any(credit["id"] == movie_id and credit["role"] == "Makeup Artist" for credit in actor["crew_credits"])

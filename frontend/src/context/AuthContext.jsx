@@ -30,6 +30,22 @@ export function AuthProvider({ children }) {
       setUser(data);
       return { ok: true };
     } catch (e) {
+      const detail = e.response?.data?.detail;
+      return {
+        ok: false,
+        error: detail?.message || formatApiErrorDetail(detail) || e.message,
+        restoreRequired: detail?.code === "account_deleted",
+      };
+    }
+  };
+
+  const restoreDeletedAccount = async (identifier, password) => {
+    try {
+      await api.post("/auth/restore-deleted", { identifier, password });
+      const { data } = await api.get("/auth/me");
+      setUser(data);
+      return { ok: true };
+    } catch (e) {
       return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
     }
   };
@@ -51,7 +67,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, initializing, login, register, logout, refresh }}>
+    <AuthContext.Provider value={{ user, initializing, login, register, restoreDeletedAccount, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

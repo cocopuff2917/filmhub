@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import PosterListField from "@/components/PosterListField";
 import CastEditDialog from "@/components/CastEditDialog";
+import BulkCastAddDialog from "@/components/BulkCastAddDialog";
 import CollectionsPicker from "@/components/CollectionsPicker";
 
 const SECTIONS = [
@@ -34,7 +35,7 @@ function LockIcon({ locked, canToggle, onToggle }) {
   return (
     <Component type="button" onClick={canToggle ? onToggle : undefined}
       title={locked ? "Field locked" : canToggle ? "Click to lock" : "Field is unlocked"}
-      className={`float-right inline-flex items-center justify-center w-6 h-6 rounded-md transition ${locked ? "text-amber-600 hover:bg-amber-50" : "text-slate-300 hover:text-slate-500 hover:bg-slate-100"} ${canToggle ? "cursor-pointer" : "cursor-default"}`}
+      className={`float-right inline-flex items-center justify-center w-6 h-6 rounded-md transition ${locked ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"} ${canToggle ? "cursor-pointer" : "cursor-default"}`}
       data-testid={`lock-${locked ? "on" : "off"}`}>
       {locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
     </Component>
@@ -45,11 +46,11 @@ function Field({ name, label, locked, canToggleLocks, onToggleLock, disabled, ch
   return (
     <div className={`${disabled ? "opacity-70" : ""}`}>
       <div className="flex items-start justify-between mb-1.5">
-        <Label className="text-slate-900 font-semibold text-sm">{label}</Label>
+        <Label className="text-slate-200 font-semibold text-sm">{label}</Label>
         <LockIcon locked={locked} canToggle={canToggleLocks} onToggle={() => onToggleLock(name)} />
       </div>
       {children}
-      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
+      {hint && <div className="mt-1 text-xs text-slate-400">{hint}</div>}
     </div>
   );
 }
@@ -62,11 +63,11 @@ function ChipInput({ value = [], onChange, placeholder, disabled, testid }) {
     onChange([...value, v]); setText("");
   };
   return (
-    <div className={`rounded-md border border-slate-300 bg-white p-2 flex flex-wrap gap-1.5 min-h-[40px] ${disabled ? "bg-slate-100" : ""}`} data-testid={testid}>
+    <div className={`rounded-xl border border-white/10 bg-[#0f1318] p-2 flex flex-wrap gap-1.5 min-h-[40px] ${disabled ? "bg-[#111827]" : ""}`} data-testid={testid}>
       {value.map((v) => (
-        <span key={v} className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-700">
+        <span key={v} className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-100">
           {v}
-          {!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x !== v))} className="text-slate-400 hover:text-rose-500"><X className="w-3 h-3" /></button>}
+          {!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x !== v))} className="text-amber-200 transition hover:text-rose-300"><X className="w-3 h-3" /></button>}
         </span>
       ))}
       {!disabled && (
@@ -77,7 +78,7 @@ function ChipInput({ value = [], onChange, placeholder, disabled, testid }) {
           }}
           onBlur={add}
           placeholder={value.length === 0 ? placeholder : ""}
-          className="flex-1 min-w-[120px] outline-none text-sm bg-transparent" />
+          className="flex-1 min-w-[120px] bg-transparent text-sm text-white placeholder:text-slate-500 outline-none" />
       )}
     </div>
   );
@@ -89,6 +90,8 @@ export default function SeriesEdit() {
   const { user } = useAuth();
   const [series, setSeries] = useState(null);
   const [actors, setActors] = useState([]);
+  const [networkOptions, setNetworkOptions] = useState([]);
+  const [customNetwork, setCustomNetwork] = useState(false);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [autoStatus, setAutoStatus] = useState("idle");
@@ -96,6 +99,7 @@ export default function SeriesEdit() {
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
   const [castDialog, setCastDialog] = useState({ open: false, index: null });
+  const [bulkCastOpen, setBulkCastOpen] = useState(false);
   const [guestDialog, setGuestDialog] = useState({ open: false, sIdx: null, eIdx: null, gIdx: null });
   const [dragIdx, setDragIdx] = useState(null);
   const [openSeason, setOpenSeason] = useState(null);
@@ -111,17 +115,22 @@ export default function SeriesEdit() {
   useEffect(() => {
     (async () => {
       try {
-        const [s, a, st] = await Promise.all([
+        const [s, a, st, networkResponse] = await Promise.all([
           api.get(`/series/${id}`),
           api.get("/actors"),
           api.get(`/series/${id}/stats`).catch(() => ({ data: { content_score: 0 } })),
+          api.get("/series/networks").catch(() => ({ data: [] })),
         ]);
+        const availableNetworks = networkResponse.data || [];
         setSeries(s.data);
         setActors(a.data);
+        setNetworkOptions(availableNetworks);
+        setCustomNetwork(!!s.data.network && !availableNetworks.some((network) => network.toLowerCase() === s.data.network.toLowerCase()));
         setStats(st.data);
         setLocked(s.data.locked_fields || []);
         setForm({
           title: s.data.title || "",
+          imdb_id: s.data.imdb_id || "",
           first_air_date: s.data.first_air_date || "",
           last_air_date: s.data.last_air_date || "",
           synopsis: s.data.synopsis || "",
@@ -212,7 +221,7 @@ export default function SeriesEdit() {
     if (silent) setAutoStatus("saving");
     try {
       const payload = {};
-      const fields = ["title", "first_air_date", "last_air_date", "synopsis", "tagline", "status",
+      const fields = ["title", ...(isMod ? ["imdb_id"] : []), "first_air_date", "last_air_date", "synopsis", "tagline", "status",
         "type", "original_language", "network", "network_logo_url",
         "awards_wins", "awards_nominations", "poster_url", "poster_urls", "backdrop_url", "backdrop_urls", "trailer_url", "video_urls",
         "genres", "keywords", "main_cast", "creators", "gallery", "seasons"];
@@ -246,11 +255,14 @@ export default function SeriesEdit() {
       }
       setSeries(r.data);
       try { const st = await api.get(`/series/${id}/stats`); setStats(st.data); } catch {}
+      return true;
     } catch (e) {
       if (silent) setAutoStatus("error");
       toast.error(e.response?.data?.detail || "Save failed");
+      return false;
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   // Debounced auto-save
@@ -285,7 +297,10 @@ export default function SeriesEdit() {
   if (!user) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">Please <Link to="/login" className="text-sky-600">sign in</Link> to edit.</div>;
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const remCast = (i) => setForm((f) => ({ ...f, main_cast: f.main_cast.filter((_, x) => x !== i) }));
+  const remCast = async (i) => {
+    const nextForm = { ...form, main_cast: form.main_cast.filter((_, x) => x !== i) };
+    if (await save(nextForm, { silent: true })) setForm(nextForm);
+  };
   const openCastEdit = (i) => setCastDialog({ open: true, index: i });
   const reorderCast = (from, to) => {
     if (from === to || from == null || to == null) return;
@@ -311,6 +326,18 @@ export default function SeriesEdit() {
     const nextForm = { ...form, main_cast: nextCast };
     setForm(nextForm);
     save(nextForm);
+  };
+  const handleBulkCastSave = (rows) => {
+    const currentCast = form.main_cast || [];
+    const existingIds = new Set(currentCast.map((row) => row.actor_id));
+    if (rows.length > 10 || rows.some((row) => existingIds.has(row.actor_id))) {
+      toast.error(rows.length > 10 ? "You can add up to 10 cast members at a time." : "One or more selected actors are already in the main cast.");
+      return false;
+    }
+    const nextForm = { ...form, main_cast: [...currentCast, ...rows] };
+    setForm(nextForm);
+    save(nextForm);
+    return true;
   };
   const handleActorCreated = (a) => setActors((prev) => [...prev, { id: a.id, name: a.name, photo_url: a.photo_url || "" }]);
   const toggleMainCastLock = async (actorId) => {
@@ -398,8 +425,8 @@ export default function SeriesEdit() {
   const currentGuestValue = guestDialog.gIdx != null && form?.seasons?.[guestDialog.sIdx]?.episodes?.[guestDialog.eIdx]?.guest_stars?.[guestDialog.gIdx];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900" data-testid="series-edit-page">
-      <div className="bg-slate-900 text-white">
+    <div className="min-h-screen bg-[#0d0f12] text-white" data-testid="series-edit-page">
+      <div className="border-b border-white/10 bg-[#111827] text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
           <button onClick={() => navigate(`/series/${id}`)} className="flex items-center gap-2 text-slate-200 hover:text-white text-sm" data-testid="back-to-series">
             <ArrowLeft className="w-4 h-4" /> Back to {series.title}
@@ -419,7 +446,7 @@ export default function SeriesEdit() {
                 autoStatus === "pending" ? "Unsaved changes…" :
                 autoStatus === "error" ? "Save failed" : "\u00A0"}
             </span>
-            <Button onClick={() => save()} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white h-9 font-semibold" data-testid="top-save-btn">
+            <Button onClick={() => save()} disabled={saving} className="bg-amber-500 hover:bg-amber-600 text-black h-9 font-semibold" data-testid="top-save-btn">
               <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
             </Button>
           </div>
@@ -428,34 +455,39 @@ export default function SeriesEdit() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-8">
         <aside className="lg:sticky lg:top-4 lg:self-start space-y-4" data-testid="edit-sidebar">
-          <div className="rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm">
-            <div className="bg-cyan-500 text-white px-4 py-3 font-bold flex items-center justify-between">
-              <span>Edit</span>
-              <span className="text-xs bg-white/20 rounded-full w-5 h-5 flex items-center justify-center">?</span>
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#14181f]/80 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+            <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-3 text-sm font-bold text-black">
+              <span>CineVerse Editor</span>
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px]">?</span>
             </div>
             <nav className="py-2">
               {SECTIONS.map((s) => (
                 <button key={s.id} type="button" onClick={() => scrollTo(s.id)}
-                  className={`w-full text-left px-4 py-2 text-sm transition ${activeSection === s.id ? "text-cyan-600 font-semibold bg-cyan-50" : "text-slate-700 hover:bg-slate-50"}`}
+                  className={`w-full text-left px-4 py-2 text-sm transition ${activeSection === s.id ? "bg-amber-500/10 font-semibold text-amber-200" : "text-slate-300 hover:bg-white/5"}`}
                   data-testid={`section-link-${s.id}`}>{s.label}</button>
               ))}
             </nav>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 border-l-4 border-l-emerald-500">
-            <div className="text-3xl font-bold text-slate-900" data-testid="edit-content-score">{stats.content_score || 0}</div>
-            <div className="text-xs text-slate-500 mt-0.5">{scoreLabel}</div>
-            <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-              <div className="h-full bg-emerald-500" style={{ width: `${stats.content_score || 0}%` }} />
+          <div className="rounded-2xl border border-emerald-500/20 bg-[#14181f]/80 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
+            <div className="text-3xl font-bold text-white" data-testid="edit-content-score">{stats.content_score || 0}</div>
+            <div className="text-xs text-slate-400 mt-0.5">{scoreLabel}</div>
+            <div className="mt-3 h-1.5 rounded-full bg-white/5 overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400" style={{ width: `${stats.content_score || 0}%` }} />
             </div>
           </div>
-          <div className="text-xs text-slate-500 flex items-center gap-1 px-1">
-            <Keyboard className="w-3.5 h-3.5" /> Keyboard Shortcuts <span className="ml-auto text-slate-400">Ctrl+S</span>
+          <div className="text-xs text-slate-400 flex items-center gap-1 px-1">
+            <Keyboard className="w-3.5 h-3.5" /> Keyboard shortcuts <span className="ml-auto text-slate-500">Ctrl+S</span>
           </div>
         </aside>
 
         <div className="space-y-8 min-w-0">
           {/* Primary Facts */}
-          <section id="primary-facts" ref={(el) => (sectionRefs.current["primary-facts"] = el)} className="space-y-5">
+          <section id="primary-facts" ref={(el) => (sectionRefs.current["primary-facts"] = el)} className="space-y-5 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+            <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-amber-400">Primary facts</div>
+            <div>
+              <Label className="text-slate-200 font-semibold text-sm">IMDb ID</Label>
+              <Input value={form.imdb_id} onChange={(e) => setField("imdb_id", e.target.value.trim())} disabled={!isMod} required={isMod} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" placeholder="tt1234567" className="mt-1.5 bg-white border-slate-300 text-slate-900 disabled:opacity-70" data-testid="field-imdb-id" />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="original_language" label="Original Language" locked={isFieldLocked("original_language")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("original_language")}>
                 <Input value={form.original_language} onChange={(e) => setField("original_language", e.target.value)} disabled={!canEditField("original_language")} className="bg-white border-slate-300 text-slate-900" data-testid="field-original-language" />
@@ -493,7 +525,29 @@ export default function SeriesEdit() {
                 </Select>
               </Field>
               <Field name="network" label="Network" locked={isFieldLocked("network")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("network")}>
-                <Input value={form.network} onChange={(e) => setField("network", e.target.value)} disabled={!canEditField("network")} placeholder="Netflix" className="bg-white border-slate-300 text-slate-900" data-testid="field-network" />
+                <Select
+                  value={customNetwork ? "__custom__" : (networkOptions.find((network) => network.toLowerCase() === form.network.toLowerCase()) || (form.network ? "__custom__" : "__none__"))}
+                  onValueChange={(value) => {
+                    if (value === "__custom__") {
+                      if (!customNetwork) setField("network", "");
+                      setCustomNetwork(true);
+                    } else {
+                      setCustomNetwork(false);
+                      setField("network", value === "__none__" ? "" : value);
+                    }
+                  }}
+                  disabled={!canEditField("network")}
+                >
+                  <SelectTrigger className="bg-white border-slate-300 text-slate-900" data-testid="field-network"><SelectValue placeholder="Select a network" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No network</SelectItem>
+                    {networkOptions.map((network) => <SelectItem key={network} value={network}>{network}</SelectItem>)}
+                    <SelectItem value="__custom__">Add another network...</SelectItem>
+                  </SelectContent>
+                </Select>
+                {customNetwork && (
+                  <Input value={form.network} onChange={(e) => setField("network", e.target.value)} disabled={!canEditField("network")} placeholder="Enter a network name" className="mt-2 bg-white border-slate-300 text-slate-900" data-testid="field-network-custom" />
+                )}
               </Field>
             </div>
 
@@ -512,9 +566,9 @@ export default function SeriesEdit() {
           </section>
 
           {/* Main Cast */}
-          <section id="cast" ref={(el) => (sectionRefs.current["cast"] = el)} className="space-y-3">
+          <section id="cast" ref={(el) => (sectionRefs.current["cast"] = el)} className="space-y-3 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-slate-900">Main Cast</h2>
+              <h2 className="font-heading text-xl font-bold text-white">Main Cast</h2>
               <LockIcon locked={isFieldLocked("main_cast")} canToggle={isMod} onToggle={() => toggleLock("main_cast")} />
             </div>
             {(series?.locked_cast_actor_ids || []).length > 0 && (
@@ -559,7 +613,7 @@ export default function SeriesEdit() {
                     )}
                     <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!rowEditable} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
                     {!(rowLocked && !canLockCast) && (
-                      <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!rowEditable} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={saving || !rowEditable} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
                     )}
                   </div>
                 );
@@ -569,12 +623,15 @@ export default function SeriesEdit() {
             <Button type="button" variant="outline" onClick={() => setCastDialog({ open: true, index: null })} disabled={!canEditField("main_cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="add-cast-btn">
               <Plus className="w-4 h-4 mr-1" /> Add cast
             </Button>
+            {isMod && <Button type="button" variant="outline" onClick={() => setBulkCastOpen(true)} disabled={!canEditField("main_cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="bulk-add-cast-btn">
+              <Plus className="w-4 h-4 mr-1" /> Add multiple
+            </Button>}
           </section>
 
           {/* Creators */}
-          <section id="creators" ref={(el) => (sectionRefs.current["creators"] = el)} className="space-y-3">
+          <section id="creators" ref={(el) => (sectionRefs.current["creators"] = el)} className="space-y-3 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-slate-900">Creators</h2>
+              <h2 className="font-heading text-xl font-bold text-white">Creators</h2>
               <LockIcon locked={isFieldLocked("creators")} canToggle={isMod} onToggle={() => toggleLock("creators")} />
             </div>
             <div className="space-y-2">
@@ -593,25 +650,25 @@ export default function SeriesEdit() {
           </section>
 
           {/* Genres */}
-          <section id="genres" ref={(el) => (sectionRefs.current["genres"] = el)}>
+          <section id="genres" ref={(el) => (sectionRefs.current["genres"] = el)} className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <Field name="genres" label="Genres" locked={isFieldLocked("genres")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("genres")} hint="Press Enter or comma to add a tag">
               <ChipInput value={form.genres} onChange={(v) => setField("genres", v)} placeholder="Drama, Sci-Fi…" disabled={!canEditField("genres")} testid="field-genres" />
             </Field>
           </section>
           {/* Keywords */}
-          <section id="keywords" ref={(el) => (sectionRefs.current["keywords"] = el)}>
+          <section id="keywords" ref={(el) => (sectionRefs.current["keywords"] = el)} className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <Field name="keywords" label="Keywords" locked={isFieldLocked("keywords")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("keywords")} hint="Short descriptive tags">
               <ChipInput value={form.keywords} onChange={(v) => setField("keywords", v)} placeholder="1980s, supernatural…" disabled={!canEditField("keywords")} testid="field-keywords" />
             </Field>
           </section>
           {/* Taglines */}
-          <section id="taglines" ref={(el) => (sectionRefs.current["taglines"] = el)}>
+          <section id="taglines" ref={(el) => (sectionRefs.current["taglines"] = el)} className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <Field name="tagline" label="Tagline" locked={isFieldLocked("tagline")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("tagline")}>
               <Input value={form.tagline} onChange={(e) => setField("tagline", e.target.value)} disabled={!canEditField("tagline")} className="bg-white border-slate-300 text-slate-900" data-testid="field-tagline" />
             </Field>
           </section>
           {/* Videos */}
-          <section id="videos" ref={(el) => (sectionRefs.current["videos"] = el)} className="space-y-5">
+          <section id="videos" ref={(el) => (sectionRefs.current["videos"] = el)} className="space-y-5 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <Field name="trailer_url" label="Trailer URL" locked={isFieldLocked("trailer_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("trailer_url")}>
               <Input value={form.trailer_url} onChange={(e) => setField("trailer_url", e.target.value)} disabled={!canEditField("trailer_url")} className="bg-white border-slate-300 text-slate-900" data-testid="field-trailer" />
             </Field>
@@ -620,7 +677,7 @@ export default function SeriesEdit() {
             </Field>
           </section>
           {/* Images */}
-          <section id="images" ref={(el) => (sectionRefs.current["images"] = el)} className="space-y-5">
+          <section id="images" ref={(el) => (sectionRefs.current["images"] = el)} className="space-y-5 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="poster_url" label={`Posters (${(form.poster_urls || []).length})`} locked={isFieldLocked("poster_url")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("poster_url")}>
                 <PosterListField
@@ -782,6 +839,14 @@ export default function SeriesEdit() {
         onSave={handleCastSave}
         onActorCreated={handleActorCreated}
       />
+      {isMod && <BulkCastAddDialog
+        open={bulkCastOpen}
+        onOpenChange={setBulkCastOpen}
+        actors={actors}
+        excludedActorIds={(form.main_cast || []).map((row) => row.actor_id)}
+        onSave={handleBulkCastSave}
+        onActorCreated={handleActorCreated}
+      />}
       <CastEditDialog
         open={guestDialog.open}
         onOpenChange={(v) => setGuestDialog((s) => ({ ...s, open: v }))}

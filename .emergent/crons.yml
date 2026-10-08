@@ -19,4 +19,11 @@ crons:
     endpoint: "{{BASE_URL}}/api/cron/cleanup"
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: false
+  - name: tmdb-cast-backfill
+    description: "Cineverse BOT audits movie cast and TV metadata against TMDB every five minutes"
+    cron: "*/5 * * * *"
+    endpoint: "{{BASE_URL}}/api/cron/tmdb-cast-backfill"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true

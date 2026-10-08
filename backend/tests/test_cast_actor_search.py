@@ -141,7 +141,7 @@ class TestMovieCastPersistence:
         s = admin_session
         # create a movie
         mv_title = f"TEST_Movie_{uuid.uuid4().hex[:8]}"
-        r = s.post(f"{API}/movies", json={"title": mv_title, "year": 2026, "release_date": "2026-01-01"}, timeout=10)
+        r = s.post(f"{API}/movies", json={"title": mv_title, "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}", "year": 2026, "release_date": "2026-01-01"}, timeout=10)
         assert r.status_code in (200, 201), r.text
         mid = r.json()["id"]
         try:

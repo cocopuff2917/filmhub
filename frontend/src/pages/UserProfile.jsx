@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Ban, Shield, Star, Edit as EditIcon, User as UserIcon, Settings, History } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Ban, Shield, Star, Edit as EditIcon, User as UserIcon, Settings, History, Trash2 } from "lucide-react";
 import EditProfileDialog from "@/components/EditProfileDialog";
+import { toast } from "sonner";
 
 // ---------- helpers ----------
 function timeAgo(iso) {
@@ -166,17 +169,64 @@ function Activity30d({ points = [] }) {
 // ---------- Main component ----------
 export default function UserProfile() {
   const { id } = useParams();
-  const { user: current } = useAuth();
+  const navigate = useNavigate();
+  const { user: current, logout } = useAuth();
   const [profile, setProfile] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [editHistory, setEditHistory] = useState([]);
+  const [editHistoryHasMore, setEditHistoryHasMore] = useState(false);
+  const [loadingMoreEdits, setLoadingMoreEdits] = useState(false);
+  const [editHistoryError, setEditHistoryError] = useState("");
 
   const load = async () => {
     try { const r = await api.get(`/users/${id}`); setProfile(r.data); }
     catch { setProfile({ notFound: true }); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+  useEffect(() => {
+    if (!profile) return;
+    const initialEdits = profile.edits || [];
+    setEditHistory(initialEdits);
+    setEditHistoryHasMore(initialEdits.length < (profile.edit_count || 0));
+    setEditHistoryError("");
+  }, [profile]);
+
+  const loadMoreEdits = async () => {
+    if (loadingMoreEdits || !editHistoryHasMore) return;
+    setLoadingMoreEdits(true);
+    setEditHistoryError("");
+    try {
+      const response = await api.get(`/users/${id}/edits`, {
+        params: { skip: editHistory.length, limit: 50 },
+      });
+      setEditHistory((currentEdits) => [...currentEdits, ...response.data.items]);
+      setEditHistoryHasMore(response.data.has_more);
+    } catch {
+      setEditHistoryError("Could not load more edits. Please try again.");
+    } finally {
+      setLoadingMoreEdits(false);
+    }
+  };
 
   const isSelf = current && current.id === id;
+
+  const deleteAccount = async (event) => {
+    event.preventDefault();
+    setDeletingAccount(true);
+    try {
+      await api.delete("/auth/me", { data: { current_password: deletePassword } });
+      toast.success("Your account has been deleted");
+      await logout();
+      navigate("/login", { replace: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not delete account");
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
 
   if (!profile) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">Loading...</div>;
   if (profile.notFound) return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">User not found.</div>;
@@ -185,8 +235,8 @@ export default function UserProfile() {
   if (profile.suspended_placeholder) {
     const sInitial = (profile.name || "?")[0]?.toUpperCase();
     return (
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-        <section className="relative overflow-hidden" data-testid="user-suspended-placeholder" style={{ background: "radial-gradient(1200px 380px at 10% -20%, #1e293b 0%, #0f172a 55%, #020617 100%)" }}>
+      <div className="min-h-screen bg-[#0d0f12] text-white">
+        <section className="relative overflow-hidden" data-testid="user-suspended-placeholder" style={{ background: "radial-gradient(1200px 380px at 10% -20%, #1f2937 0%, #0f172a 55%, #020617 100%)" }}>
           <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
             <div className="mx-auto w-24 h-24 rounded-full overflow-hidden flex items-center justify-center text-white font-display text-4xl border-4 border-white/10 shadow-lg bg-slate-700 opacity-70" aria-hidden>
               <span>{sInitial}</span>
@@ -210,9 +260,9 @@ export default function UserProfile() {
   const recent = profile.recent_entities || [];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-[#0d0f12] text-white">
       {/* ============= HERO ============= */}
-      <section className="relative overflow-hidden" data-testid="user-hero" style={{ background: "radial-gradient(1200px 380px at 10% -20%, #1e293b 0%, #0f172a 55%, #020617 100%)" }}>
+      <section className="relative overflow-hidden border-b border-white/10" data-testid="user-hero" style={{ background: "radial-gradient(1200px 380px at 10% -20%, #1f2937 0%, #0f172a 55%, #020617 100%)" }}>
         {/* decorative accents */}
         <svg className="absolute inset-0 w-full h-full opacity-40" preserveAspectRatio="none">
           <line x1="55%" y1="0" x2="80%" y2="30%" stroke="#e11d48" strokeWidth="2" />
@@ -256,9 +306,14 @@ export default function UserProfile() {
                 <div className="w-px h-8 bg-white/15" />
                 <ScoreCircle score={profile.avg_series_rating} label="TV Score" />
                 {isSelf && (
-                  <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="ml-auto border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white h-8" data-testid="edit-profile-btn">
-                    <Settings className="w-3.5 h-3.5 mr-1.5" /> Edit Profile
-                  </Button>
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white h-8" data-testid="edit-profile-btn">
+                      <Settings className="w-3.5 h-3.5 mr-1.5" /> Edit Profile
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="border-rose-500/40 bg-rose-500/5 text-rose-200 hover:bg-rose-500/15 hover:text-rose-100 h-8" data-testid="delete-account-btn">
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Delete Account
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>
@@ -310,33 +365,33 @@ export default function UserProfile() {
       </section>
 
       {/* ============= SUB NAV ============= */}
-      <div className="border-b border-slate-200 bg-white">
+      <div className="border-b border-white/10 bg-[#10151d]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <Tabs defaultValue="overview">
             <TabsList className="bg-transparent p-0 h-auto rounded-none w-full justify-center gap-8">
-              <TabsTrigger value="overview" className="text-slate-500 data-[state=active]:text-slate-900 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 px-1 py-3 text-sm font-medium" data-testid="tab-overview">Overview</TabsTrigger>
-              <TabsTrigger value="reviews" className="text-slate-500 data-[state=active]:text-slate-900 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 px-1 py-3 text-sm font-medium" data-testid="tab-reviews">Reviews</TabsTrigger>
-              <TabsTrigger value="edits" className="text-slate-500 data-[state=active]:text-slate-900 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 px-1 py-3 text-sm font-medium" data-testid="tab-edits">Edit History</TabsTrigger>
+              <TabsTrigger value="overview" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-overview">Overview</TabsTrigger>
+              <TabsTrigger value="reviews" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-reviews">Reviews</TabsTrigger>
+              <TabsTrigger value="edits" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-edits">Edit History</TabsTrigger>
             </TabsList>
 
             {/* ============= OVERVIEW TAB ============= */}
             <TabsContent value="overview" className="py-8 space-y-8">
               {/* Stats row */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6" data-testid="stats-row">
-                <div>
-                  <div className="text-xs uppercase tracking-widest text-slate-500">Total Edits</div>
-                  <div className="mt-1 font-heading text-4xl font-bold text-rose-500" data-testid="total-edits">{(profile.edit_count || 0).toLocaleString()}</div>
+                <div className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.2)]">
+                  <div className="text-xs uppercase tracking-widest text-slate-400">Total Edits</div>
+                  <div className="mt-1 font-heading text-4xl font-bold text-amber-300" data-testid="total-edits">{(profile.edit_count || 0).toLocaleString()}</div>
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-widest text-slate-500">Total Ratings</div>
-                  <div className="mt-1 font-heading text-4xl font-bold text-rose-500" data-testid="total-ratings">{profile.total_ratings || 0}</div>
+                <div className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.2)]">
+                  <div className="text-xs uppercase tracking-widest text-slate-400">Total Ratings</div>
+                  <div className="mt-1 font-heading text-4xl font-bold text-amber-300" data-testid="total-ratings">{profile.total_ratings || 0}</div>
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-widest text-slate-500">Rating Overview</div>
+                <div className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.2)]">
+                  <div className="text-xs uppercase tracking-widest text-slate-400">Rating Overview</div>
                   <RatingHistogram dist={profile.rating_distribution || []} />
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-widest text-slate-500">Most Watched Genres</div>
+                <div className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.2)]">
+                  <div className="text-xs uppercase tracking-widest text-slate-400">Most Watched Genres</div>
                   <div className="mt-2"><GenreDonut genres={profile.top_genres || []} /></div>
                 </div>
               </div>
@@ -344,23 +399,23 @@ export default function UserProfile() {
               {/* Recent Activity */}
               <div>
                 <div className="flex items-baseline justify-between">
-                  <h2 className="font-heading text-lg font-bold text-slate-900">Recent Activity</h2>
-                  <a href="#edits-tab" onClick={(e) => { e.preventDefault(); document.querySelector('[data-testid="tab-edits"]')?.click(); }} className="text-xs text-rose-500 hover:text-rose-600">View More</a>
+                  <h2 className="font-heading text-lg font-bold text-white">Recent Activity</h2>
+                  <a href="#edits-tab" onClick={(e) => { e.preventDefault(); document.querySelector('[data-testid="tab-edits"]')?.click(); }} className="text-xs text-amber-300 hover:text-amber-200">View More</a>
                 </div>
                 {recent.length === 0 ? (
-                  <div className="mt-3 rounded-lg border border-dashed border-slate-200 py-8 text-center text-slate-400 text-sm">No recent activity yet.</div>
+                  <div className="mt-3 rounded-lg border border-dashed border-white/10 py-8 text-center text-slate-400 text-sm">No recent activity yet.</div>
                 ) : (
                   <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3" data-testid="recent-activity">
                     {recent.slice(0, 5).map((it) => {
                       const path = it.entity_type === "series" ? "/series/" : it.entity_type === "actor" ? "/actor/" : "/movie/";
                       return (
-                        <Link to={`${path}${it.entity_id}`} key={`${it.entity_type}-${it.entity_id}`} className="group rounded-lg overflow-hidden border border-slate-200 bg-white hover:shadow-md transition" data-testid={`recent-${it.entity_id}`}>
+                        <Link to={`${path}${it.entity_id}`} key={`${it.entity_type}-${it.entity_id}`} className="group rounded-lg overflow-hidden border border-white/10 bg-[#14181f]/80 hover:border-amber-400/50 transition" data-testid={`recent-${it.entity_id}`}>
                           <div className="aspect-video bg-slate-100 overflow-hidden">
                             {it.poster_url ? <img src={fileUrl(it.poster_url)} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /> : <div className="w-full h-full flex items-center justify-center text-slate-300 text-2xl">?</div>}
                           </div>
                           <div className="p-2.5">
-                            <div className="font-semibold text-sm text-slate-900 truncate">{it.entity_title || "(deleted)"}</div>
-                            <div className="mt-0.5 flex items-center justify-between text-[11px] text-slate-500">
+                            <div className="font-semibold text-sm text-white truncate">{it.entity_title || "(deleted)"}</div>
+                            <div className="mt-0.5 flex items-center justify-between text-[11px] text-slate-400">
                               <span>{timeAgo(it.last_at)}</span>
                               <span>{it.edit_count} edit{it.edit_count !== 1 && "s"}</span>
                             </div>
@@ -373,8 +428,8 @@ export default function UserProfile() {
               </div>
 
               {/* 30 Day Activity chart */}
-              <div className="rounded-xl bg-white border border-slate-200 p-5">
-                <h2 className="font-heading text-lg font-bold text-slate-900">30 Day Activity</h2>
+              <div className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.2)]">
+                <h2 className="font-heading text-lg font-bold text-white">30 Day Activity</h2>
                 <Activity30d points={activity} />
               </div>
             </TabsContent>
@@ -382,20 +437,20 @@ export default function UserProfile() {
             {/* ============= REVIEWS TAB ============= */}
             <TabsContent value="reviews" className="py-8">
               {(!profile.reviews || profile.reviews.length === 0) ? (
-                <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-slate-400 text-sm">No rated movies yet.</div>
+                <div className="rounded-xl border border-dashed border-white/10 py-10 text-center text-slate-400 text-sm">No rated movies yet.</div>
               ) : (
                 <div className="space-y-3">
                   {profile.reviews.map((r) => (
-                    <Link to={`/movie/${r.movie_id}`} key={r.id} className="flex items-center gap-4 rounded-xl bg-white border border-slate-200 p-4 hover:border-rose-300 hover:shadow-sm transition" data-testid={`user-review-${r.id}`}>
+                    <Link to={`/movie/${r.movie_id}`} key={r.id} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-[#14181f]/80 p-4 hover:border-amber-400/50 hover:shadow-[0_16px_30px_rgba(0,0,0,0.18)] transition" data-testid={`user-review-${r.id}`}>
                       <div className="w-12 h-16 rounded bg-slate-100 overflow-hidden flex-shrink-0">
                         {r.movie_poster_url && <img src={fileUrl(r.movie_poster_url)} alt="" className="w-full h-full object-cover" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3">
-                          <span className="font-semibold text-slate-900 truncate">{r.movie_title || "(deleted movie)"}</span>
-                          <span className="flex items-center gap-1 text-amber-500 font-bold"><Star className="w-4 h-4 fill-amber-500" /> {r.rating}</span>
+                          <span className="font-semibold text-white truncate">{r.movie_title || "(deleted movie)"}</span>
+                          <span className="flex items-center gap-1 text-amber-300 font-bold"><Star className="w-4 h-4 fill-amber-400" /> {r.rating}</span>
                         </div>
-                        {r.text && <div className="text-sm text-slate-500 mt-1 line-clamp-2">{r.text}</div>}
+                        {r.text && <div className="text-sm text-slate-300 mt-1 line-clamp-2">{r.text}</div>}
                         <div className="text-xs text-slate-400 mt-0.5">{timeAgo(r.created_at)}</div>
                       </div>
                     </Link>
@@ -406,26 +461,45 @@ export default function UserProfile() {
 
             {/* ============= EDITS TAB ============= */}
             <TabsContent value="edits" className="py-8">
-              <div className="flex items-center gap-2 text-slate-900 font-heading text-lg font-bold"><History className="w-4 h-4" /> Edit History</div>
-              {(!profile.edits || profile.edits.length === 0) ? (
-                <div className="mt-4 rounded-xl border border-dashed border-slate-200 py-10 text-center text-slate-400 text-sm">No edits recorded yet.</div>
+              <div className="flex items-center gap-2 text-white font-heading text-lg font-bold"><History className="w-4 h-4 text-amber-300" /> Edit History</div>
+              {editHistory.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-white/10 py-10 text-center text-slate-400 text-sm">No edits recorded yet.</div>
               ) : (
-                <ol className="mt-4 relative border-l-2 border-slate-200 ml-2 space-y-3">
-                  {profile.edits.map((e) => {
+                <ol className="mt-4 relative border-l-2 border-white/10 ml-2 space-y-3">
+                  {editHistory.map((e) => {
                     const path = e.entity_type === "series" ? "/series/" : e.entity_type === "actor" ? "/actor/" : "/movie/";
                     return (
                       <li key={e.id} className="pl-4 relative" data-testid={`user-edit-${e.id}`}>
-                        <span className="absolute -left-[7px] top-1.5 w-3 h-3 rounded-full bg-rose-500 border-2 border-white" />
+                        <span className="absolute -left-[7px] top-1.5 w-3 h-3 rounded-full bg-amber-400 border-2 border-[#0d0f12]" />
                         <div className="text-sm">
-                          <Link to={`${path}${e.entity_id}`} className="text-slate-900 font-semibold hover:text-rose-500">{e.entity_title || "(deleted)"}</Link>
-                          <span className="ml-2 text-[10px] uppercase tracking-widest text-rose-500 font-semibold">{e.action}</span>
+                          <Link to={`${path}${e.entity_id}`} className="text-white font-semibold hover:text-amber-300">{e.entity_title || "(deleted)"}</Link>
+                          <span className="ml-2 text-[10px] uppercase tracking-widest text-amber-300 font-semibold">{e.action}</span>
                           <span className="ml-2 text-xs text-slate-400">{timeAgo(e.created_at)}</span>
                         </div>
-                        {e.summary && <div className="text-xs text-slate-500 mt-0.5">{e.summary}</div>}
+                        {e.summary && <div className="text-xs text-slate-300 mt-0.5">{e.summary}</div>}
                       </li>
                     );
                   })}
                 </ol>
+              )}
+              {editHistoryError && <div role="alert" className="mt-4 text-center text-sm text-rose-600">{editHistoryError}</div>}
+              {(editHistoryHasMore || editHistory.length > 0) && (
+                <div className="mt-5 text-center">
+                  {editHistoryHasMore ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={loadMoreEdits}
+                      disabled={loadingMoreEdits}
+                      className="border-white/10 bg-[#14181f] text-amber-100 hover:bg-[#1d2430]"
+                      data-testid="load-more-edits-btn"
+                    >
+                      {loadingMoreEdits ? "Loading…" : "Load more edits"}
+                    </Button>
+                  ) : (
+                    <div className="text-xs text-slate-400" data-testid="all-edits-loaded">All {editHistory.length} edits shown</div>
+                  )}
+                </div>
               )}
             </TabsContent>
           </Tabs>
@@ -438,6 +512,34 @@ export default function UserProfile() {
         profile={profile}
         onSaved={load}
       />
+      <Dialog open={deleteOpen} onOpenChange={(open) => { setDeleteOpen(open); if (!open) setDeletePassword(""); }}>
+        <DialogContent className="bg-[#14181f] text-white border-white/10" data-testid="delete-account-dialog">
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription className="text-slate-300">
+              You will no longer be able to sign in. Your contributions will remain on CineVerse and keep their attribution. An administrator can restore your account.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={deleteAccount} className="space-y-4">
+            <Input
+              type="password"
+              value={deletePassword}
+              onChange={(event) => setDeletePassword(event.target.value)}
+              placeholder="Current password"
+              autoComplete="current-password"
+              required
+              className="bg-[#0d0f12] border-white/10 text-white"
+              data-testid="delete-account-password"
+            />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
+              <Button type="submit" disabled={deletingAccount} className="bg-rose-600 hover:bg-rose-700 text-white" data-testid="confirm-delete-account-btn">
+                {deletingAccount ? "Deleting..." : "Delete Account"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

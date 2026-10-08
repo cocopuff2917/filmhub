@@ -26,20 +26,23 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center px-4 py-10 hero-radial">
-      <div className="w-full max-w-md" data-testid="forgot-password-page">
+    <div className="auth-shell min-h-[calc(100vh-64px)] flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md relative z-10" data-testid="forgot-password-page">
         <div className="text-center mb-8">
-          <div className="inline-flex w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 items-center justify-center mb-4 shadow-[0_0_25px_rgba(245,158,11,0.4)]">
+          <div className="auth-orb inline-flex w-12 h-12 rounded-xl items-center justify-center mb-4 shadow-[0_0_25px_rgba(245,158,11,0.4)]">
             <KeyRound className="w-6 h-6 text-black" strokeWidth={2.5} />
           </div>
-          <h1 className="font-display text-4xl tracking-widest text-white">FORGOT PASSWORD</h1>
+          <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-amber-200">
+            account recovery
+          </div>
+          <h1 className="mt-4 font-display text-4xl tracking-[0.18em] text-white">FORGOT PASSWORD</h1>
           <p className="mt-2 text-sm text-slate-400">
             {sent
               ? "Check your inbox for reset instructions"
               : "Enter your email and we'll send you a reset link"}
           </p>
         </div>
-        <Card className="glass border-white/10">
+        <Card className="auth-panel border border-white/10">
           <CardContent className="pt-6">
             {sent ? (
               <div className="space-y-5 text-center" data-testid="forgot-password-success">

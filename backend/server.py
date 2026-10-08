@@ -14,12 +14,14 @@ import requests
 import secrets
 import hmac
 import re
+import calendar
 import ipaddress
 import httpx
+from collections import Counter
 from io import BytesIO
 from html import escape
 from html.parser import HTMLParser
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Annotated
 
@@ -27,6 +29,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Respons
 from fastapi.responses import Response as FastAPIResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from PIL import Image, ImageOps
 from pillow_avif import AvifImagePlugin
@@ -46,6 +49,7 @@ APP_NAME = "cineverse"
 storage_key: Optional[str] = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -209,6 +213,36 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=86400, path="/")
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
 
+ACCOUNT_RECOVERY_WINDOW = timedelta(days=30)
+
+def _parse_account_deletion_time(value) -> Optional[datetime]:
+    try:
+        deleted_time = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        if deleted_time.tzinfo is None:
+            deleted_time = deleted_time.replace(tzinfo=timezone.utc)
+        return deleted_time
+    except (TypeError, ValueError):
+        return None
+
+def can_self_restore_account(user: dict) -> bool:
+    deleted_at = user.get("deleted_at")
+    if not deleted_at:
+        return False
+    deleted_time = _parse_account_deletion_time(deleted_at)
+    if deleted_time is None:
+        return False
+    now = datetime.now(timezone.utc)
+    return deleted_time <= now and now - deleted_time <= ACCOUNT_RECOVERY_WINDOW
+
+def can_delete_account_again(user: dict) -> bool:
+    last_deleted_at = user.get("last_account_deleted_at")
+    if not last_deleted_at:
+        return True
+    deleted_time = _parse_account_deletion_time(last_deleted_at)
+    if deleted_time is None:
+        return False
+    return datetime.now(timezone.utc) - deleted_time >= ACCOUNT_RECOVERY_WINDOW
+
 async def get_current_user_allow_suspended(request: Request) -> dict:
     token = request.cookies.get("access_token")
     if not token:
@@ -224,6 +258,8 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        if user.get("deleted_at"):
+            raise HTTPException(status_code=401, detail="Account has been deleted")
         # auto-lift expired suspensions
         sus = user.get("suspended_until")
         is_suspended = False
@@ -244,6 +280,8 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
         user["id"] = str(user["_id"])
         user.pop("_id", None)
         user.pop("password_hash", None)
+        user.pop("failed_login_attempts", None)
+        user.pop("login_locked_until", None)
         user["is_suspended"] = is_suspended
         user["suspension_until"] = user.get("suspended_until")
         # resolve custom roles (new multi-array + legacy single id)
@@ -336,12 +374,24 @@ class CastMember(BaseModel):
     character_name: str
 
 class CrewMember(BaseModel):
-    name: str
+    actor_id: Optional[str] = None
+    name: str = ""
     role: str = "Director"  # Director | Writer | Producer, etc.
+
+class PurchaseOption(BaseModel):
+    provider: str = Field(min_length=1, max_length=80)
+    url: str = Field(min_length=1, max_length=2048)
+
+DEFAULT_CREW_JOBS = ["Director", "Writer", "Producer", "Cinematographer", "Composer", "Editor", "Makeup Artist"]
+
+class CrewJobsUpdate(BaseModel):
+    jobs: List[str] = Field(min_length=1, max_length=100)
 
 class MovieCreate(BaseModel):
     title: str
     release_date: str  # YYYY-MM-DD
+    imdb_id: Optional[str] = Field(default=None, pattern=r"^tt\d{7,10}$")
+    tmdb_id: Optional[int] = None
     genres: List[str] = []
     synopsis: str = ""
     tagline: str = ""
@@ -355,6 +405,7 @@ class MovieCreate(BaseModel):
     gallery: List[str] = []
     cast: List[CastMember] = []
     crew: List[CrewMember] = []
+    purchase_options: List[PurchaseOption] = Field(default_factory=list, max_length=20)
     keywords: List[str] = []
     status: str = "Released"  # Released | In Production | Post Production | Rumored | Canceled
     original_language: str = "English"
@@ -369,6 +420,7 @@ class MovieCreate(BaseModel):
 class MovieUpdate(BaseModel):
     title: Optional[str] = None
     release_date: Optional[str] = None
+    imdb_id: Optional[str] = Field(default=None, pattern=r"^tt\d{7,10}$")
     genres: Optional[List[str]] = None
     synopsis: Optional[str] = None
     tagline: Optional[str] = None
@@ -382,6 +434,7 @@ class MovieUpdate(BaseModel):
     gallery: Optional[List[str]] = None
     cast: Optional[List[CastMember]] = None
     crew: Optional[List[CrewMember]] = None
+    purchase_options: Optional[List[PurchaseOption]] = Field(default=None, max_length=20)
     keywords: Optional[List[str]] = None
     status: Optional[str] = None
     original_language: Optional[str] = None
@@ -441,6 +494,8 @@ class SeasonItem(BaseModel):
 
 class SeriesCreate(BaseModel):
     title: str
+    imdb_id: Optional[str] = Field(default=None, pattern=r"^tt\d{7,10}$")
+    tmdb_id: Optional[int] = None
     first_air_date: Optional[str] = None
     last_air_date: Optional[str] = None
     genres: List[str] = []
@@ -471,6 +526,7 @@ class SeriesCreate(BaseModel):
 
 class SeriesUpdate(BaseModel):
     title: Optional[str] = None
+    imdb_id: Optional[str] = Field(default=None, pattern=r"^tt\d{7,10}$")
     first_air_date: Optional[str] = None
     last_air_date: Optional[str] = None
     genres: Optional[List[str]] = None
@@ -498,6 +554,13 @@ class SeriesUpdate(BaseModel):
     collection_ids: Optional[List[str]] = None
     locked_cast_actor_ids: Optional[List[str]] = None
     locked_guest_stars: Optional[List[str]] = None
+
+class NetworkCategoryUpdate(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=2000)
+    image_url: Optional[str] = Field(default=None, max_length=2048)
+
+class KeywordCategoryUpdate(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=2000)
 
 # ----------- Moderation Models -----------
 class SuspendRequest(BaseModel):
@@ -545,6 +608,9 @@ class HomepageConfig(BaseModel):
     announcement: HomepageAnnouncement = Field(default_factory=HomepageAnnouncement)
     sections: List[HomepageSection] = Field(default_factory=list)
 
+class ContributorGuidelinesUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=30000)
+
 class RoleUpdate(BaseModel):
     role: str  # user / moderator / admin
 
@@ -555,6 +621,20 @@ class ProfileUpdate(BaseModel):
     email: Optional[EmailStr] = None
     name: Optional[str] = Field(default=None, min_length=2, max_length=40)
     bio: Optional[str] = Field(default=None, max_length=500)
+
+class AccountDeleteRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+
+class UsernameCooldownOverride(BaseModel):
+    user_id: str
+    amount: int = Field(ge=0, le=1200)
+    unit: str
+
+class AdminUserProfileUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    name: Optional[str] = Field(default=None, min_length=2, max_length=40)
+    bio: Optional[str] = Field(default=None, max_length=500)
+    avatar_url: Optional[str] = None
 
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1)
@@ -585,8 +665,14 @@ class ThreadCreate(BaseModel):
 class ThreadMessageCreate(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
 
+class ThreadMessageUpdate(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
 class ThreadStatusUpdate(BaseModel):
     status: str  # open | closed
+
+class ThreadPrivacyUpdate(BaseModel):
+    is_private: bool
 
 # ----------- Direct Threads / Notifications -----------
 class DirectThreadCreate(BaseModel):
@@ -812,6 +898,8 @@ def _norm_title(s: str) -> str:
 def doc_to_dict(doc, id_key="id"):
     if not doc:
         return doc
+    doc.pop("_tmdb_cast_checked", None)
+    doc.pop("_tmdb_audit_checked", None)
     doc[id_key] = str(doc.pop("_id"))
     return doc
 
@@ -819,7 +907,8 @@ async def enrich_movie(doc):
     doc_to_dict(doc)
     # attach actors data
     cast = doc.get("cast", []) or []
-    actor_ids = [c["actor_id"] for c in cast if c.get("actor_id")]
+    crew = doc.get("crew", []) or []
+    actor_ids = [c["actor_id"] for c in cast + crew if c.get("actor_id")]
     actors_map = {}
     if actor_ids:
         object_ids = []
@@ -838,6 +927,10 @@ async def enrich_movie(doc):
         if actor:
             enriched_cast.append({**c, "actor": actor})
     doc["cast"] = enriched_cast
+    doc["crew"] = [
+        {**member, "name": actor["name"], "actor": actor} if (actor := actors_map.get(member.get("actor_id"))) else member
+        for member in crew
+    ]
     # rating aggregation
     agg = await db.reviews.aggregate([
         {"$match": {"movie_id": doc["id"]}},
@@ -980,6 +1073,39 @@ def compute_field_changes(old: dict, new: dict) -> list:
         })
     return changes
 
+INDEXNOW_KEY = "69c9086637498e320a0d056e514a6546"
+
+async def _submit_indexnow_url(entity_type: str, entity_id: str):
+    route = {
+        "movie": "/movie/",
+        "series": "/series/",
+        "actor": "/actor/",
+        "collection": "/collection/",
+    }.get(entity_type)
+    if not route or not entity_id:
+        return
+    site_url = os.environ.get("PUBLIC_SITE_URL", "https://filmhub-918.emergent.host").strip().rstrip("/")
+    parsed_site = urlparse(site_url)
+    if parsed_site.scheme != "https" or not parsed_site.netloc:
+        return
+    item_url = f"{site_url}{route}{quote(str(entity_id), safe='')}"
+    urls = [item_url]
+    if entity_type in ("movie", "series"):
+        urls.append(f"{item_url}/credits")
+    payload = {
+        "host": parsed_site.netloc,
+        "key": INDEXNOW_KEY,
+        "keyLocation": f"{site_url}/{INDEXNOW_KEY}.txt",
+        "urlList": urls,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            response = await http.post("https://api.indexnow.org/indexnow", json=payload)
+            if response.status_code not in (200, 202):
+                logger.warning("IndexNow rejected %s URL submission with status %s", entity_type, response.status_code)
+    except httpx.HTTPError as error:
+        logger.warning("IndexNow submission failed: %s", type(error).__name__)
+
 async def log_edit(user: dict, entity_type: str, entity_id: str, action: str, entity_title: str = "", summary: str = "", changes: Optional[list] = None):
     """Record an edit event with detailed field-level changes."""
     await db.edits.insert_one({
@@ -995,6 +1121,34 @@ async def log_edit(user: dict, entity_type: str, entity_id: str, action: str, en
         "user_role": user.get("role", "user"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
+    await _submit_indexnow_url(entity_type, entity_id)
+
+async def _sync_user_role_badges(user_id: str, role: str):
+    for collection in (db.edits, db.comments, db.threads, db.thread_messages):
+        await collection.update_many(
+            {"user_id": user_id, "user_role": {"$in": ["moderator", "admin"]}},
+            {"$set": {"user_role": role}},
+        )
+    await db.notifications.update_many(
+        {"from_user_id": user_id, "from_user_role": {"$in": ["moderator", "admin"]}},
+        {"$set": {"from_user_role": role}},
+    )
+
+async def _effective_user_role(user: dict) -> str:
+    effective_role = user.get("role", "user")
+    rank = {"user": 0, "moderator": 1, "admin": 2}
+    role_ids = list(dict.fromkeys((user.get("custom_role_ids") or []) + ([user.get("custom_role_id")] if user.get("custom_role_id") else [])))
+    for role_id in role_ids:
+        try:
+            custom_role = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
+        except Exception:
+            custom_role = None
+        if not custom_role:
+            continue
+        role_base = _derive_base(custom_role.get("permissions", []) or [])
+        if rank.get(role_base, 0) > rank.get(effective_role, 0):
+            effective_role = role_base
+    return effective_role
 
 def get_client_ip(request: Request) -> str:
     # honor x-forwarded-for from ingress
@@ -1088,8 +1242,69 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         user = await db.users.find_one({"email": identifier.lower()})
     else:
         user = await db.users.find_one({"name": {"$regex": f"^{re.escape(identifier)}$", "$options": "i"}})
-    if not user or not verify_password(payload.password, user["password_hash"]):
+    if user and not user.get("is_system_account"):
+        now = datetime.now(timezone.utc)
+        locked_until = user.get("login_locked_until")
+        if locked_until:
+            try:
+                lock_expiry = datetime.fromisoformat(locked_until)
+                if lock_expiry.tzinfo is None:
+                    lock_expiry = lock_expiry.replace(tzinfo=timezone.utc)
+                if lock_expiry > now:
+                    retry_after = max(1, int((lock_expiry - now).total_seconds()))
+                    raise HTTPException(
+                        status_code=429,
+                        detail="Too many failed login attempts. Try again in 5 minutes.",
+                        headers={"Retry-After": str(retry_after)},
+                    )
+            except ValueError:
+                pass
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$unset": {"failed_login_attempts": "", "login_locked_until": ""}},
+            )
+        if not verify_password(payload.password, user.get("password_hash", "")):
+            updated_user = await db.users.find_one_and_update(
+                {"_id": user["_id"]},
+                {"$inc": {"failed_login_attempts": 1}},
+                return_document=ReturnDocument.AFTER,
+            )
+            attempts = (updated_user or {}).get("failed_login_attempts", 0)
+            if attempts >= 5:
+                lock_expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
+                await db.users.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {
+                        "failed_login_attempts": 0,
+                        "login_locked_until": lock_expiry.isoformat(),
+                    }},
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many failed login attempts. Try again in 5 minutes.",
+                    headers={"Retry-After": "300"},
+                )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$unset": {"failed_login_attempts": "", "login_locked_until": ""}},
+        )
+    else:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    deleted_at = user.get("deleted_at")
+    if deleted_at:
+        if not can_self_restore_account(user):
+            raise HTTPException(
+                status_code=403,
+                detail="The 30-day self-restoration period has expired. Contact an administrator to restore this account.",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "account_deleted",
+                "message": "This account was deleted. Restore it within 30 days to sign in.",
+            },
+        )
     email = user.get("email", "")
     # Suspension: DO NOT block login anymore; suspended users can log in to access their inbox.
     # Auto-lift expired suspensions.
@@ -1129,22 +1344,88 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         "token_type": "bearer",
     }
 
+@api_router.post("/auth/restore-deleted")
+async def restore_deleted_account(payload: LoginRequest, request: Request, response: Response):
+    identifier = (payload.identifier or payload.email or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Email or username is required")
+    if "@" in identifier:
+        user = await db.users.find_one({"email": identifier.lower()})
+    else:
+        user = await db.users.find_one({"name": {"$regex": f"^{re.escape(identifier)}$", "$options": "i"}})
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user.get("deleted_at"):
+        raise HTTPException(status_code=400, detail="This account is not deleted")
+    if not can_self_restore_account(user):
+        raise HTTPException(
+            status_code=403,
+            detail="The 30-day self-restoration period has expired. Contact an administrator to restore this account.",
+        )
+    restore_update = {"$unset": {"deleted_at": "", "deleted_by": "", "deleted_by_name": ""}}
+    if not user.get("last_account_deleted_at"):
+        restore_update["$set"] = {"last_account_deleted_at": user["deleted_at"]}
+    await db.users.update_one({"_id": user["_id"]}, restore_update)
+    return await login(payload, request, response)
+
 @api_router.post("/auth/logout")
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     return {"ok": True}
 
+DEFAULT_USERNAME_COOLDOWN_AMOUNT = 30
+DEFAULT_USERNAME_COOLDOWN_UNIT = "days"
+USERNAME_COOLDOWN_UNITS = {"minutes", "hours", "days", "months", "years"}
+
+def _username_cooldown_settings(user: dict) -> tuple[int, str, bool]:
+    has_override = "username_cooldown_amount" in user and "username_cooldown_unit" in user
+    if not has_override:
+        return DEFAULT_USERNAME_COOLDOWN_AMOUNT, DEFAULT_USERNAME_COOLDOWN_UNIT, False
+    try:
+        amount = int(user["username_cooldown_amount"])
+        unit = str(user["username_cooldown_unit"]).lower()
+        if amount < 0 or amount > 1200 or unit not in USERNAME_COOLDOWN_UNITS:
+            raise ValueError("Invalid saved username cooldown")
+        return amount, unit, True
+    except Exception:
+        return DEFAULT_USERNAME_COOLDOWN_AMOUNT, DEFAULT_USERNAME_COOLDOWN_UNIT, False
+
+def _username_change_deadline(last_changed_at: Optional[str], user: dict) -> Optional[str]:
+    if not last_changed_at:
+        return None
+    amount, unit, _ = _username_cooldown_settings(user)
+    if amount == 0:
+        return None
+    try:
+        last_changed = datetime.fromisoformat(last_changed_at)
+        if last_changed.tzinfo is None:
+            last_changed = last_changed.replace(tzinfo=timezone.utc)
+        if unit == "minutes":
+            deadline = last_changed + timedelta(minutes=amount)
+        elif unit == "hours":
+            deadline = last_changed + timedelta(hours=amount)
+        elif unit == "days":
+            deadline = last_changed + timedelta(days=amount)
+        elif unit == "months":
+            month_index = last_changed.year * 12 + last_changed.month - 1 + amount
+            year, month_offset = divmod(month_index, 12)
+            month = month_offset + 1
+            day = min(last_changed.day, calendar.monthrange(year, month)[1])
+            deadline = last_changed.replace(year=year, month=month, day=day)
+        else:
+            year = last_changed.year + amount
+            day = min(last_changed.day, calendar.monthrange(year, last_changed.month)[1])
+            deadline = last_changed.replace(year=year, day=day)
+        return deadline.isoformat()
+    except Exception:
+        return None
+
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user_allow_suspended)):
-    # username change cooldown
     name_last_changed_at = user.get("name_last_changed_at")
-    name_change_available_at = None
-    if name_last_changed_at:
-        try:
-            name_change_available_at = (datetime.fromisoformat(name_last_changed_at) + timedelta(days=30)).isoformat()
-        except Exception:
-            pass
+    cooldown_amount, cooldown_unit, has_cooldown_override = _username_cooldown_settings(user)
+    name_change_available_at = _username_change_deadline(name_last_changed_at, user)
     return {
         "id": user["id"],
         "email": user.get("email"),
@@ -1160,6 +1441,9 @@ async def me(user: dict = Depends(get_current_user_allow_suspended)):
         "created_at": user.get("created_at"),
         "name_last_changed_at": name_last_changed_at,
         "name_change_available_at": name_change_available_at,
+        "username_cooldown_amount": cooldown_amount,
+        "username_cooldown_unit": cooldown_unit,
+        "username_cooldown_override": has_cooldown_override,
         "is_suspended": user.get("is_suspended", False),
         "suspension_reason": user.get("suspension_reason") if user.get("is_suspended") else None,
         "suspension_until": user.get("suspension_until") if user.get("is_suspended") else None,
@@ -1210,6 +1494,8 @@ async def refresh_token(request: Request, response: Response):
     user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.get("deleted_at"):
+        raise HTTPException(status_code=401, detail="Account has been deleted")
     access = create_access_token(str(user["_id"]), user.get("email", ""))
     refresh = create_refresh_token(str(user["_id"]))
     set_auth_cookies(response, access, refresh)
@@ -1267,24 +1553,16 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
                 raise HTTPException(status_code=400, detail="Username must be 2–40 characters: letters, numbers, dots, underscores, or hyphens only.")
             if "@" in new_name:
                 raise HTTPException(status_code=400, detail="Username cannot contain '@'.")
-            # 30-day cooldown on username changes
             fresh = await db.users.find_one({"_id": ObjectId(user["id"])})
             last_changed = (fresh or {}).get("name_last_changed_at")
-            if last_changed:
-                try:
-                    last_dt = datetime.fromisoformat(last_changed)
-                    next_eligible = last_dt + timedelta(days=30)
-                    now = datetime.now(timezone.utc)
-                    if next_eligible > now:
-                        days_left = (next_eligible - now).days + 1
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"You can change your username again in {days_left} day{'s' if days_left != 1 else ''} (on {next_eligible.strftime('%b %d, %Y')}).",
-                        )
-                except HTTPException:
-                    raise
-                except Exception:
-                    pass
+            next_eligible = _username_change_deadline(last_changed, fresh or user)
+            if next_eligible:
+                deadline = datetime.fromisoformat(next_eligible)
+                if deadline > datetime.now(timezone.utc):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"You can change your username again on {deadline.strftime('%b %d, %Y at %I:%M %p UTC')}.",
+                    )
             if await _username_taken(new_name, exclude_user_id=user["id"]):
                 raise HTTPException(status_code=400, detail="Username is already taken")
             update["name"] = new_name
@@ -1294,6 +1572,8 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
             pass
     if payload.bio is not None:
         update["bio"] = payload.bio.strip()
+    if "name" in update or "bio" in update:
+        await _moderate_user_content(user, "\n".join(str(update[key]) for key in ("name", "bio") if key in update))
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
     try:
@@ -1313,6 +1593,65 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
             {"$set": {"from_user_name": new_name}},
         )
     return {"ok": True, **update}
+
+@api_router.delete("/auth/me")
+async def delete_account(
+    payload: AccountDeleteRequest,
+    response: Response,
+    user: dict = Depends(get_current_user_allow_suspended),
+):
+    stored_user = await db.users.find_one({"_id": ObjectId(user["id"])})
+    if not stored_user or not verify_password(payload.current_password, stored_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    if not can_delete_account_again(stored_user):
+        raise HTTPException(status_code=429, detail="You can delete your account only once every 30 days")
+    deleted_at = datetime.now(timezone.utc).isoformat()
+    update = {
+        "deleted_at": deleted_at,
+        "last_account_deleted_at": deleted_at,
+        "deleted_by": user["id"],
+        "deleted_by_name": user.get("name"),
+    }
+    moderator_role_removed = stored_user.get("role") == "moderator" or user.get("effective_role") == "moderator"
+    unset = {}
+    if moderator_role_removed:
+        update["role"] = "user"
+        assigned_role_ids = list(dict.fromkeys(
+            (stored_user.get("custom_role_ids") or [])
+            + ([stored_user["custom_role_id"]] if stored_user.get("custom_role_id") else [])
+        ))
+        removed_role_ids = set()
+        for role_id in assigned_role_ids:
+            try:
+                custom_role = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
+            except Exception:
+                custom_role = None
+            if custom_role and _derive_base(custom_role.get("permissions", []) or []) == "moderator":
+                removed_role_ids.add(role_id)
+        if removed_role_ids:
+            remaining_role_ids = [role_id for role_id in assigned_role_ids if role_id not in removed_role_ids]
+            update["custom_role_ids"] = remaining_role_ids
+            if stored_user.get("custom_role_id") in removed_role_ids:
+                if remaining_role_ids:
+                    update["custom_role_id"] = remaining_role_ids[0]
+                else:
+                    unset["custom_role_id"] = ""
+    user_update = {"$set": update}
+    if unset:
+        user_update["$unset"] = unset
+    await db.users.update_one(
+        {"_id": ObjectId(user["id"])},
+        user_update,
+    )
+    if moderator_role_removed:
+        updated_user = {**stored_user, **update}
+        for field in unset:
+            updated_user.pop(field, None)
+        await _sync_user_role_badges(user["id"], await _effective_user_role(updated_user))
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return {"ok": True, "deleted_at": deleted_at}
 
 @api_router.post("/auth/me/password")
 async def change_password(payload: PasswordChange, user: dict = Depends(get_current_user)):
@@ -1452,7 +1791,28 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
             pass
 
     viewer_is_mod = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
+    viewer_is_admin = bool(viewer and viewer.get("effective_role") == "admin")
     viewer_is_self = bool(viewer and viewer.get("id") == str(u["_id"]))
+
+    if u.get("deleted_at"):
+        if not viewer_is_admin:
+            raise HTTPException(status_code=404, detail="User not found")
+        deleted_edits = []
+        async for edit in db.edits.find({"user_id": str(u["_id"])}).sort("created_at", -1).limit(30):
+            edit["id"] = str(edit.pop("_id"))
+            deleted_edits.append(edit)
+        return {
+            "id": str(u["_id"]),
+            "name": "Deleted account",
+            "avatar_url": "",
+            "bio": "",
+            "role": "user",
+            "custom_role": None,
+            "created_at": u.get("created_at"),
+            "is_deleted": True,
+            "edits": deleted_edits,
+            "edit_count": await db.edits.count_documents({"user_id": str(u["_id"])}),
+        }
 
     # Hide suspended profiles site-wide. For non-mod viewers, return a minimal
     # placeholder so the UI can render "This user is currently suspended"
@@ -1667,6 +2027,41 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
 
     return profile
 
+@api_router.get("/users/{user_id}/edits")
+async def get_user_edit_history(
+    user_id: str,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    viewer: Optional[dict] = Depends(get_optional_user),
+):
+    try:
+        target = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    suspended_until = target.get("suspended_until")
+    active_suspension = suspended_until == "permanent"
+    if suspended_until and suspended_until != "permanent":
+        try:
+            active_suspension = datetime.fromisoformat(suspended_until) > datetime.now(timezone.utc)
+        except Exception:
+            pass
+    viewer_is_mod = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
+    viewer_is_self = bool(viewer and viewer.get("id") == str(target["_id"]))
+    if active_suspension and not (viewer_is_mod or viewer_is_self):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cursor = db.edits.find({"user_id": str(target["_id"])})
+    cursor = cursor.sort([("created_at", -1), ("_id", -1)]).skip(skip).limit(limit + 1)
+    edits = []
+    async for edit in cursor:
+        edit["id"] = str(edit.pop("_id"))
+        edits.append(edit)
+    has_more = len(edits) > limit
+    return {"items": edits[:limit], "has_more": has_more}
+
 # ----------- Leaderboard -----------
 @api_router.get("/leaderboard")
 async def leaderboard(limit: int = 10):
@@ -1820,6 +2215,8 @@ async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = De
         update["$unset"] = {"custom_role_id": ""}
     await db.users.update_one({"_id": ObjectId(user_id)}, update)
     target = await db.users.find_one({"_id": ObjectId(user_id)})
+    if target:
+        await _sync_user_role_badges(user_id, await _effective_user_role(target))
     label = ", ".join(labels) if labels else "(none)"
     await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Custom roles: {label}")
     return {"ok": True, "custom_role_ids": cleaned}
@@ -2002,12 +2399,47 @@ async def suspend_user(user_id: str, payload: SuspendRequest, mod: dict = Depend
     verb = "Updated suspension" if was_suspended else "Suspended"
     await log_edit(mod, "user", user_id, action, target.get("name", ""), f"{verb} {duration_label}: {payload.reason or '(no reason)'}", changes)
     title = f"Your suspension has been updated — now {duration_label}" if was_suspended else f"Your account has been suspended {duration_label}"
+    suspension_thread_id = None
+    if not was_suspended:
+        author_role = mod.get("effective_role", mod.get("role", "user"))
+        if author_role not in ("moderator", "admin"):
+            author_role = "moderator"
+        thread_title = "Account suspension"
+        reason = payload.reason or "No reason was provided."
+        thread_body = (
+            f"Your account has been suspended {duration_label}.\n\n"
+            f"Reason: {reason}\n\n"
+            "If you believe this is a mistake, reply here to contact Support."
+        )
+        thread = {
+            "title": thread_title,
+            "body": thread_body,
+            "category": "direct",
+            "status": "open",
+            "entity_type": None,
+            "entity_id": None,
+            "entity_title": None,
+            "user_id": mod["id"],
+            "user_name": mod.get("name"),
+            "user_avatar": mod.get("avatar_url", ""),
+            "user_role": author_role,
+            "target_user_id": user_id,
+            "target_user_name": target.get("name"),
+            "is_direct": True,
+            "is_suspension_notice": True,
+            "created_at": now_iso,
+            "last_activity_at": now_iso,
+            "message_count": 0,
+        }
+        result = await db.threads.insert_one(thread)
+        suspension_thread_id = str(result.inserted_id)
     await _create_notification(
         user_id=str(target["_id"]),
         ntype="suspension",
         title=title,
         body=payload.reason or "",
-        link="/inbox",
+        link=f"/threads/{suspension_thread_id}" if suspension_thread_id else "/inbox",
+        thread_id=suspension_thread_id,
         from_user=mod,
     )
     return {"ok": True, "suspended_until": until, "updated": was_suspended}
@@ -2028,14 +2460,109 @@ async def unsuspend_user(user_id: str, mod: dict = Depends(get_current_user)):
     await log_edit(mod, "user", user_id, "unsuspend", target.get("name", ""), "Suspension lifted")
     return {"ok": True}
 
+@api_router.post("/moderation/users/{user_id}/restore")
+async def restore_user_account(user_id: str, admin: dict = Depends(get_current_admin)):
+    try:
+        target_id = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    target = await db.users.find_one({"_id": target_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target.get("deleted_at"):
+        raise HTTPException(status_code=400, detail="Account is not deleted")
+    restore_update = {"$unset": {"deleted_at": "", "deleted_by": "", "deleted_by_name": ""}}
+    if not target.get("last_account_deleted_at"):
+        restore_update["$set"] = {"last_account_deleted_at": target["deleted_at"]}
+    await db.users.update_one({"_id": target_id}, restore_update)
+    await log_edit(admin, "user", user_id, "account-restore", target.get("name", ""), "Restored deleted account")
+    return {"ok": True}
+
 @api_router.patch("/moderation/users/{user_id}/role")
 async def set_user_role(user_id: str, payload: RoleUpdate, admin: dict = Depends(get_current_admin)):
     if payload.role not in ("user", "moderator", "admin"):
         raise HTTPException(status_code=400, detail="Invalid role")
     await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": payload.role}})
     target = await db.users.find_one({"_id": ObjectId(user_id)})
+    if target:
+        await _sync_user_role_badges(user_id, await _effective_user_role(target))
     await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Role set to {payload.role}")
     return {"ok": True, "role": payload.role}
+
+@api_router.patch("/moderation/users/{user_id}/profile")
+async def admin_update_user_profile(
+    user_id: str,
+    payload: AdminUserProfileUpdate,
+    admin: dict = Depends(get_current_admin),
+):
+    try:
+        target_id = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    target = await db.users.find_one({"_id": target_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    update = {}
+    if payload.email is not None:
+        email = str(payload.email).strip().lower()
+        if email != (target.get("email") or "").lower():
+            existing = await db.users.find_one({"email": email, "_id": {"$ne": target_id}})
+            if existing:
+                raise HTTPException(status_code=400, detail="Email is already registered")
+            update["email"] = email
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not USERNAME_RE.fullmatch(name):
+            raise HTTPException(status_code=400, detail="Username must be 2–40 characters: letters, numbers, dots, underscores, or hyphens only.")
+        if name.lower() != (target.get("name") or "").strip().lower():
+            if await _username_taken(name, exclude_user_id=user_id):
+                raise HTTPException(status_code=400, detail="Username is already taken")
+            update["name"] = name
+            update["name_last_changed_at"] = datetime.now(timezone.utc).isoformat()
+    if payload.bio is not None:
+        update["bio"] = payload.bio.strip()
+    if payload.avatar_url is not None:
+        update["avatar_url"] = payload.avatar_url
+    if not update:
+        return {"ok": True, "updated": {}}
+
+    try:
+        await db.users.update_one({"_id": target_id}, {"$set": update})
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail="Email is already registered")
+
+    if "name" in update:
+        for collection in (db.edits, db.comments, db.threads, db.thread_messages):
+            await collection.update_many(
+                {"user_id": user_id},
+                {"$set": {"user_name": update["name"]}},
+            )
+        await db.notifications.update_many(
+            {"from_user_id": user_id},
+            {"$set": {"from_user_name": update["name"]}},
+        )
+    if "avatar_url" in update:
+        for collection in (db.edits, db.comments, db.threads, db.thread_messages):
+            await collection.update_many(
+                {"user_id": user_id},
+                {"$set": {"user_avatar": update["avatar_url"]}},
+            )
+        await db.notifications.update_many(
+            {"from_user_id": user_id},
+            {"$set": {"from_user_avatar": update["avatar_url"]}},
+        )
+
+    await log_edit(
+        admin,
+        "user",
+        user_id,
+        "profile-update",
+        update.get("name", target.get("name", "")),
+        "Admin updated user profile",
+        changes=compute_field_changes(target, update),
+    )
+    return {"ok": True, "updated": update}
 
 # ============================================================================
 # IP Ban (moderator/admin tool)
@@ -2253,6 +2780,43 @@ async def update_homepage_config(payload: HomepageConfig, admin: dict = Depends(
     await log_edit(admin, "homepage", "homepage", "update", "Homepage", f"Updated homepage config ({len(cleaned_sections)} sections)")
     return {"ok": True}
 
+DEFAULT_CONTRIBUTOR_GUIDELINES = """Make every contribution accurate, clear, and useful to the community.
+
+Research before editing. Prefer reliable, official sources for names, dates, credits, and other factual details. Do not guess when information is uncertain.
+
+Write in a neutral, concise style. Keep biographies and descriptions focused on relevant, verifiable information.
+
+Check for an existing entry before creating a new one. Add only details that belong to the movie, series, actor, or collection you are editing.
+
+Use images that directly represent the subject. Only add material you have permission to use, and do not use images to advertise or promote unrelated content.
+
+Do not add private personal information, harassment, spam, or intentionally misleading content. Use the forum to discuss disputed information and report problems.
+
+Moderators may correct, lock, or remove contributions that do not follow these guidelines."""
+
+@api_router.get("/contributor-guidelines")
+async def get_contributor_guidelines():
+    config = await db.site_config.find_one({"_id": "contributor-guidelines"})
+    return {
+        "title": "Contributor Guidelines",
+        "content": (config or {}).get("content") or DEFAULT_CONTRIBUTOR_GUIDELINES,
+        "updated_at": (config or {}).get("updated_at"),
+    }
+
+@api_router.put("/contributor-guidelines")
+async def update_contributor_guidelines(payload: ContributorGuidelinesUpdate, admin: dict = Depends(get_current_admin)):
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Guidelines cannot be empty")
+    updated_at = datetime.now(timezone.utc).isoformat()
+    await db.site_config.update_one(
+        {"_id": "contributor-guidelines"},
+        {"$set": {"content": content, "updated_at": updated_at, "updated_by": admin["id"]}},
+        upsert=True,
+    )
+    await log_edit(admin, "site-content", "contributor-guidelines", "update", "Contributor Guidelines", "Updated contributor guidelines")
+    return {"ok": True, "content": content, "updated_at": updated_at}
+
 @api_router.get("/moderation/users/{user_id}/ips")
 async def get_user_ips(user_id: str, mod: dict = Depends(get_current_moderator)):
     try:
@@ -2290,9 +2854,16 @@ async def get_user_ips(user_id: str, mod: dict = Depends(get_current_moderator))
     return {"user_id": user_id, "user_name": target.get("name"), "ips": result}
 
 @api_router.get("/moderation/users")
-async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int = 200):
+async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int = 200, q: Optional[str] = None):
     users = []
-    async for u in db.users.find({}).sort("created_at", -1).limit(limit):
+    user_query = {}
+    if q and q.strip():
+        query = re.escape(q.strip())
+        user_query["$or"] = [
+            {"name": {"$regex": query, "$options": "i"}},
+            {"email": {"$regex": query, "$options": "i"}},
+        ]
+    async for u in db.users.find(user_query).sort("created_at", -1).limit(limit):
         cr = None
         if u.get("custom_role_id"):
             try:
@@ -2306,15 +2877,107 @@ async def list_all_users(mod: dict = Depends(get_current_moderator), limit: int 
             "id": str(u["_id"]),
             "email": u.get("email"),
             "name": u.get("name"),
+            "bio": u.get("bio", ""),
             "role": u.get("role", "user"),
             "custom_role": cr,
             "avatar_url": u.get("avatar_url", ""),
             "created_at": u.get("created_at"),
             "suspended_until": u.get("suspended_until"),
             "suspension_reason": u.get("suspension_reason", ""),
+            "is_deleted": bool(u.get("deleted_at")),
+            "deleted_at": u.get("deleted_at"),
             "ip_count": len(u.get("ips", []) or []),
         })
     return users
+
+@api_router.get("/admin/username-cooldown/users")
+async def search_username_cooldown_users(q: Optional[str] = None, limit: int = 100, admin: dict = Depends(get_current_admin)):
+    query = {}
+    if q and q.strip():
+        escaped = re.escape(q.strip())
+        query["$or"] = [
+            {"name": {"$regex": escaped, "$options": "i"}},
+            {"email": {"$regex": escaped, "$options": "i"}},
+        ]
+    users = []
+    async for user in db.users.find(query).sort("name", 1).limit(max(1, min(limit, 100))):
+        users.append({"id": str(user["_id"]), "name": user.get("name", ""), "email": user.get("email", "")})
+    return users
+
+@api_router.get("/admin/username-cooldown")
+async def get_username_cooldown(user_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    if not user_id:
+        return {"default_amount": DEFAULT_USERNAME_COOLDOWN_AMOUNT, "default_unit": DEFAULT_USERNAME_COOLDOWN_UNIT}
+    try:
+        target = await db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        target = None
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    amount, unit, has_override = _username_cooldown_settings(target)
+    return {
+        "user_id": user_id,
+        "user_name": target.get("name", ""),
+        "amount": amount,
+        "unit": unit,
+        "has_override": has_override,
+        "default_amount": DEFAULT_USERNAME_COOLDOWN_AMOUNT,
+        "default_unit": DEFAULT_USERNAME_COOLDOWN_UNIT,
+    }
+
+@api_router.put("/admin/username-cooldown")
+async def set_username_cooldown(payload: UsernameCooldownOverride, admin: dict = Depends(get_current_admin)):
+    unit = payload.unit.lower()
+    if unit not in USERNAME_COOLDOWN_UNITS:
+        raise HTTPException(status_code=400, detail="Invalid cooldown unit")
+    try:
+        user_oid = ObjectId(payload.user_id)
+        target = await db.users.find_one({"_id": user_oid})
+    except Exception:
+        target = None
+        user_oid = None
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    updates = {"username_cooldown_amount": payload.amount, "username_cooldown_unit": unit}
+    await db.users.update_one({"_id": user_oid}, {"$set": updates})
+    await log_edit(
+        admin,
+        "user",
+        payload.user_id,
+        "update",
+        target.get("name", ""),
+        f"Set username change cooldown to {payload.amount} {unit}",
+        compute_field_changes(target, updates),
+    )
+    return {"user_id": payload.user_id, "user_name": target.get("name", ""), "amount": payload.amount, "unit": unit, "has_override": True}
+
+@api_router.delete("/admin/username-cooldown/{user_id}")
+async def reset_username_cooldown(user_id: str, admin: dict = Depends(get_current_admin)):
+    try:
+        user_oid = ObjectId(user_id)
+        target = await db.users.find_one({"_id": user_oid})
+    except Exception:
+        target = None
+        user_oid = None
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    previous = {key: target[key] for key in ("username_cooldown_amount", "username_cooldown_unit") if key in target}
+    await db.users.update_one(
+        {"_id": user_oid},
+        {"$unset": {"username_cooldown_amount": "", "username_cooldown_unit": ""}},
+    )
+    if previous:
+        changes = [{"field": key, "before": value, "after": None} for key, value in previous.items()]
+        await log_edit(admin, "user", user_id, "update", target.get("name", ""), "Reset username cooldown to default", changes)
+    return {
+        "user_id": user_id,
+        "user_name": target.get("name", ""),
+        "amount": DEFAULT_USERNAME_COOLDOWN_AMOUNT,
+        "unit": DEFAULT_USERNAME_COOLDOWN_UNIT,
+        "has_override": False,
+        "default_amount": DEFAULT_USERNAME_COOLDOWN_AMOUNT,
+        "default_unit": DEFAULT_USERNAME_COOLDOWN_UNIT,
+    }
 
 @api_router.get("/moderation/stats")
 async def moderation_stats(mod: dict = Depends(get_current_moderator)):
@@ -2432,11 +3095,137 @@ async def list_suspensions(mod: dict = Depends(get_current_moderator), q: Option
         })
     return out
 
+_HARASSMENT_CATEGORIES = ("harassment", "harassment/threatening", "hate", "hate/threatening")
+_MODERATION_EXEMPT_PERMISSIONS = {
+    "user.suspend", "content.lock_cast", "content.protect_fields", "moderation.messages.read_reply",
+    "content.delete", "content.lock", "user.view_ips", "thread.moderate", "comment.moderate",
+    "content.edit_locked",
+}
+
+def _is_moderation_exempt(user: dict) -> bool:
+    if user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin"):
+        return True
+    return bool(_MODERATION_EXEMPT_PERMISSIONS.intersection(user.get("permissions") or []))
+
+async def _permanently_suspend_for_harassment(user: dict, categories: list[str]) -> None:
+    if _is_moderation_exempt(user):
+        return
+    user_id = user.get("id")
+    try:
+        user_oid = ObjectId(user_id)
+    except Exception:
+        return
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    current = await db.users.find_one({"_id": user_oid})
+    if not current:
+        return
+    until = current.get("suspended_until")
+    if until == "permanent":
+        return
+    if until:
+        try:
+            if datetime.fromisoformat(until) > now:
+                return
+        except Exception:
+            pass
+    result = await db.users.update_one(
+        {
+            "_id": user_oid,
+            "role": {"$nin": ["moderator", "admin"]},
+            "effective_role": {"$nin": ["moderator", "admin"]},
+            "$or": [
+                {"suspended_until": {"$exists": False}},
+                {"suspended_until": None},
+                {"suspended_until": {"$lte": now_iso}},
+            ],
+        },
+        {"$set": {
+            "suspended_until": "permanent",
+            "suspension_reason": "harassment",
+            "suspended_by": "system",
+            "suspended_by_name": "Automatic Moderation",
+            "suspended_at": now_iso,
+        }},
+    )
+    if not result.modified_count:
+        return
+    categories_text = ", ".join(categories)
+    thread = {
+        "title": "Automatic account suspension",
+        "body": f"Your account has been suspended permanently.\n\nReason: harassment. Automated moderation flagged your content under: {categories_text}. If you believe this is a mistake, reply here to contact Support.",
+        "category": "direct",
+        "status": "open",
+        "entity_type": None,
+        "entity_id": None,
+        "entity_title": None,
+        "user_id": "system",
+        "user_name": "Automatic Moderation",
+        "user_avatar": "",
+        "user_role": "moderator",
+        "target_user_id": user_id,
+        "target_user_name": current.get("name"),
+        "is_direct": True,
+        "is_suspension_notice": True,
+        "created_at": now_iso,
+        "last_activity_at": now_iso,
+        "message_count": 0,
+    }
+    thread_result = await db.threads.insert_one(thread)
+    thread_id = str(thread_result.inserted_id)
+    await log_edit(
+        {"id": "system", "name": "Automatic Moderation", "role": "moderator"},
+        "user",
+        user_id,
+        "suspend",
+        current.get("name", ""),
+        f"Automatically suspended permanently for harassment: {categories_text}",
+    )
+    await _create_notification(
+        user_id=user_id,
+        ntype="suspension",
+        title="Your account has been suspended permanently",
+        body="Reason: harassment",
+        link=f"/threads/{thread_id}",
+        thread_id=thread_id,
+    )
+
+async def _moderate_user_content(user: dict, text: str) -> None:
+    if not text or not text.strip() or _is_moderation_exempt(user):
+        return
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Content moderation is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/moderations",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": "omni-moderation-latest", "input": text[:20000]},
+            )
+            response.raise_for_status()
+            results = response.json().get("results") or []
+            categories = (results[0].get("categories") or {}) if results else {}
+    except Exception as error:
+        logger.warning("Content moderation request failed: %s", type(error).__name__)
+        raise HTTPException(status_code=503, detail="Content moderation is temporarily unavailable")
+
+    triggered = [category for category in _HARASSMENT_CATEGORIES if categories.get(category)]
+    if not triggered:
+        return
+    if not _is_moderation_exempt(user):
+        await _permanently_suspend_for_harassment(user, triggered)
+    raise HTTPException(
+        status_code=403,
+        detail="This content triggered the harassment filter. Your account has been permanently suspended." if not _is_moderation_exempt(user) else "This content was blocked by the harassment filter.",
+    )
+
 # ----------- Comments (Discussion) -----------
 @api_router.post("/comments")
 async def create_comment(payload: CommentCreate, user: dict = Depends(get_current_user)):
     if payload.entity_type not in ("movie", "series"):
         raise HTTPException(status_code=400, detail="Invalid entity_type")
+    await _moderate_user_content(user, payload.text)
     doc = {
         "entity_type": payload.entity_type,
         "entity_id": payload.entity_id,
@@ -2597,6 +3386,7 @@ async def _create_notification(*, user_id: str, ntype: str, title: str, body: st
 async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_user)):
     if payload.category not in ("support", "report", "general"):
         raise HTTPException(status_code=400, detail="Invalid category")
+    await _moderate_user_content(user, f"{payload.title}\n{payload.body}")
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "title": payload.title.strip(),
@@ -2695,6 +3485,12 @@ async def list_threads(
         # exclude direct threads from generic listings
         base_exclude = {"$or": [{"is_direct": {"$ne": True}}, {"is_direct": {"$exists": False}}]}
         q = {"$and": [q, base_exclude]} if q else base_exclude
+        if not _is_mod_role(viewer):
+            if viewer:
+                private_filter = {"$or": [{"is_private": {"$ne": True}}, {"user_id": viewer["id"]}]}
+            else:
+                private_filter = {"is_private": {"$ne": True}}
+            q = {"$and": [q, private_filter]} if q else private_filter
     # Hide threads created by currently-suspended users from non-mod viewers
     if not _is_mod_role(viewer):
         suspended_ids = await _get_suspended_user_ids()
@@ -2724,6 +3520,10 @@ async def get_thread(thread_id: str, viewer: Optional[dict] = Depends(get_option
     except Exception:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not t:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if t.get("is_private") and not (
+        viewer and (viewer.get("id") == t.get("user_id") or _is_mod_role(viewer))
+    ):
         raise HTTPException(status_code=404, detail="Thread not found")
     if t.get("is_direct"):
         if not _can_view_direct_thread(t, viewer):
@@ -2773,6 +3573,8 @@ async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user
     if not t:
         raise HTTPException(status_code=404, detail="Thread not found")
     is_direct = bool(t.get("is_direct"))
+    if t.get("is_private") and user.get("id") != t.get("user_id") and not _is_mod_role(user):
+        raise HTTPException(status_code=404, detail="Thread not found")
     if is_direct:
         if not _can_view_direct_thread(t, user):
             raise HTTPException(status_code=404, detail="Thread not found")
@@ -2782,6 +3584,7 @@ async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user
             raise HTTPException(status_code=403, detail="Your account is suspended. You can only reply to moderator messages.")
     if t.get("status") == "closed" and not _is_mod_role(user):
         raise HTTPException(status_code=403, detail="Thread is closed")
+    await _moderate_user_content(user, payload.text)
     now = datetime.now(timezone.utc).isoformat()
     # If a mod-perm user is posting into a direct thread they're not a participant in,
     # mark the message with role=moderator so masking kicks in for the suspended recipient.
@@ -2832,6 +3635,47 @@ async def post_thread_message(thread_id: str, payload: ThreadMessageCreate, user
         )
     return doc
 
+@api_router.patch("/threads/{thread_id}/messages/{message_id}")
+async def edit_thread_message(
+    thread_id: str,
+    message_id: str,
+    payload: ThreadMessageUpdate,
+    user: dict = Depends(get_current_user_allow_suspended),
+):
+    try:
+        thread_oid = ObjectId(thread_id)
+        message_oid = ObjectId(message_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Message not found")
+    thread = await db.threads.find_one({"_id": thread_oid})
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    is_direct = bool(thread.get("is_direct"))
+    if thread.get("is_private") and user.get("id") != thread.get("user_id") and not _is_mod_role(user):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if is_direct:
+        if not _can_view_direct_thread(thread, user):
+            raise HTTPException(status_code=404, detail="Thread not found")
+    elif user.get("is_suspended"):
+        raise HTTPException(status_code=403, detail="Your account is suspended. You can only access moderator messages.")
+
+    message = await db.thread_messages.find_one({"_id": message_oid, "thread_id": thread_id})
+    if not message or message.get("system"):
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.get("user_id") != user.get("id"):
+        raise HTTPException(status_code=403, detail="You can only edit your own messages")
+    if thread.get("status") == "closed" and not _is_mod_role(user):
+        raise HTTPException(status_code=403, detail="Thread is closed")
+
+    edited_at = datetime.now(timezone.utc).isoformat()
+    updated_text = payload.text.strip()
+    await _moderate_user_content(user, updated_text)
+    await db.thread_messages.update_one(
+        {"_id": message_oid, "thread_id": thread_id},
+        {"$set": {"text": updated_text, "edited_at": edited_at}},
+    )
+    return {"id": message_id, "thread_id": thread_id, "text": updated_text, "edited_at": edited_at}
+
 @api_router.patch("/threads/{thread_id}/status")
 async def set_thread_status(thread_id: str, payload: ThreadStatusUpdate, mod: dict = Depends(get_current_moderator)):
     if payload.status not in ("open", "closed"):
@@ -2854,6 +3698,26 @@ async def set_thread_status(thread_id: str, payload: ThreadStatusUpdate, mod: di
     })
     t = await db.threads.find_one({"_id": ObjectId(thread_id)})
     return _serialize_thread(t)
+
+@api_router.patch("/threads/{thread_id}/privacy")
+async def set_thread_privacy(thread_id: str, payload: ThreadPrivacyUpdate, mod: dict = Depends(get_current_moderator)):
+    try:
+        thread_oid = ObjectId(thread_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await db.threads.find_one({"_id": thread_oid})
+    if not thread or thread.get("is_direct"):
+        raise HTTPException(status_code=404, detail="Forum thread not found")
+    await db.threads.update_one(
+        {"_id": thread_oid},
+        {"$set": {
+            "is_private": payload.is_private,
+            "privacy_changed_at": datetime.now(timezone.utc).isoformat(),
+            "privacy_changed_by": mod["id"],
+        }},
+    )
+    thread["is_private"] = payload.is_private
+    return _serialize_thread(thread)
 
 @api_router.delete("/threads/{thread_id}")
 async def delete_thread(thread_id: str, user: dict = Depends(get_current_user)):
@@ -2938,9 +3802,601 @@ async def ip_overlap_groups(mod: dict = Depends(get_current_moderator)):
     return result
 
 # ----------- Movies -----------
+def _normalize_purchase_options(options: list) -> list:
+    normalized = []
+    seen = set()
+    for option in options or []:
+        row = option if isinstance(option, dict) else option.model_dump()
+        provider = (row.get("provider") or "").strip()
+        url = (row.get("url") or "").strip()
+        parsed = urlparse(url)
+        if not provider or not url or parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Each purchase option needs a provider and valid HTTP(S) URL")
+        key = (provider.casefold(), url.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"provider": provider, "url": url})
+    return normalized
+
+TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
+
+async def _tmdb_request(path: str, params: Optional[dict] = None) -> dict:
+    access_token = (os.environ.get("TMDB_ACCESS_TOKEN") or "").strip()
+    api_key = (os.environ.get("TMDB_API_KEY") or "").strip()
+    if not access_token and not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="TMDB import needs a backend credential. Set TMDB_ACCESS_TOKEN or TMDB_API_KEY in backend/.env and restart the API.",
+        )
+    headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
+    query = dict(params or {})
+    if api_key:
+        query["api_key"] = api_key
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as http:
+            response = await http.get(f"https://api.themoviedb.org/3{path}", headers=headers, params=query)
+            if response.status_code == 401:
+                raise HTTPException(status_code=503, detail="TMDB credentials were rejected")
+            response.raise_for_status()
+            return response.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as error:
+        logger.warning("TMDB request failed with status %s", error.response.status_code)
+        if error.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="TMDB title not found")
+        raise HTTPException(status_code=502, detail="TMDB request failed")
+    except httpx.HTTPError as error:
+        logger.warning("TMDB request failed: %s", type(error).__name__)
+        raise HTTPException(status_code=502, detail="TMDB is temporarily unavailable")
+
+def _tmdb_image(path: Optional[str]) -> str:
+    return f"{TMDB_IMAGE_BASE}{path}" if path else ""
+
+async def _tmdb_language_name(code: Optional[str]) -> str:
+    if not code:
+        return "English"
+    try:
+        languages = await _tmdb_request("/configuration/languages")
+        language = next((item for item in languages if item.get("iso_639_1") == code), None)
+        return language.get("english_name") if language and language.get("english_name") else code
+    except HTTPException:
+        return code
+
+def _tmdb_trailer(videos: dict) -> str:
+    for video in videos.get("results", []) or []:
+        if video.get("site") == "YouTube" and video.get("type") == "Trailer" and video.get("key"):
+            return f"https://www.youtube.com/watch?v={video['key']}"
+    return ""
+
+async def _tmdb_actor_id(person: dict, user: dict) -> Optional[str]:
+    name = (person.get("name") or "").strip()
+    if not name:
+        return None
+    tmdb_person_id = person.get("id")
+    existing = await db.actors.find_one(_alive({"tmdb_id": tmdb_person_id})) if tmdb_person_id else None
+    if existing:
+        return str(existing["_id"])
+    named_matches = await db.actors.find(
+        _alive({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
+    ).to_list(2)
+    if not tmdb_person_id and named_matches:
+        return str(named_matches[0]["_id"])
+    if tmdb_person_id and len(named_matches) == 1 and not named_matches[0].get("tmdb_id"):
+        await db.actors.update_one({"_id": named_matches[0]["_id"]}, {"$set": {"tmdb_id": tmdb_person_id}})
+        return str(named_matches[0]["_id"])
+    actor = {
+        "name": name,
+        "tmdb_id": tmdb_person_id,
+        "bio": person.get("biography") or "",
+        "photo_url": "",
+        "birth_date": person.get("birthday"),
+        "death_date": person.get("deathday"),
+        "place_of_birth": person.get("place_of_birth") or "",
+        "place_of_death": "",
+        "gallery": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"],
+    }
+    result = await db.actors.insert_one({
+        **actor,
+    })
+    actor_id = str(result.inserted_id)
+    await log_edit(user, "actor", actor_id, "create", name, f"Created actor \"{name}\" from TMDB")
+    return actor_id
+
+async def _ensure_tmdb_bot_user() -> dict:
+    email = (os.environ.get("CINEVERSE_BOT_EMAIL") or "cineverse-bot@cineverse.com").strip().lower()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        await db.users.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"name": "Cineverse BOT", "role": "user", "is_system_account": True}},
+        )
+        user_id = str(existing["_id"])
+    else:
+        result = await db.users.insert_one({
+            "email": email,
+            "password_hash": hash_password(secrets.token_urlsafe(48)),
+            "name": "Cineverse BOT",
+            "role": "user",
+            "is_system_account": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        user_id = str(result.inserted_id)
+    return {"id": user_id, "email": email, "name": "Cineverse BOT", "role": "user", "avatar_url": ""}
+
+def _tmdb_credentials_configured() -> bool:
+    return bool((os.environ.get("TMDB_ACCESS_TOKEN") or "").strip() or (os.environ.get("TMDB_API_KEY") or "").strip())
+
+async def _tmdb_match_id(kind: str, title: str, date: Optional[str], tmdb_id: Optional[int] = None) -> Optional[int]:
+    if tmdb_id:
+        return tmdb_id
+    normalized_title = re.sub(r"[^\w]", "", (title or "").casefold())
+    if not normalized_title:
+        return None
+    media_type = "movie" if kind == "movie" else "tv"
+    search = await _tmdb_request(f"/search/{media_type}", {"query": title, "include_adult": "false"})
+    expected_year = str(date or "")[:4]
+    matches = []
+    for result in search.get("results", []) or []:
+        result_title = result.get("title") if kind == "movie" else result.get("name")
+        if re.sub(r"[^\w]", "", (result_title or "").casefold()) != normalized_title:
+            continue
+        result_date = result.get("release_date") if kind == "movie" else result.get("first_air_date")
+        if expected_year and (result_date or "")[:4] != expected_year:
+            continue
+        if result.get("id"):
+            matches.append(result["id"])
+    return matches[0] if len(matches) == 1 else None
+
+async def _tmdb_add_cast(kind: str, title: str, date: Optional[str], tmdb_id: Optional[int], cast: list, bot: dict):
+    if not _tmdb_credentials_configured():
+        return cast, False
+    matched_id = await _tmdb_match_id(kind, title, date, tmdb_id)
+    if not matched_id:
+        return cast, True
+    media_type = "movie" if kind == "movie" else "tv"
+    details = await _tmdb_request(f"/{media_type}/{matched_id}", {"append_to_response": "credits"})
+    rows = [dict(row) if isinstance(row, dict) else row.model_dump() for row in (cast or [])]
+    existing_actor_ids = {row.get("actor_id") for row in rows if isinstance(row, dict)}
+    for person in (details.get("credits") or {}).get("cast", [])[:20]:
+        actor_id = await _tmdb_actor_id(person, bot)
+        if actor_id and actor_id not in existing_actor_ids:
+            rows.append({"actor_id": actor_id, "character_name": person.get("character") or ""})
+            existing_actor_ids.add(actor_id)
+    return _dedupe_cast(rows), True
+
+async def _tmdb_audit_item(kind: str, item: dict, bot: dict):
+    date_field = "release_date" if kind == "movie" else "first_air_date"
+    tmdb_id = await _tmdb_match_id(kind, item.get("title") or "", item.get(date_field), item.get("tmdb_id"))
+    if not tmdb_id:
+        return {}, 0, 0, True, None
+
+    media_type = "movie" if kind == "movie" else "tv"
+    details = await _tmdb_request(f"/{media_type}/{tmdb_id}", {"append_to_response": "credits"})
+    update = {}
+    added = removed = 0
+    credits = details.get("credits") or {}
+    tmdb_cast = credits.get("cast") if isinstance(credits, dict) else None
+    if isinstance(tmdb_cast, list) and tmdb_cast:
+        cast_field = "cast" if kind == "movie" else "main_cast"
+        current_cast = [row if isinstance(row, dict) else row.model_dump() for row in (item.get(cast_field) or [])]
+        current_actor_oids = []
+        for row in current_cast:
+            try:
+                current_actor_oids.append(ObjectId(row.get("actor_id")))
+            except Exception:
+                pass
+        actor_tmdb_ids = {}
+        if current_actor_oids:
+            async for actor in db.actors.find({"_id": {"$in": current_actor_oids}}, {"tmdb_id": 1}):
+                actor_tmdb_ids[str(actor["_id"])] = actor.get("tmdb_id")
+        people_by_tmdb_id = {
+            int(person["id"]): person
+            for person in tmdb_cast
+            if person.get("id") is not None
+        }
+        retained_cast = []
+        for row in current_cast:
+            person_id = actor_tmdb_ids.get(row.get("actor_id"))
+            try:
+                person_id = int(person_id) if person_id is not None else None
+            except (TypeError, ValueError):
+                person_id = None
+            if person_id is not None and person_id not in people_by_tmdb_id:
+                continue
+            person = people_by_tmdb_id.get(person_id)
+            character = (person or {}).get("character")
+            retained_cast.append({
+                **row,
+                "character_name": character if character else row.get("character_name") or "",
+            })
+
+        top_billed_cast = []
+        for person in tmdb_cast[:20]:
+            actor_id = await _tmdb_actor_id(person, bot)
+            if actor_id:
+                top_billed_cast.append({"actor_id": actor_id, "character_name": person.get("character") or ""})
+        top_billed_by_actor = {row["actor_id"]: row for row in top_billed_cast}
+        retained_ids = {row.get("actor_id") for row in retained_cast}
+        expected_cast = [
+            {
+                **row,
+                "character_name": top_billed_by_actor[row["actor_id"]].get("character_name") or row.get("character_name") or "",
+            } if row.get("actor_id") in top_billed_by_actor else row
+            for row in retained_cast
+        ]
+        expected_cast.extend(row for row in top_billed_cast if row["actor_id"] not in retained_ids)
+        expected_cast = _dedupe_cast(expected_cast)
+        if cast_field not in (item.get("locked_fields") or []):
+            expected_cast = _enforce_cast_locks(
+                current_cast,
+                expected_cast,
+                item.get("locked_cast_actor_ids") or [],
+                False,
+            )
+        current_signature = [{"actor_id": row.get("actor_id"), "character_name": row.get("character_name") or ""} for row in current_cast]
+        expected_ids = {row["actor_id"] for row in expected_cast}
+        current_ids = {row.get("actor_id") for row in current_cast if row.get("actor_id")}
+        cast_locked = cast_field in (item.get("locked_fields") or [])
+        if not cast_locked:
+            added = len(expected_ids - current_ids)
+            removed = len(current_ids - expected_ids)
+        if not cast_locked and expected_cast and current_signature != expected_cast:
+            update[cast_field] = expected_cast
+
+    if kind == "series":
+        fields = {
+            "title": details.get("name"),
+            "first_air_date": details.get("first_air_date"),
+            "last_air_date": details.get("last_air_date"),
+            "synopsis": details.get("overview"),
+            "tagline": details.get("tagline"),
+        }
+        for field, value in fields.items():
+            if isinstance(value, str) and value.strip() and value != item.get(field):
+                update[field] = value
+
+        genres = [genre.get("name") for genre in details.get("genres", []) if genre.get("name")]
+        if genres and genres != (item.get("genres") or []):
+            update["genres"] = genres
+
+        tmdb_status = details.get("status") or ""
+        status_map = {
+            "Ended": "Ended",
+            "Canceled": "Cancelled",
+            "Returning Series": "Returning",
+        }
+        if tmdb_status:
+            status = status_map.get(tmdb_status, "Ongoing")
+            if status != item.get("status"):
+                update["status"] = status
+
+        series_type = (details.get("type") or "").lower()
+        if series_type:
+            mapped_type = "Miniseries" if "mini" in series_type else "Documentary" if "documentary" in series_type else "Scripted"
+            if mapped_type != item.get("type"):
+                update["type"] = mapped_type
+
+        language = await _tmdb_language_name(details.get("original_language"))
+        if details.get("original_language") and language != item.get("original_language"):
+            update["original_language"] = language
+
+        networks = details.get("networks") or []
+        network = networks[0].get("name") if networks else None
+        if network and network != item.get("network"):
+            update["network"] = network
+
+        creators = []
+        for person in details.get("created_by", []) or []:
+            actor_id = await _tmdb_actor_id(person, bot)
+            if actor_id:
+                creators.append({"actor_id": actor_id, "name": person.get("name") or "", "role": "Creator"})
+        if creators and creators != (item.get("creators") or []):
+            update["creators"] = creators
+
+        locked_fields = set(item.get("locked_fields") or [])
+        for field in locked_fields:
+            update.pop(field, None)
+
+    return update, added, removed, True, tmdb_id
+
+class TMDBCastBackfillRequest(BaseModel):
+    kind: str
+    limit: int = Field(default=10, ge=1, le=25)
+
+@api_router.post("/moderation/tmdb/backfill-cast")
+async def backfill_tmdb_cast(payload: TMDBCastBackfillRequest, admin: dict = Depends(get_current_admin)):
+    kind = payload.kind.strip().lower()
+    if kind not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="kind must be movie or series")
+    if not _tmdb_credentials_configured():
+        raise HTTPException(status_code=503, detail="Set TMDB_ACCESS_TOKEN or TMDB_API_KEY on the backend")
+
+    collection = db.movies if kind == "movie" else db.series
+    bot = await _ensure_tmdb_bot_user()
+    checked = updated = added_cast_members = removed_cast_members = unmatched = errors = 0
+    cursor = collection.find(_alive({"_tmdb_audit_checked": {"$ne": True}})).sort("_id", 1).limit(payload.limit)
+    async for item in cursor:
+        entity_id = str(item["_id"])
+        try:
+            update_data, added, removed, checked_item, matched_id = await _tmdb_audit_item(kind, item, bot)
+        except Exception as error:
+            errors += 1
+            logger.warning("Cineverse BOT TMDB audit failed for %s %s: %s", kind, entity_id, type(error).__name__)
+            continue
+
+        if checked_item:
+            checked += 1
+        if not matched_id:
+            unmatched += 1
+        update_data["_tmdb_audit_checked"] = True
+        if matched_id and item.get("tmdb_id") != matched_id:
+            update_data["tmdb_id"] = matched_id
+        content_updates = {
+            key: value for key, value in update_data.items()
+            if key not in {"_tmdb_audit_checked", "tmdb_id"}
+        }
+        if content_updates:
+            update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await collection.update_one({"_id": item["_id"]}, {"$set": update_data})
+            updated += 1
+            added_cast_members += added
+            removed_cast_members += removed
+            await log_edit(
+                bot,
+                kind,
+                entity_id,
+                "update",
+                item.get("title") or "",
+                f"Cineverse BOT reconciled {kind} data with TMDB; added {added} and removed {removed} cast members",
+                compute_field_changes(item, content_updates),
+            )
+        else:
+            await collection.update_one({"_id": item["_id"]}, {"$set": update_data})
+
+    return {
+        "kind": kind,
+        "checked": checked,
+        "updated": updated,
+        "added_cast_members": added_cast_members,
+        "removed_cast_members": removed_cast_members,
+        "unmatched": unmatched,
+        "errors": errors,
+    }
+
+class TMDBImportRequest(BaseModel):
+    kind: str
+    tmdb_id: int = Field(ge=1)
+
+class TMDBImportSettingUpdate(BaseModel):
+    enabled: bool
+
+async def _assert_unique_imdb_id(imdb_id: str, exclude_id=None):
+    if not imdb_id:
+        return
+    for kind, collection in (("movie", db.movies), ("series", db.series)):
+        query = _alive({"imdb_id": imdb_id})
+        if exclude_id is not None:
+            query["_id"] = {"$ne": exclude_id}
+        existing = await collection.find_one(query, {"_id": 1, "title": 1})
+        if existing:
+            label = "movie" if kind == "movie" else "TV series"
+            _raise_duplicate_entity(
+                kind,
+                existing,
+                f'This IMDb ID already belongs to "{existing.get("title", label)}". Please edit the existing page instead.',
+            )
+
+def _raise_duplicate_entity(kind: str, existing: dict, message: str):
+    entity_id = str(existing["_id"])
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "message": message,
+            "entity_type": kind,
+            "entity_id": entity_id,
+            "url": f"/{kind}/{entity_id}",
+        },
+    )
+
+async def _tmdb_import_is_enabled() -> bool:
+    config = await db.site_config.find_one({"_id": "tmdb-import-settings"})
+    return bool((config or {}).get("enabled", False))
+
+@api_router.get("/moderation/tmdb/settings")
+async def get_tmdb_import_settings(mod: dict = Depends(get_current_moderator)):
+    return {"enabled": await _tmdb_import_is_enabled()}
+
+@api_router.put("/moderation/tmdb/settings")
+async def update_tmdb_import_settings(
+    payload: TMDBImportSettingUpdate,
+    admin: dict = Depends(get_current_admin),
+):
+    updated_at = datetime.now(timezone.utc).isoformat()
+    await db.site_config.update_one(
+        {"_id": "tmdb-import-settings"},
+        {"$set": {"enabled": payload.enabled, "updated_at": updated_at, "updated_by": admin["id"]}},
+        upsert=True,
+    )
+    await log_edit(
+        admin,
+        "site-config",
+        "tmdb-import-settings",
+        "update",
+        "TMDB imports",
+        f"TMDB imports {'enabled' if payload.enabled else 'disabled'}",
+    )
+    return {"ok": True, "enabled": payload.enabled}
+
+@api_router.get("/moderation/tmdb/search")
+async def search_tmdb(kind: str, q: str, mod: dict = Depends(get_current_moderator)):
+    if not await _tmdb_import_is_enabled():
+        raise HTTPException(status_code=403, detail="TMDB imports are currently disabled by an administrator")
+    kind = kind.strip().lower()
+    query = q.strip()
+    if kind not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="kind must be movie or series")
+    if not query:
+        raise HTTPException(status_code=400, detail="Search query is required")
+    media_type = "movie" if kind == "movie" else "tv"
+    data = await _tmdb_request(f"/search/{media_type}", {"query": query, "include_adult": "false"})
+    results = []
+    for item in data.get("results", [])[:10]:
+        results.append({
+            "tmdb_id": item.get("id"),
+            "title": item.get("title") if kind == "movie" else item.get("name"),
+            "date": item.get("release_date") if kind == "movie" else item.get("first_air_date"),
+            "overview": item.get("overview") or "",
+            "poster_url": _tmdb_image(item.get("poster_path")),
+        })
+    return results
+
+@api_router.post("/moderation/tmdb/import")
+async def import_from_tmdb(payload: TMDBImportRequest, mod: dict = Depends(get_current_moderator)):
+    if not await _tmdb_import_is_enabled():
+        raise HTTPException(status_code=403, detail="TMDB imports are currently disabled by an administrator")
+    if payload.kind not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="kind must be movie or series")
+    media_type = "movie" if payload.kind == "movie" else "tv"
+    details = await _tmdb_request(f"/{media_type}/{payload.tmdb_id}", {"append_to_response": "credits,videos,external_ids"})
+    imdb_id = (details.get("external_ids") or {}).get("imdb_id")
+    if not imdb_id:
+        raise HTTPException(status_code=422, detail="TMDB has no IMDb ID for this title. Add it manually using the movie or series form.")
+    credits = details.get("credits") or {}
+    videos = details.get("videos") or {}
+    bot = await _ensure_tmdb_bot_user()
+
+    if payload.kind == "movie":
+        title = (details.get("title") or "").strip()
+        release_date = details.get("release_date") or ""
+        duplicate = await db.movies.find_one(_alive({
+            "title": {"$regex": f"^\\s*{re.escape(title)}\\s*$", "$options": "i"},
+            "release_date": release_date,
+        })) if title else None
+        if duplicate:
+            _raise_duplicate_entity("movie", duplicate, "This movie already exists. Please edit the existing page instead.")
+        cast = []
+        for person in (credits.get("cast") or [])[:20]:
+            actor_id = await _tmdb_actor_id(person, bot)
+            if actor_id:
+                cast.append({"actor_id": actor_id, "character_name": person.get("character") or ""})
+        crew = []
+        for person in (credits.get("crew") or []):
+            role = person.get("job") or person.get("department") or "Crew"
+            if role in ("Director", "Writer", "Screenplay", "Story", "Producer", "Executive Producer", "Cinematography", "Original Music Composer", "Editor"):
+                crew.append({"name": person.get("name") or "", "role": role})
+            if len(crew) >= 30:
+                break
+        data = {
+            "title": title,
+            "imdb_id": imdb_id,
+            "tmdb_id": payload.tmdb_id,
+            "release_date": release_date,
+            "genres": [genre.get("name") for genre in details.get("genres", []) if genre.get("name")],
+            "synopsis": details.get("overview") or "",
+            "tagline": details.get("tagline") or "",
+            "poster_url": _tmdb_image(details.get("poster_path")),
+            "backdrop_url": _tmdb_image(details.get("backdrop_path")),
+            "trailer_url": _tmdb_trailer(videos),
+            "runtime": details.get("runtime"),
+            "cast": cast,
+            "crew": crew,
+            "status": details.get("status") if details.get("status") in ("Released", "In Production", "Post Production", "Rumored", "Canceled") else "Released",
+            "original_language": await _tmdb_language_name(details.get("original_language")),
+            "budget": details.get("budget") or None,
+            "revenue": details.get("revenue") or None,
+        }
+        return await create_movie(MovieCreate(**data), mod)
+
+    title = (details.get("name") or "").strip()
+    first_air_date = details.get("first_air_date") or None
+    duplicate = await db.series.find_one(_alive({
+        "title": {"$regex": f"^\\s*{re.escape(title)}\\s*$", "$options": "i"},
+        "first_air_date": first_air_date or "",
+    })) if title else None
+    if duplicate:
+        _raise_duplicate_entity("series", duplicate, "This TV series already exists. Please edit the existing page instead.")
+    main_cast = []
+    for person in (credits.get("cast") or [])[:20]:
+        actor_id = await _tmdb_actor_id(person, bot)
+        if actor_id:
+            main_cast.append({"actor_id": actor_id, "character_name": person.get("character") or ""})
+    creators = []
+    for person in details.get("created_by", []) or []:
+        actor_id = await _tmdb_actor_id(person, bot)
+        if actor_id:
+            creators.append({"actor_id": actor_id, "name": person.get("name") or "", "role": "Creator"})
+    seasons = []
+    for season_summary in details.get("seasons", []) or []:
+        season_number = season_summary.get("season_number")
+        if season_number is None:
+            continue
+        season_detail = await _tmdb_request(f"/{media_type}/{payload.tmdb_id}/season/{season_number}")
+        episodes = []
+        for episode in season_detail.get("episodes", []) or []:
+            still_url = _tmdb_image(episode.get("still_path"))
+            episodes.append({
+                "episode_number": episode.get("episode_number", 0),
+                "name": episode.get("name") or "",
+                "air_date": episode.get("air_date"),
+                "overview": episode.get("overview") or "",
+                "still_url": still_url,
+                "stills": [still_url] if still_url else [],
+            })
+        seasons.append({
+            "season_number": season_number,
+            "name": season_detail.get("name") or season_summary.get("name") or "",
+            "air_date": season_detail.get("air_date") or season_summary.get("air_date"),
+            "overview": season_detail.get("overview") or season_summary.get("overview") or "",
+            "poster_url": _tmdb_image(season_detail.get("poster_path") or season_summary.get("poster_path")),
+            "episodes": episodes,
+        })
+    network = (details.get("networks") or [{}])[0]
+    tmdb_status = details.get("status") or ""
+    if tmdb_status == "Ended":
+        series_status = "Ended"
+    elif tmdb_status == "Canceled":
+        series_status = "Cancelled"
+    elif tmdb_status == "Returning Series":
+        series_status = "Returning"
+    else:
+        series_status = "Ongoing"
+    series_type = (details.get("type") or "").lower()
+    data = {
+        "title": title,
+        "imdb_id": imdb_id,
+        "tmdb_id": payload.tmdb_id,
+        "first_air_date": first_air_date,
+        "last_air_date": details.get("last_air_date") or None,
+        "genres": [genre.get("name") for genre in details.get("genres", []) if genre.get("name")],
+        "synopsis": details.get("overview") or "",
+        "tagline": details.get("tagline") or "",
+        "poster_url": _tmdb_image(details.get("poster_path")),
+        "backdrop_url": _tmdb_image(details.get("backdrop_path")),
+        "trailer_url": _tmdb_trailer(videos),
+        "status": series_status,
+        "main_cast": main_cast,
+        "creators": creators,
+        "network": network.get("name") or "",
+        "network_logo_url": _tmdb_image(network.get("logo_path")),
+        "type": "Miniseries" if "mini" in series_type else "Documentary" if "documentary" in series_type else "Scripted",
+        "original_language": await _tmdb_language_name(details.get("original_language")),
+        "seasons": seasons,
+    }
+    return await create_series(SeriesCreate(**data), mod)
+
 @api_router.post("/movies")
 async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_user)):
     doc = payload.model_dump()
+    is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    if doc.get("imdb_id") and not is_mod:
+        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a movie's IMDb ID")
+    if is_mod and not doc.get("imdb_id"):
+        raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a movie")
+    await _assert_unique_imdb_id(doc["imdb_id"])
     # Duplicate guard: same normalized title + same release date (case + whitespace insensitive)
     title_clean = (doc.get("title") or "").strip()
     if title_clean:
@@ -2949,25 +4405,41 @@ async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_us
             "release_date": doc.get("release_date") or "",
         }))
         if existing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A movie with the same title and release date already exists (id={str(existing['_id'])}).",
-            )
+            _raise_duplicate_entity("movie", existing, "A movie with the same title and release date already exists. Please edit the existing page instead.")
     doc["title"] = title_clean
     doc["cast"] = _dedupe_cast(doc.get("cast", []))
+    tmdb_added_cast = 0
+    if not doc["cast"] and os.environ.get("TMDB_AUTO_CAST_ENABLED", "true").lower() == "true":
+        try:
+            bot = await _ensure_tmdb_bot_user()
+            doc["cast"], checked = await _tmdb_add_cast(
+                "movie", doc["title"], doc.get("release_date"), doc.get("tmdb_id"), [], bot
+            )
+            if checked:
+                doc["_tmdb_cast_checked"] = True
+                tmdb_added_cast = len(doc["cast"])
+        except Exception as error:
+            logger.warning("Cineverse BOT could not add movie cast: %s", type(error).__name__)
     doc["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in doc.get("crew", [])]
+    doc["purchase_options"] = _normalize_purchase_options(doc.get("purchase_options", []))
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
     result = await db.movies.insert_one(doc)
     fetched = await db.movies.find_one({"_id": result.inserted_id})
     enriched = await enrich_movie(fetched)
     await log_edit(user, "movie", enriched["id"], "create", enriched["title"], f"Created movie \"{enriched['title']}\"")
+    if tmdb_added_cast:
+        await log_edit(
+            await _ensure_tmdb_bot_user(), "movie", enriched["id"], "update", enriched["title"],
+            f"Cineverse BOT added {tmdb_added_cast} cast members from TMDB",
+        )
     return enriched
 
 @api_router.get("/movies")
 async def list_movies(
     q: Optional[str] = None,
     genre: Optional[str] = None,
+    keyword: Optional[str] = None,
     year: Optional[int] = None,
     min_rating: Optional[float] = None,
     sort: Optional[str] = "recent",
@@ -2989,6 +4461,8 @@ async def list_movies(
         filter_query["$or"] = or_filters
     if genre:
         filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
+    if keyword:
+        filter_query["keywords"] = {"$regex": f"^{re.escape(keyword.strip())}$", "$options": "i"}
     if year:
         filter_query["release_date"] = {"$regex": f"^{year}"}
     cursor = db.movies.find(_alive(filter_query))
@@ -3006,6 +4480,34 @@ async def list_movies(
     else:
         docs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return docs
+
+@api_router.get("/movies/keywords/{keyword}")
+async def get_movie_keyword(keyword: str):
+    name = keyword.strip()
+    if not name:
+        raise HTTPException(status_code=404, detail="Keyword not found")
+    doc = await db.keyword_categories.find_one({"_id": name.casefold()})
+    return {"keyword": (doc or {}).get("keyword", name), "description": (doc or {}).get("description", "")}
+
+@api_router.patch("/movies/keywords/{keyword}")
+async def update_movie_keyword(keyword: str, payload: KeywordCategoryUpdate, user: dict = Depends(get_current_user)):
+    name = keyword.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Keyword required")
+    updates = payload.model_dump(exclude_none=True)
+    if "description" in updates:
+        updates["description"] = updates["description"].strip()
+    await db.keyword_categories.update_one(
+        {"_id": name.casefold()},
+        {"$set": {
+            "keyword": name,
+            **updates,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_by": user["id"],
+        }},
+        upsert=True,
+    )
+    return await get_movie_keyword(name)
 
 @api_router.get("/movies/trending")
 async def trending_movies(limit: int = 12):
@@ -3199,8 +4701,8 @@ async def _collect_related_movies(base_genres: list, base_actors: list, base_yea
     return scored
 
 async def _collect_related_series(base_genres: list, base_actors: list, base_year: Optional[int],
-                                  base_collections: list, exclude_series_id=None):
-    """Return a list of scored TV series sharing genres/actors/collection with the base."""
+                                  base_collections: list, base_network: str = "", exclude_series_id=None):
+    """Return a list of scored TV series sharing network, genres, actors, or collection with the base."""
     genre_set = set(base_genres or [])
     actor_set = set(base_actors or [])
     coll_set = set(base_collections or [])
@@ -3213,6 +4715,9 @@ async def _collect_related_series(base_genres: list, base_actors: list, base_yea
         or_filters.append({"seasons.episodes.guest_stars.actor_id": {"$in": list(actor_set)}})
     if coll_set:
         or_filters.append({"collection_ids": {"$in": list(coll_set)}})
+    network = (base_network or "").strip()
+    if network:
+        or_filters.append({"network": {"$regex": f"^{re.escape(network)}$", "$options": "i"}})
     if not or_filters:
         return []
 
@@ -3232,6 +4737,8 @@ async def _collect_related_series(base_genres: list, base_actors: list, base_yea
         d_colls = set(d.get("collection_ids") or [])
         d_year = _year_from(d.get("first_air_date"))
         score = _score_related(genre_set, actor_set, base_year, coll_set, d_genres, d_actors, d_year, d_colls)
+        if network and (d.get("network") or "").strip().casefold() == network.casefold():
+            score += 5
         if score > 0:
             scored.append((score, d))
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -3266,11 +4773,111 @@ def _check_locks(old_doc: dict, update_data: dict, user: dict, action: str = "ed
     if violated:
         raise HTTPException(status_code=403, detail=f"These fields are locked by moderators: {', '.join(violated)}")
 
+def _member_key(member: dict, *, crew: bool = False):
+    actor_id = member.get("actor_id")
+    role = (member.get("role") or "").strip().casefold() if crew else ""
+    if actor_id:
+        return ("actor", actor_id, role)
+    return ("name", (member.get("name") or "").strip().casefold(), role)
+
+def _removed_member_count(previous: list, updated: list, *, crew: bool = False) -> int:
+    key = lambda member: _member_key(member, crew=crew)
+    old_counts = Counter(key(member) for member in previous or [])
+    new_counts = Counter(key(member) for member in updated or [])
+    return sum(max(0, count - new_counts.get(member_key, 0)) for member_key, count in old_counts.items())
+
+async def _auto_suspend_for_rapid_removals(user: dict, removed_count: int) -> bool:
+    if removed_count <= 0 or user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin"):
+        return False
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    cutoff_iso = (now - timedelta(seconds=5)).isoformat()
+    user_id = user["id"]
+    events = db.cast_crew_removal_events
+    await events.delete_many({"user_id": user_id, "created_at": {"$lt": cutoff_iso}})
+    await events.insert_one({"user_id": user_id, "removed_count": removed_count, "created_at": now_iso})
+    recent = await events.aggregate([
+        {"$match": {"user_id": user_id, "created_at": {"$gte": cutoff_iso}}},
+        {"$group": {"_id": None, "removed_count": {"$sum": "$removed_count"}}},
+    ]).to_list(1)
+    if not recent or recent[0]["removed_count"] <= 5:
+        return False
+
+    until = "permanent"
+    try:
+        user_oid = ObjectId(user_id)
+    except Exception:
+        return True
+    result = await db.users.update_one(
+        {
+            "_id": user_oid,
+            "role": {"$nin": ["moderator", "admin"]},
+            "effective_role": {"$nin": ["moderator", "admin"]},
+            "$or": [
+                {"suspended_until": {"$exists": False}},
+                {"suspended_until": None},
+                {"suspended_until": {"$lte": now_iso}},
+            ],
+        },
+        {"$set": {
+            "suspended_until": until,
+            "suspension_reason": "vandalism",
+            "suspended_by": "system",
+            "suspended_by_name": "Automatic Moderation",
+            "suspended_at": now_iso,
+        }},
+    )
+    if result.modified_count:
+        thread = {
+            "title": "Automatic account suspension",
+            "body": "Your account has been suspended permanently.\n\nReason: vandalism. The system detected more than five cast or crew removals within five seconds. If you believe this is a mistake, reply here to contact Support.",
+            "category": "direct",
+            "status": "open",
+            "entity_type": None,
+            "entity_id": None,
+            "entity_title": None,
+            "user_id": "system",
+            "user_name": "Automatic Moderation",
+            "user_avatar": "",
+            "user_role": "moderator",
+            "target_user_id": user_id,
+            "target_user_name": user.get("name"),
+            "is_direct": True,
+            "is_suspension_notice": True,
+            "created_at": now_iso,
+            "last_activity_at": now_iso,
+            "message_count": 0,
+        }
+        thread_result = await db.threads.insert_one(thread)
+        thread_id = str(thread_result.inserted_id)
+        await log_edit(
+            {"id": "system", "name": "Automatic Moderation", "role": "moderator"},
+            "user",
+            user_id,
+            "suspend",
+            user.get("name", ""),
+            "Automatically suspended permanently: vandalism",
+        )
+        await _create_notification(
+            user_id=user_id,
+            ntype="suspension",
+            title="Your account has been suspended permanently",
+            body="Reason: vandalism",
+            link=f"/threads/{thread_id}",
+            thread_id=thread_id,
+        )
+    return True
+
 @api_router.patch("/movies/{movie_id}")
 async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     old_doc = await db.movies.find_one({"_id": ObjectId(movie_id)}) or {}
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    if "imdb_id" in update_data and update_data["imdb_id"] != old_doc.get("imdb_id"):
+        if not is_mod:
+            raise HTTPException(status_code=403, detail="Only administrators and moderators can change a movie's IMDb ID")
+        await _assert_unique_imdb_id(update_data["imdb_id"], ObjectId(movie_id))
     # Non-mods cannot change locked_cast_actor_ids
     if "locked_cast_actor_ids" in update_data and not is_mod:
         update_data.pop("locked_cast_actor_ids", None)
@@ -3284,6 +4891,8 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
         update_data["cast"] = _dedupe_cast(update_data["cast"])
     if "crew" in update_data:
         update_data["crew"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["crew"]]
+    if "purchase_options" in update_data:
+        update_data["purchase_options"] = _normalize_purchase_options(update_data["purchase_options"])
     _enforce_image_delete_guard(
         old_doc, update_data, user,
         single_fields=["poster_url", "backdrop_url"],
@@ -3294,6 +4903,13 @@ async def update_movie(movie_id: str, payload: MovieUpdate, user: dict = Depends
         if listf in update_data and update_data.get(listf):
             update_data[primary] = update_data[listf][0]
     _check_locks(old_doc, update_data, user)
+    removed_count = 0
+    if "cast" in update_data:
+        removed_count += _removed_member_count(old_doc.get("cast", []), update_data["cast"])
+    if "crew" in update_data:
+        removed_count += _removed_member_count(old_doc.get("crew", []), update_data["crew"], crew=True)
+    if await _auto_suspend_for_rapid_removals(user, removed_count):
+        raise HTTPException(status_code=403, detail="Your account has been suspended permanently for vandalism.")
     await db.movies.update_one({"_id": ObjectId(movie_id)}, {"$set": update_data})
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
     enriched = await enrich_movie(doc)
@@ -3382,6 +4998,12 @@ def _serialize_series_payload(data: dict) -> dict:
 @api_router.post("/series")
 async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_user)):
     doc = _serialize_series_payload(payload.model_dump())
+    is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    if doc.get("imdb_id") and not is_mod:
+        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a TV series' IMDb ID")
+    if is_mod and not doc.get("imdb_id"):
+        raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a TV series")
+    await _assert_unique_imdb_id(doc["imdb_id"])
     # Duplicate guard: same normalized title + same first_air_date (case + whitespace insensitive)
     title_clean = (doc.get("title") or "").strip()
     if title_clean:
@@ -3390,23 +5012,38 @@ async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_
             "first_air_date": doc.get("first_air_date") or "",
         }))
         if existing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A TV series with the same title and first-air date already exists (id={str(existing['_id'])}).",
-            )
+            _raise_duplicate_entity("series", existing, "A TV series with the same title and first-air date already exists. Please edit the existing page instead.")
     doc["title"] = title_clean
+    tmdb_added_cast = 0
+    if not doc.get("main_cast") and os.environ.get("TMDB_AUTO_CAST_ENABLED", "true").lower() == "true":
+        try:
+            bot = await _ensure_tmdb_bot_user()
+            doc["main_cast"], checked = await _tmdb_add_cast(
+                "series", doc["title"], doc.get("first_air_date"), doc.get("tmdb_id"), [], bot
+            )
+            if checked:
+                doc["_tmdb_cast_checked"] = True
+                tmdb_added_cast = len(doc["main_cast"])
+        except Exception as error:
+            logger.warning("Cineverse BOT could not add series cast: %s", type(error).__name__)
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
     result = await db.series.insert_one(doc)
     fetched = await db.series.find_one({"_id": result.inserted_id})
     enriched = await enrich_series(fetched)
     await log_edit(user, "series", enriched["id"], "create", enriched["title"], f"Created series \"{enriched['title']}\"")
+    if tmdb_added_cast:
+        await log_edit(
+            await _ensure_tmdb_bot_user(), "series", enriched["id"], "update", enriched["title"],
+            f"Cineverse BOT added {tmdb_added_cast} cast members from TMDB",
+        )
     return enriched
 
 @api_router.get("/series")
 async def list_series(
     q: Optional[str] = None,
     genre: Optional[str] = None,
+    network: Optional[str] = None,
     year: Optional[int] = None,
     min_rating: Optional[float] = None,
     sort: Optional[str] = "recent",
@@ -3427,6 +5064,8 @@ async def list_series(
         filter_query["$or"] = or_filters
     if genre:
         filter_query["genres"] = {"$regex": f"^{genre}$", "$options": "i"}
+    if network:
+        filter_query["network"] = {"$regex": f"^{re.escape(network.strip())}$", "$options": "i"}
     if year:
         filter_query["first_air_date"] = {"$regex": f"^{year}"}
     cursor = db.series.find(_alive(filter_query))
@@ -3444,6 +5083,50 @@ async def list_series(
     else:
         docs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return docs
+
+@api_router.get("/series/networks")
+async def list_series_networks():
+    values = await db.series.distinct("network", _alive())
+    networks = {value.strip().casefold(): value.strip() for value in values if isinstance(value, str) and value.strip()}
+    return sorted(networks.values(), key=str.casefold)
+
+@api_router.get("/series/networks/{network}")
+async def get_series_network(network: str):
+    name = network.strip()
+    if not name:
+        raise HTTPException(status_code=404, detail="Network not found")
+    doc = await db.network_categories.find_one({"_id": name.casefold()})
+    return {
+        "network": (doc or {}).get("network", name),
+        "description": (doc or {}).get("description", ""),
+        "image_url": (doc or {}).get("image_url", ""),
+    }
+
+@api_router.patch("/series/networks/{network}")
+async def update_series_network(network: str, payload: NetworkCategoryUpdate, user: dict = Depends(get_current_user)):
+    name = network.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Network name required")
+    now = datetime.now(timezone.utc).isoformat()
+    updates = payload.model_dump(exclude_none=True)
+    if "description" in updates:
+        updates["description"] = updates["description"].strip()
+    if "image_url" in updates:
+        updates["image_url"] = updates["image_url"].strip()
+    await db.network_categories.update_one(
+        {"_id": name.casefold()},
+        {
+            "$set": {
+                "network": name,
+                **updates,
+                "updated_at": now,
+                "updated_by": user["id"],
+            },
+            "$setOnInsert": {"created_at": now, "created_by": user["id"]},
+        },
+        upsert=True,
+    )
+    return await get_series_network(name)
 
 @api_router.get("/series/trending")
 async def trending_series(limit: int = 12):
@@ -3594,7 +5277,14 @@ async def similar_series(series_id: str, limit: int = 10):
                     main_cast_ids.append(g.get("actor_id"))
     base_year = _year_from(base.get("first_air_date"))
     base_collections = base.get("collection_ids") or []
-    scored = await _collect_related_series(genres, main_cast_ids, base_year, base_collections, exclude_series_id=base["_id"])
+    scored = await _collect_related_series(
+        genres,
+        main_cast_ids,
+        base_year,
+        base_collections,
+        base_network=base.get("network", ""),
+        exclude_series_id=base["_id"],
+    )
     out = []
     for _s, d in scored[:limit]:
         item = await enrich_series(d, deep=False)
@@ -3609,6 +5299,10 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
     old_doc = await db.series.find_one({"_id": ObjectId(series_id)}) or {}
     _check_locks(old_doc, update_data, user)
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    if "imdb_id" in update_data and update_data["imdb_id"] != old_doc.get("imdb_id"):
+        if not is_mod:
+            raise HTTPException(status_code=403, detail="Only administrators and moderators can change a TV series' IMDb ID")
+        await _assert_unique_imdb_id(update_data["imdb_id"], ObjectId(series_id))
     if "locked_cast_actor_ids" in update_data and not is_mod:
         update_data.pop("locked_cast_actor_ids", None)
     if "locked_guest_stars" in update_data and not is_mod:
@@ -3889,6 +5583,20 @@ async def get_actor(actor_id: str, viewer: Optional[dict] = Depends(get_optional
         movies.append(m_dict)
     actor["movies"] = movies
 
+    crew_credits = []
+    async for m in db.movies.find(_alive({"crew.actor_id": actor_id})):
+        m_dict = await enrich_movie(m)
+        for member in m_dict.get("crew", []):
+            if member.get("actor_id") == actor_id:
+                crew_credits.append({
+                    "id": m_dict["id"],
+                    "title": m_dict.get("title", ""),
+                    "poster_url": m_dict.get("poster_url", ""),
+                    "release_date": m_dict.get("release_date", ""),
+                    "role": member.get("role", "Crew"),
+                })
+    actor["crew_credits"] = crew_credits
+
     # find series where actor is in main_cast
     series_main = []
     async for s in db.series.find(_alive({"main_cast.actor_id": actor_id})):
@@ -3922,6 +5630,38 @@ async def get_actor(actor_id: str, viewer: Optional[dict] = Depends(get_optional
     guest_episodes.sort(key=lambda x: (x.get("season_number") or 0, x.get("episode_number") or 0))
     actor["guest_episodes"] = guest_episodes
     return actor
+
+@api_router.get("/crew-jobs")
+async def list_crew_jobs():
+    config = await db.site_config.find_one({"_id": "crew-jobs"})
+    return (config or {}).get("jobs") or DEFAULT_CREW_JOBS
+
+@api_router.put("/crew-jobs")
+async def update_crew_jobs(payload: CrewJobsUpdate, mod: dict = Depends(get_current_moderator)):
+    jobs = []
+    seen = set()
+    for value in payload.jobs:
+        job = value.strip()
+        key = job.casefold()
+        if not job:
+            continue
+        if len(job) > 80:
+            raise HTTPException(status_code=400, detail="Crew job names must be 80 characters or fewer")
+        if key not in seen:
+            jobs.append(job)
+            seen.add(key)
+    if not jobs:
+        raise HTTPException(status_code=400, detail="At least one crew job is required")
+    await db.site_config.update_one(
+        {"_id": "crew-jobs"},
+        {"$set": {
+            "jobs": jobs,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_by": mod["id"],
+        }},
+        upsert=True,
+    )
+    return jobs
 
 @api_router.patch("/actors/{actor_id}")
 async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends(get_current_user)):
@@ -4281,6 +6021,132 @@ async def cron_cleanup(request: Request, authorization: Optional[str] = Header(d
     asyncio.create_task(_run_cleanup())
     return {"ok": True, "queued": True}
 
+async def _purge_expired_deleted_accounts() -> dict:
+    now = datetime.now(timezone.utc)
+    cutoff = (now - ACCOUNT_RECOVERY_WINDOW).isoformat()
+    result = await db.users.delete_many({"deleted_at": {"$lt": cutoff}})
+    summary = {
+        "ran_at": now.isoformat(),
+        "accounts_purged": result.deleted_count,
+    }
+    try:
+        await db.cron_runs.insert_one({"job": "purge-deleted-accounts", "at": now.isoformat(), **summary})
+    except Exception:
+        pass
+    return summary
+
+@api_router.post("/cron/purge-deleted-accounts")
+async def cron_purge_deleted_accounts(request: Request, authorization: Optional[str] = Header(default=None)):
+    _verify_cron_auth(authorization)
+    run_id = request.headers.get("X-Webhook-Id") or ""
+    if run_id:
+        try:
+            already = await db.cron_runs.find_one({"run_id": run_id, "job": "purge-deleted-accounts"})
+        except Exception:
+            already = None
+        if already:
+            return {"ok": True, "duplicate": True}
+        try:
+            await db.cron_runs.insert_one({
+                "run_id": run_id,
+                "job": "purge-deleted-accounts",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+    import asyncio
+    asyncio.create_task(_purge_expired_deleted_accounts())
+    return {"ok": True, "queued": True}
+
+async def _run_tmdb_cast_backfill() -> dict:
+    if not _tmdb_credentials_configured():
+        logger.warning("Cineverse BOT TMDB backfill skipped: no TMDB credential configured")
+        return {"status": "waiting_for_credentials"}
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    try:
+        lock = await db.site_config.find_one_and_update(
+            {
+                "_id": "tmdb-cast-backfill-lock",
+                "$or": [
+                    {"locked_until": {"$exists": False}},
+                    {"locked_until": {"$lte": now_iso}},
+                ],
+            },
+            {"$set": {"locked_until": (now + timedelta(minutes=30)).isoformat()}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError:
+        return {"status": "already_running"}
+    if not lock:
+        return {"status": "already_running"}
+
+    try:
+        bot = await _ensure_tmdb_bot_user()
+        totals = {
+            "checked": 0,
+            "updated": 0,
+            "added_cast_members": 0,
+            "removed_cast_members": 0,
+            "unmatched": 0,
+            "errors": 0,
+        }
+        for kind in ("movie", "series"):
+            result = await backfill_tmdb_cast(TMDBCastBackfillRequest(kind=kind, limit=10), bot)
+            for key in totals:
+                totals[key] += result[key]
+
+        remaining = {
+            "movies": await db.movies.count_documents(_alive({"_tmdb_audit_checked": {"$ne": True}})),
+            "series": await db.series.count_documents(_alive({"_tmdb_audit_checked": {"$ne": True}})),
+        }
+        status = "complete" if not any(remaining.values()) else "running"
+        summary = {
+            "status": status,
+            "remaining": remaining,
+            "last_run_at": datetime.now(timezone.utc).isoformat(),
+            **totals,
+        }
+        await db.site_config.update_one(
+            {"_id": "tmdb-cast-backfill-status"},
+            {"$set": summary},
+            upsert=True,
+        )
+        return summary
+    except Exception:
+        logger.exception("Cineverse BOT TMDB cast backfill failed")
+        return {"status": "error"}
+    finally:
+        await db.site_config.update_one(
+            {"_id": "tmdb-cast-backfill-lock"},
+            {"$set": {"locked_until": datetime.now(timezone.utc).isoformat()}},
+        )
+
+@api_router.post("/cron/tmdb-cast-backfill")
+async def cron_tmdb_cast_backfill(request: Request, authorization: Optional[str] = Header(default=None)):
+    _verify_cron_auth(authorization)
+    run_id = request.headers.get("X-Webhook-Id") or ""
+    if run_id:
+        try:
+            already = await db.cron_runs.find_one({"run_id": run_id, "job": "tmdb-cast-backfill"})
+        except Exception:
+            already = None
+        if already:
+            return {"ok": True, "duplicate": True}
+        try:
+            await db.cron_runs.insert_one({
+                "run_id": run_id,
+                "job": "tmdb-cast-backfill",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+    import asyncio
+    asyncio.create_task(_run_tmdb_cast_backfill())
+    return {"ok": True, "queued": True}
+
 @api_router.post("/admin/cleanup/run")
 async def run_cleanup_now(_admin: dict = Depends(get_current_admin)):
     """Admin: trigger the disk cleanup immediately."""
@@ -4378,6 +6244,7 @@ async def restore_backup(payload: BackupRestoreRequest, admin: dict = Depends(ge
 # ----------- Reviews -----------
 @api_router.post("/movies/{movie_id}/reviews")
 async def create_review(movie_id: str, payload: ReviewCreate, user: dict = Depends(get_current_user)):
+    await _moderate_user_content(user, payload.text)
     doc = {
         "movie_id": movie_id,
         "user_id": user["id"],
@@ -4407,6 +6274,7 @@ async def create_series_review(series_id: str, payload: ReviewCreate, user: dict
         raise HTTPException(status_code=404, detail="Series not found")
     if not exists or exists.get("deleted"):
         raise HTTPException(status_code=404, detail="Series not found")
+    await _moderate_user_content(user, payload.text)
     doc = {
         "series_id": series_id,
         "user_id": user["id"],
@@ -4463,6 +6331,81 @@ async def get_watchlist(user: dict = Depends(get_current_user)):
     return movies
 
 # ----------- Genres -----------
+@api_router.get("/sitemap.xml", include_in_schema=False)
+async def sitemap():
+    site_url = os.environ.get("PUBLIC_SITE_URL", "https://filmhub-918.emergent.host").strip().rstrip("/")
+    entries = []
+    seen_urls = set()
+
+    def add_url(path: str, lastmod=None):
+        loc = f"{site_url}{path}"
+        if loc in seen_urls:
+            return
+        seen_urls.add(loc)
+        lastmod_xml = f"<lastmod>{html.escape(lastmod)}</lastmod>" if lastmod else ""
+        entries.append(f"<url><loc>{html.escape(loc)}</loc>{lastmod_xml}</url>")
+
+    for path in ("/", "/browse", "/threads", "/contributor-guidelines"):
+        add_url(path)
+
+    for collection, route in (
+        (db.movies, "/movie/"),
+        (db.series, "/series/"),
+        (db.actors, "/actor/"),
+        (db.collections, "/collection/"),
+    ):
+        cursor = collection.find(_alive(), {"_id": 1, "created_at": 1, "updated_at": 1})
+        async for item in cursor:
+            loc = html.escape(f"{site_url}{route}{item['_id']}")
+            lastmod = item.get("updated_at") or item.get("created_at")
+            if isinstance(lastmod, datetime):
+                lastmod = lastmod.date().isoformat()
+            elif isinstance(lastmod, str):
+                try:
+                    lastmod = datetime.fromisoformat(lastmod.replace("Z", "+00:00")).date().isoformat()
+                except ValueError:
+                    lastmod = None
+            item_path = f"{route}{item['_id']}"
+            add_url(item_path, lastmod)
+            if route in ("/movie/", "/series/"):
+                add_url(f"{item_path}/credits", lastmod)
+
+    for network in await db.series.distinct("network", _alive({"network": {"$nin": ["", None]}})):
+        if isinstance(network, str) and network.strip():
+            add_url(f"/network/{quote(network.strip(), safe='')}")
+
+    for collection in (db.movies, db.series):
+        for keyword in await collection.distinct("keywords", _alive()):
+            if isinstance(keyword, str) and keyword.strip():
+                add_url(f"/keyword/{quote(keyword.strip(), safe='')}")
+
+    suspended_user_ids = await _get_suspended_user_ids()
+    public_thread_query = {"is_direct": {"$ne": True}, "is_private": {"$ne": True}}
+    if suspended_user_ids:
+        public_thread_query["user_id"] = {"$nin": suspended_user_ids}
+    async for thread in db.threads.find(public_thread_query, {"_id": 1, "created_at": 1, "last_activity_at": 1}):
+        lastmod = thread.get("last_activity_at") or thread.get("created_at")
+        if isinstance(lastmod, str):
+            try:
+                lastmod = datetime.fromisoformat(lastmod.replace("Z", "+00:00")).date().isoformat()
+            except ValueError:
+                lastmod = None
+        elif isinstance(lastmod, datetime):
+            lastmod = lastmod.date().isoformat()
+        add_url(f"/threads/{thread['_id']}", lastmod)
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(entries)
+        + "</urlset>"
+    )
+    return FastAPIResponse(
+        content=xml,
+        media_type="application/xml",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
 @api_router.get("/genres")
 async def genres():
     result = await db.movies.distinct("genres")
@@ -4557,6 +6500,8 @@ async def startup():
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}})
         logger.info(f"Updated admin password: {admin_email}")
+
+    await _ensure_tmdb_bot_user()
 
     # init storage
     init_storage()
@@ -4757,31 +6702,6 @@ async def remove_from_collection(collection_id: str, payload: CollectionMembersh
         raise HTTPException(status_code=404, detail="Title not found")
     await coll.update_one({"_id": target_oid}, {"$pull": {"collection_ids": collection_id}})
     return {"ok": True}
-
-@api_router.get("/sitemap.xml")
-async def sitemap():
-    """XML sitemap listing every public movie, series, actor and collection."""
-    base = os.environ.get("PUBLIC_SITE_URL", "").rstrip("/")
-    urls: List[str] = []
-    # Static pages
-    for path in ["/", "/browse", "/forums"]:
-        urls.append(path)
-    async for d in db.movies.find(_alive(), {"_id": 1, "updated_at": 1, "created_at": 1}):
-        urls.append(f"/movie/{str(d['_id'])}")
-    async for d in db.series.find(_alive(), {"_id": 1}):
-        urls.append(f"/series/{str(d['_id'])}")
-    async for d in db.actors.find(_alive(), {"_id": 1}):
-        urls.append(f"/actor/{str(d['_id'])}")
-    async for d in db.collections.find({}, {"_id": 1}):
-        urls.append(f"/collection/{str(d['_id'])}")
-    today = datetime.now(timezone.utc).date().isoformat()
-    parts = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    for u in urls:
-        loc = f"{base}{u}" if base else u
-        parts.append(f"  <url><loc>{loc}</loc><lastmod>{today}</lastmod></url>")
-    parts.append("</urlset>")
-    xml = "\n".join(parts)
-    return FastAPIResponse(content=xml, media_type="application/xml")
 
 app.include_router(api_router)
 

@@ -143,7 +143,7 @@ export default function SearchBar() {
             >
               <div className={`flex-shrink-0 overflow-hidden bg-[#1e2430] border border-white/10 ${kind === "actor" ? "w-8 h-8 rounded-full" : "w-8 h-11 rounded"}`}>
                 {row.poster_url ? (
-                  <img src={fileUrl(row.poster_url)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  <img src={fileUrl(row.poster_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                 ) : null}
               </div>
               <div className="flex-1 min-w-0">

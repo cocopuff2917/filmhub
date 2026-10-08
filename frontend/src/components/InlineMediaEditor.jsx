@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { api, fileUrl, uploadImage } from "@/lib/api";
+import ImageUrlInput from "@/components/ImageUrlInput";
+import ImageWithFallback from "@/components/ImageWithFallback";
 import { useAuth } from "@/context/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import ImageUpload from "@/components/ImageUpload";
 import { Camera, Film, Plus, Trash2, Star, StarOff, Upload, Youtube, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { parseYouTubeId } from "@/components/VideosSection";
@@ -20,8 +23,11 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   const { user } = useAuth();
   const canMod = isMod(user);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState("poster");
+  const isActor = kind === "actor";
+  const allowImageUrls = kind === "movie" || kind === "series";
+  const [tab, setTab] = useState(isActor ? "photo" : "poster");
 
+  const [photoUrl, setPhotoUrl] = useState(entity.photo_url || "");
   const [posterUrls, setPosterUrls] = useState(entity.poster_urls || (entity.poster_url ? [entity.poster_url] : []));
   const [backdropUrls, setBackdropUrls] = useState(entity.backdrop_urls || (entity.backdrop_url ? [entity.backdrop_url] : []));
   const [gallery, setGallery] = useState(Array.isArray(entity.gallery) ? entity.gallery : []);
@@ -31,9 +37,10 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   const [saving, setSaving] = useState(false);
 
   const locked = new Set(entity.locked_fields || []);
-  const base = kind === "series" ? "/series" : `/movies`;
+  const base = kind === "series" ? "/series" : kind === "actor" ? "/actors" : "/movies";
 
   const resetFromProps = () => {
+    setPhotoUrl(entity.photo_url || "");
     setPosterUrls(entity.poster_urls || (entity.poster_url ? [entity.poster_url] : []));
     setBackdropUrls(entity.backdrop_urls || (entity.backdrop_url ? [entity.backdrop_url] : []));
     setGallery(Array.isArray(entity.gallery) ? entity.gallery : []);
@@ -53,6 +60,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
       onUpdated?.(r.data || patch);
       // Sync local state from server response
       if (r?.data) {
+        if (typeof r.data.photo_url === "string") setPhotoUrl(r.data.photo_url);
         setPosterUrls(r.data.poster_urls || posterUrls);
         setBackdropUrls(r.data.backdrop_urls || backdropUrls);
         setGallery(r.data.gallery || gallery);
@@ -62,6 +70,16 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
       throw e;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const updateActorPhoto = async (url) => {
+    const previousPhoto = photoUrl;
+    setPhotoUrl(url);
+    try {
+      await savePatch({ photo_url: url }, "Actor photo updated");
+    } catch {
+      setPhotoUrl(previousPhoto);
     }
   };
 
@@ -89,6 +107,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   };
 
   const posterLocked = locked.has("poster_url") || locked.has("poster_urls");
+  const photoLocked = locked.has("photo_url");
   const backdropLocked = locked.has("backdrop_url") || locked.has("backdrop_urls");
   const galleryLocked = locked.has("gallery");
   const trailerLocked = locked.has("trailer_url");
@@ -116,7 +135,9 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
           <DialogHeader>
             <DialogTitle className="font-heading">Edit media</DialogTitle>
             <DialogDescription className="text-slate-400 text-xs">
-              {canMod
+              {isActor
+                ? "Update the actor headshot and gallery without leaving the page."
+                : canMod
                 ? "Add, remove, and set which poster/backdrop is primary — all without leaving the page."
                 : "Anyone can upload additional posters, backdrops, and videos. Deleting or changing which one is primary is reserved for moderators."}
             </DialogDescription>
@@ -124,21 +145,41 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
 
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="bg-[#0d0f12] border border-white/10">
-              <TabsTrigger value="poster" data-testid="media-tab-poster">Posters</TabsTrigger>
-              <TabsTrigger value="backdrop" data-testid="media-tab-backdrop">Backdrops</TabsTrigger>
+              {isActor ? (
+                <TabsTrigger value="photo" data-testid="media-tab-photo">Headshot</TabsTrigger>
+              ) : (
+                <>
+                  <TabsTrigger value="poster" data-testid="media-tab-poster">Posters</TabsTrigger>
+                  <TabsTrigger value="backdrop" data-testid="media-tab-backdrop">Backdrops</TabsTrigger>
+                </>
+              )}
               <TabsTrigger value="gallery" data-testid="media-tab-gallery">Gallery</TabsTrigger>
-              <TabsTrigger value="trailer" data-testid="media-tab-trailer">Trailer</TabsTrigger>
-              <TabsTrigger value="videos" data-testid="media-tab-videos">Videos</TabsTrigger>
+              {!isActor && <TabsTrigger value="trailer" data-testid="media-tab-trailer">Trailer</TabsTrigger>}
+              {!isActor && <TabsTrigger value="videos" data-testid="media-tab-videos">Videos</TabsTrigger>}
             </TabsList>
 
+            {isActor && (
+              <TabsContent value="photo" className="mt-4 space-y-3">
+                {photoLocked ? <LockedNotice label="Headshot" /> : (
+                  <ImageUpload
+                    value={photoUrl}
+                    onChange={updateActorPhoto}
+                    testid="actor-media-photo-upload"
+                    allowUrl
+                  />
+                )}
+              </TabsContent>
+            )}
+
             {/* POSTERS */}
-            <TabsContent value="poster" className="mt-4 space-y-3">
+            {!isActor && <TabsContent value="poster" className="mt-4 space-y-3">
               <ImageListEditor
                 items={posterUrls}
                 aspect="2/3"
                 saving={saving}
                 locked={posterLocked}
                 canMod={canMod}
+                allowUrl={allowImageUrls}
                 testId="poster"
                 onAppend={async (url) => {
                   const next = [...posterUrls, url];
@@ -157,16 +198,17 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                   setPosterUrls(next);
                 }}
               />
-            </TabsContent>
+            </TabsContent>}
 
             {/* BACKDROPS */}
-            <TabsContent value="backdrop" className="mt-4 space-y-3">
+            {!isActor && <TabsContent value="backdrop" className="mt-4 space-y-3">
               <ImageListEditor
                 items={backdropUrls}
                 aspect="16/9"
                 saving={saving}
                 locked={backdropLocked}
                 canMod={canMod}
+                allowUrl={allowImageUrls}
                 testId="backdrop"
                 onAppend={async (url) => {
                   const next = [...backdropUrls, url];
@@ -185,7 +227,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                   setBackdropUrls(next);
                 }}
               />
-            </TabsContent>
+            </TabsContent>}
 
             {/* TRAILER */}
             <TabsContent value="gallery" className="mt-4 space-y-3">
@@ -194,6 +236,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                 saving={saving}
                 locked={galleryLocked}
                 canMod={canMod}
+                allowUrl={allowImageUrls || isActor}
                 onAppend={async (url) => {
                   const next = [...gallery, url];
                   await savePatch({ gallery: next }, "Gallery image added");
@@ -207,7 +250,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
               />
             </TabsContent>
 
-            <TabsContent value="trailer" className="mt-4 space-y-3">
+            {!isActor && <TabsContent value="trailer" className="mt-4 space-y-3">
               {trailerLocked && <LockedNotice label="Trailer" />}
               <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-3">
                 <label className="text-xs uppercase tracking-widest text-slate-400 flex items-center gap-2"><Youtube className="w-3.5 h-3.5 text-rose-400" /> Official Trailer URL</label>
@@ -230,10 +273,10 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                   </Button>
                 </div>
               </div>
-            </TabsContent>
+            </TabsContent>}
 
             {/* VIDEOS */}
-            <TabsContent value="videos" className="mt-4 space-y-3">
+            {!isActor && <TabsContent value="videos" className="mt-4 space-y-3">
               {videosLocked && <LockedNotice label="Videos" />}
               <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-3">
                 <label className="text-xs uppercase tracking-widest text-slate-400 flex items-center gap-2"><Film className="w-3.5 h-3.5 text-amber-400" /> Additional YouTube videos</label>
@@ -282,7 +325,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                   </Button>
                 </div>
               </div>
-            </TabsContent>
+            </TabsContent>}
           </Tabs>
         </DialogContent>
       </Dialog>
@@ -293,7 +336,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
 // ---------------------------------------------------------
 // Shared image list editor (used for posters AND backdrops)
 // ---------------------------------------------------------
-function ImageListEditor({ items, aspect, saving, locked, canMod, testId, onAppend, onRemove, onSetPrimary }) {
+function ImageListEditor({ items, aspect, saving, locked, canMod, allowUrl = true, testId, onAppend, onRemove, onSetPrimary }) {
   const [uploading, setUploading] = useState(false);
 
   const handleFile = async (e) => {
@@ -327,11 +370,12 @@ function ImageListEditor({ items, aspect, saving, locked, canMod, testId, onAppe
         <div className={`grid gap-3 ${aspect === "2/3" ? "grid-cols-3 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"}`}>
           {items.map((url, idx) => (
             <div key={`${url}-${idx}`} className="group relative rounded-lg overflow-hidden border border-white/10 bg-black" data-testid={`${testId}-tile-${idx}`}>
-              <img
+              <ImageWithFallback
                 src={fileUrl(url)}
                 alt=""
                 className="w-full object-cover"
                 style={{ aspectRatio: aspect }}
+                fallback={<div className="flex w-full items-center justify-center text-xs text-slate-500" style={{ aspectRatio: aspect }}>Preview unavailable</div>}
               />
               {idx === 0 && (
                 <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider" data-testid={`${testId}-primary-${idx}`}>
@@ -376,6 +420,16 @@ function ImageListEditor({ items, aspect, saving, locked, canMod, testId, onAppe
           {uploading ? "Uploading…" : `Upload ${testId === "poster" ? "another poster" : "another backdrop"}`}
           <input type="file" accept="image/*" disabled={locked || uploading || saving} onChange={handleFile} className="hidden" data-testid={`${testId}-upload-input`} />
         </label>
+        {allowUrl && (
+          <div className="mt-3 max-w-lg">
+            <ImageUrlInput
+              onAdd={onAppend}
+              disabled={locked || uploading || saving}
+              testid={`${testId}-url`}
+              placeholder={`https://example.com/${testId}.jpg`}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -390,7 +444,7 @@ function LockedNotice({ label }) {
 }
 
 // Gallery editor (no primary concept, 16:9 tiles)
-function GalleryListEditor({ items, saving, locked, canMod, onAppend, onRemove }) {
+function GalleryListEditor({ items, saving, locked, canMod, allowUrl = true, onAppend, onRemove }) {
   const [uploading, setUploading] = useState(false);
 
   const handleFile = async (e) => {
@@ -422,7 +476,13 @@ function GalleryListEditor({ items, saving, locked, canMod, onAppend, onRemove }
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="gallery-grid-editor">
           {items.map((url, idx) => (
             <div key={`${url}-${idx}`} className="group relative rounded-lg overflow-hidden border border-white/10 bg-black" data-testid={`gallery-tile-${idx}`}>
-              <img src={fileUrl(url)} alt="" className="w-full object-cover" style={{ aspectRatio: "16/9" }} />
+              <ImageWithFallback
+                src={fileUrl(url)}
+                alt=""
+                className="w-full object-cover"
+                style={{ aspectRatio: "16/9" }}
+                fallback={<div className="flex w-full items-center justify-center text-xs text-slate-500" style={{ aspectRatio: "16/9" }}>Preview unavailable</div>}
+              />
               {canMod && !locked && (
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <button
@@ -449,6 +509,16 @@ function GalleryListEditor({ items, saving, locked, canMod, onAppend, onRemove }
           {uploading ? "Uploading…" : "Upload another gallery image"}
           <input type="file" accept="image/*" disabled={locked || uploading || saving} onChange={handleFile} className="hidden" data-testid="gallery-upload-input" />
         </label>
+        {allowUrl && (
+          <div className="mt-3 max-w-lg">
+            <ImageUrlInput
+              onAdd={onAppend}
+              disabled={locked || uploading || saving}
+              testid="gallery-upload-url"
+              placeholder="https://example.com/gallery-image.jpg"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

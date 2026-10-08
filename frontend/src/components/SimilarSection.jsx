@@ -23,7 +23,7 @@ export default function SimilarSection({ kind, entityId }) {
   const title = kind === "movie" ? "Related Movies" : "Related TV Series";
   const copy = kind === "movie"
     ? "Movies matched by shared cast, release year, genres, and collection."
-    : "TV series matched by shared cast, premiere year, genres, and collection.";
+    : "TV series matched by shared network, cast, premiere year, genres, and collection.";
 
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="similar-section">

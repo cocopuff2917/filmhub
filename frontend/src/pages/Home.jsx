@@ -99,6 +99,9 @@ export default function Home() {
               alt=""
               className="absolute inset-0 w-full h-full object-cover opacity-30"
               data-testid="hero-featured-backdrop"
+              loading="eager"
+              decoding="async"
+              fetchPriority="high"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-transparent" />
           </>
@@ -107,7 +110,7 @@ export default function Home() {
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 lg:pt-28 lg:pb-24">
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold uppercase tracking-widest">
-              <Sparkles className="w-3.5 h-3.5" /> {hero.tagline || "The Movie Database, Reimagined"}
+              <Sparkles className="w-3.5 h-3.5" /> {hero.tagline || "CineVerse, curated for your next obsession"}
             </div>
             <h1 className="mt-6 font-display text-5xl sm:text-6xl lg:text-7xl leading-none tracking-tight text-white" data-testid="hero-title">
               {featured ? featured.title : (hero.title || "A new home for movie & TV lovers")}

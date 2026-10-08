@@ -27,6 +27,9 @@ export default function EditProfileDialog({ open, onOpenChange, profile, onSaved
 
   const availableOn = me?.name_change_available_at ? new Date(me.name_change_available_at) : null;
   const canChangeUsername = !availableOn || availableOn.getTime() <= Date.now();
+  const cooldownAmount = me?.username_cooldown_amount ?? 30;
+  const cooldownUnit = me?.username_cooldown_unit || "days";
+  const cooldownLabel = `${cooldownAmount} ${cooldownAmount === 1 ? cooldownUnit.slice(0, -1) : cooldownUnit}`;
 
   useEffect(() => {
     if (open && profile) {
@@ -140,7 +143,9 @@ export default function EditProfileDialog({ open, onOpenChange, profile, onSaved
                     You can change your username again on <span className="font-semibold">{availableOn.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>.
                   </div>
                 ) : (
-                  <div className="text-[11px] text-slate-500 mt-1">Usernames can be changed once every 30 days.</div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    {cooldownAmount === 0 ? "Usernames can be changed at any time." : `Usernames can be changed once every ${cooldownLabel}.`}
+                  </div>
                 )}
               </div>
 

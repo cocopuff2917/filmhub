@@ -4,7 +4,7 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Lock, Unlock, Trash2, Send, MessageSquare, ThumbsUp, Quote as QuoteIcon, Languages, Flag, EyeOff } from "lucide-react";
+import { Lock, Unlock, Trash2, Send, MessageSquare, ThumbsUp, Quote as QuoteIcon, Languages, Flag, EyeOff, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import ForumSidebar from "@/components/ForumSidebar";
 
@@ -64,6 +64,29 @@ export default function ThreadDetail() {
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
+  const setPrivacy = async (isPrivate) => {
+    try {
+      await api.patch(`/threads/${id}/privacy`, { is_private: isPrivate });
+      toast.success(isPrivate ? "Thread is now private" : "Thread is now public");
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to update privacy"); }
+  };
+
+  const editMessage = async (messageId, text) => {
+    try {
+      const response = await api.patch(`/threads/${id}/messages/${messageId}`, { text });
+      setThread((current) => current && ({
+        ...current,
+        messages: current.messages.map((message) => message.id === messageId ? { ...message, ...response.data } : message),
+      }));
+      toast.success("Message updated");
+      return true;
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to update message");
+      return false;
+    }
+  };
+
   const del = async () => {
     if (!window.confirm("Delete this thread and all replies?")) return;
     try { await api.delete(`/threads/${id}`); toast.success("Deleted"); navigate("/threads"); }
@@ -97,7 +120,20 @@ export default function ThreadDetail() {
   const replies = (thread.messages || []).filter((m) => !m.system);
   const systemLog = (thread.messages || []).filter((m) => m.system);
 
-  const Post = ({ author, avatarUrl, role, when, children, showActions = true, testId }) => (
+  const Post = ({ author, avatarUrl, role, when, children, showActions = true, testId, editable = false, onSave }) => {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState("");
+    const [savingEdit, setSavingEdit] = useState(false);
+
+    const saveEdit = async () => {
+      if (!draft.trim()) return;
+      setSavingEdit(true);
+      const saved = await onSave(draft.trim());
+      if (saved) setEditing(false);
+      setSavingEdit(false);
+    };
+
+    return (
     <div className="rounded-lg overflow-hidden border border-white/5 bg-[#0d1220]/40" data-testid={testId}>
       <div className="flex items-start gap-4 p-5">
         <MaybeLink id={author?.id} className="flex-shrink-0">
@@ -116,7 +152,15 @@ export default function ThreadDetail() {
             <span className="text-xs text-slate-500">· {when}</span>
           </div>
           <div className="mt-3 text-slate-200 whitespace-pre-wrap break-words leading-relaxed">
-            {children}
+            {editing ? (
+              <div className="space-y-2">
+                <Textarea rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={5000} className="bg-[#0a0d14] border-white/10 text-white" data-testid={`${testId}-edit-input`} />
+                <div className="flex justify-end gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)} disabled={savingEdit} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
+                  <Button type="button" size="sm" onClick={saveEdit} disabled={savingEdit || !draft.trim()} className="bg-amber-500 hover:bg-amber-600 text-black">{savingEdit ? "Saving…" : "Save"}</Button>
+                </div>
+              </div>
+            ) : children}
           </div>
         </div>
       </div>
@@ -126,6 +170,11 @@ export default function ThreadDetail() {
             <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><ThumbsUp className="w-3.5 h-3.5" /> Like</button>
             <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><QuoteIcon className="w-3.5 h-3.5" /> Quote</button>
             <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Languages className="w-3.5 h-3.5" /> Translate</button>
+            {editable && !editing && (
+              <button type="button" onClick={() => { setDraft(typeof children === "string" ? children : ""); setEditing(true); }} className="inline-flex items-center gap-1 hover:text-white transition" aria-label="Edit message" data-testid={`${testId}-edit-btn`}>
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-4">
             <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Flag className="w-3.5 h-3.5" /> Report</button>
@@ -134,7 +183,8 @@ export default function ThreadDetail() {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col lg:flex-row bg-[#0a0d14] min-h-[calc(100vh-64px)]" data-testid="thread-detail-page">
@@ -152,6 +202,17 @@ export default function ThreadDetail() {
                       <button type="button" onClick={() => setStatus("closed")} className="block w-full text-right text-sm py-1 pr-1 text-rose-300 hover:text-rose-200" data-testid="close-thread-btn">Close thread</button>
                     ) : (
                       <button type="button" onClick={() => setStatus("open")} className="block w-full text-right text-sm py-1 pr-1 text-emerald-300 hover:text-emerald-200" data-testid="open-thread-btn">Reopen thread</button>
+                    )}
+                    {!thread.is_direct && (
+                      <button
+                        type="button"
+                        onClick={() => setPrivacy(!thread.is_private)}
+                        className="flex w-full items-center justify-end gap-1 text-right text-sm py-1 pr-1 text-amber-300 hover:text-amber-200"
+                        data-testid="toggle-thread-privacy-btn"
+                      >
+                        {thread.is_private ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                        {thread.is_private ? "Make public" : "Make private"}
+                      </button>
                     )}
                     <button type="button" onClick={del} className="block w-full text-right text-sm py-1 pr-1 text-rose-300 hover:text-rose-200" data-testid="delete-thread-btn">Delete</button>
                   </>
@@ -184,6 +245,7 @@ export default function ThreadDetail() {
             <span className="text-sm text-slate-400">Support</span>
             <span className="mx-1 text-slate-500">›</span>
             <span className="text-sm font-semibold text-white">{catLabel[thread.category] || "General"}</span>
+            {thread.is_private && <span className="ml-auto inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300" data-testid="thread-private-badge"><Lock className="w-3 h-3" /> Private</span>}
             {entityHref && thread.entity_title && (
               <>
                 <span className="mx-1 text-slate-500">·</span>
@@ -260,7 +322,9 @@ export default function ThreadDetail() {
               author={{ id: m.user_id, name: m.user_name }}
               avatarUrl={m.user_avatar}
               role={m.user_role}
-              when={timeAgo(m.created_at)}
+              when={`${timeAgo(m.created_at)}${m.edited_at ? " · edited" : ""}`}
+              editable={user?.id === m.user_id}
+              onSave={(text) => editMessage(m.id, text)}
             >
               {m.text}
             </Post>

@@ -3,8 +3,10 @@ import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, X } from "lucide-react";
 import { toast } from "sonner";
+import ImageUrlInput from "@/components/ImageUrlInput";
+import ImageWithFallback from "@/components/ImageWithFallback";
 
-export default function ImageUpload({ value, onChange, testid, shape = "square", canDelete = true }) {
+export default function ImageUpload({ value, onChange, testid, shape = "square", canDelete = true, allowUrl = false }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
 
@@ -29,7 +31,12 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
     <div className="flex items-center gap-3">
       {value ? (
         <div className={`relative w-16 h-16 overflow-hidden bg-[#1e2430] border border-white/10 ${roundedCls}`}>
-          <img src={fileUrl(value)} alt="" className="w-full h-full object-cover" />
+          <ImageWithFallback
+            src={fileUrl(value)}
+            alt=""
+            className="w-full h-full object-cover"
+            fallback={<div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] text-slate-500">Preview unavailable</div>}
+          />
         </div>
       ) : (
         <div className={`w-16 h-16 bg-[#1e2430] border border-white/10 flex items-center justify-center text-slate-600 ${roundedCls}`}>
@@ -37,10 +44,13 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
         </div>
       )}
       <input type="file" accept="image/*" ref={ref} onChange={handle} className="hidden" />
-      <Button type="button" variant="outline" onClick={() => ref.current.click()} disabled={busy}
-        className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={testid}>
-        {busy ? "Uploading..." : value ? "Replace" : "Upload"}
-      </Button>
+      <div className="min-w-0 space-y-2">
+        <Button type="button" variant="outline" onClick={() => ref.current.click()} disabled={busy}
+          className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={testid}>
+          {busy ? "Uploading..." : value ? "Replace" : "Upload"}
+        </Button>
+        {allowUrl && <ImageUrlInput onAdd={(url) => onChange(url)} disabled={busy} testid={testid || "image-upload"} />}
+      </div>
       {value && canDelete && (
         <Button type="button" variant="ghost" onClick={() => onChange("")} className="text-slate-400 hover:text-white hover:bg-white/5" data-testid={testid ? `${testid}-remove` : undefined}>
           <X className="w-4 h-4" />
@@ -50,7 +60,7 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
   );
 }
 
-export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
+export function GalleryUpload({ value, onChange, testid, canDelete = true, allowUrl = false }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
   const list = value || [];
@@ -81,7 +91,12 @@ export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
       <div className="flex flex-wrap gap-2">
         {list.map((p, i) => (
           <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden bg-[#1e2430] border border-white/10 group">
-            <img src={fileUrl(p)} alt="" className="w-full h-full object-cover" />
+            <ImageWithFallback
+              src={fileUrl(p)}
+              alt=""
+              className="w-full h-full object-cover"
+              fallback={<div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] text-slate-500">Preview unavailable</div>}
+            />
             {canDelete && (
               <button type="button" onClick={() => remove(i)} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition" data-testid={testid ? `${testid}-remove-${i}` : undefined}>
                 <X className="w-3 h-3 text-white" />
@@ -95,6 +110,16 @@ export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
           {busy ? "..." : <Upload className="w-5 h-5" />}
         </button>
       </div>
+      {allowUrl && (
+        <div className="mt-3 max-w-lg">
+          <ImageUrlInput
+            onAdd={(url) => onChange([...list, url])}
+            disabled={busy}
+            testid={testid || "gallery-upload"}
+            placeholder="https://example.com/gallery-image.jpg"
+          />
+        </div>
+      )}
     </div>
   );
 }

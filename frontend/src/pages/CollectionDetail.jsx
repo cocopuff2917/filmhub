@@ -39,69 +39,67 @@ export default function CollectionDetail() {
   const series = coll.titles.filter((t) => t.kind === "series");
 
   return (
-    <div data-testid="collection-detail-page">
-      {/* Hero */}
-      <section className="relative overflow-hidden">
+    <div data-testid="collection-detail-page" className="min-h-screen bg-[#0a0d12] text-white">
+      <section className="relative overflow-hidden border-b border-white/10">
         <div
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: backdrop ? `url(${backdrop})` : undefined, backgroundColor: backdrop ? undefined : "#0d0f12" }}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/80 to-[#0d0f12]" />
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 grid grid-cols-1 md:grid-cols-[220px_1fr] gap-8 items-center">
-          <div className="rounded-2xl overflow-hidden aspect-[2/3] bg-[#1e2430] border border-white/10 max-w-[220px]">
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/80 to-[#0a0d12]" />
+        <div className="relative z-10 mx-auto grid max-w-7xl gap-8 px-4 py-16 sm:px-6 lg:grid-cols-[220px_1fr] lg:px-8">
+          <div className="max-w-[220px] overflow-hidden rounded-2xl border border-amber-500/20 bg-[#14181f]/80 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
             {poster ? (
-              <img src={poster} alt={coll.name} className="w-full h-full object-cover" />
+              <img src={poster} alt={coll.name} className="h-full w-full object-cover" />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-600">
-                <Layers className="w-16 h-16" />
+              <div className="flex h-full w-full items-center justify-center text-slate-600">
+                <Layers className="h-16 w-16" />
               </div>
             )}
           </div>
           <div>
-            <div className="text-xs uppercase tracking-widest text-amber-400 font-semibold flex items-center gap-2">
-              <Layers className="w-4 h-4" /> Collection
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-amber-300 font-semibold">
+              <Layers className="w-4 h-4" /> collection
             </div>
-            <h1 className="mt-2 font-display text-5xl sm:text-6xl tracking-tight text-white" data-testid="collection-name">{coll.name}</h1>
-            <div className="mt-3 text-sm text-slate-300 flex items-center gap-4 flex-wrap">
+            <h1 className="mt-2 font-display text-5xl tracking-tight text-white sm:text-6xl" data-testid="collection-name">{coll.name}</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-slate-300">
               <span>{movies.length} film{movies.length !== 1 && "s"}</span>
               <span>·</span>
               <span>{series.length} series</span>
               <span>·</span>
               <span>{coll.titles.length} total</span>
             </div>
-            {coll.description && <p className="mt-4 text-slate-300 leading-relaxed max-w-3xl">{coll.description}</p>}
+            {coll.description && <p className="mt-4 max-w-3xl leading-relaxed text-slate-300">{coll.description}</p>}
           </div>
         </div>
       </section>
 
-      {/* Titles */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         {coll.titles.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-20 text-center text-slate-500">
+          <div className="rounded-2xl border border-dashed border-white/10 bg-[#14181f]/60 py-20 text-center text-slate-500">
             No titles in this collection yet.
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 lg:gap-6">
             {coll.titles.map((t) => (
               <Link
                 key={`${t.kind}-${t.id}`}
                 to={t.kind === "movie" ? `/movie/${t.id}` : `/series/${t.id}`}
-                className="group block"
+                className="group block rounded-2xl border border-white/10 bg-[#14181f]/80 p-2 shadow-[0_18px_40px_rgba(0,0,0,0.14)] transition hover:-translate-y-0.5 hover:border-amber-500/40"
                 data-testid={`collection-title-${t.id}`}
               >
-                <div className="aspect-[2/3] rounded-xl overflow-hidden bg-[#1e2430] border border-white/5 group-hover:border-amber-500/40 transition">
+                <div className="aspect-[2/3] overflow-hidden rounded-xl bg-[#1e2430]">
                   {t.poster_url ? (
-                    <img src={fileUrl(t.poster_url)} alt={t.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                    <img src={fileUrl(t.poster_url)} alt={t.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-3xl">{t.title?.[0]}</div>
+                    <div className="flex h-full w-full items-center justify-center text-3xl font-display text-slate-600">{t.title?.[0]}</div>
                   )}
                 </div>
-                <div className="mt-2 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                <div className="mt-2 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-slate-500 font-semibold">
                   {t.kind === "movie" ? <Film className="w-3 h-3" /> : <Tv className="w-3 h-3" />}
                   <span>{t.kind}</span>
                   {t.year && <span>· {t.year}</span>}
                 </div>
-                <div className="mt-1 font-semibold text-sm text-white line-clamp-2 group-hover:text-amber-400 transition-colors">{t.title}</div>
+                <div className="mt-1 line-clamp-2 text-sm font-semibold text-white transition-colors group-hover:text-amber-300">{t.title}</div>
               </Link>
             ))}
           </div>

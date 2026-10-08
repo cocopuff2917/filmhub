@@ -30,16 +30,19 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center px-4 py-10 hero-radial">
-      <div className="w-full max-w-md">
+    <div className="auth-shell min-h-[calc(100vh-64px)] flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
-          <div className="inline-flex w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 items-center justify-center mb-4 shadow-[0_0_25px_rgba(245,158,11,0.4)]">
+          <div className="auth-orb inline-flex w-12 h-12 rounded-xl items-center justify-center mb-4 shadow-[0_0_25px_rgba(245,158,11,0.4)]">
             <Film className="w-6 h-6 text-black" strokeWidth={2.5} />
           </div>
-          <h1 className="font-display text-4xl tracking-widest text-white">JOIN CINEVERSE</h1>
+          <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-amber-200">
+            create account
+          </div>
+          <h1 className="mt-4 font-display text-4xl tracking-[0.18em] text-white">JOIN CINEVERSE</h1>
           <p className="mt-2 text-sm text-slate-400">Rate. Review. Remember every film.</p>
         </div>
-        <Card className="glass border-white/10">
+        <Card className="auth-panel border border-white/10">
           <CardContent className="pt-6">
             <form onSubmit={submit} className="space-y-4">
               <div>

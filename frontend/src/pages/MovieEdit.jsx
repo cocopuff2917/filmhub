@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import PosterListField from "@/components/PosterListField";
 import CastEditDialog from "@/components/CastEditDialog";
+import BulkCastAddDialog from "@/components/BulkCastAddDialog";
 import CollectionsPicker from "@/components/CollectionsPicker";
 
 const SECTIONS = [
@@ -22,11 +23,12 @@ const SECTIONS = [
   { id: "keywords", label: "Keywords" },
   { id: "taglines", label: "Taglines" },
   { id: "videos", label: "Videos" },
+  { id: "purchase-options", label: "Where to Buy" },
   { id: "images", label: "Images" },
 ];
 
 const STATUSES = ["Released", "In Production", "Post Production", "Rumored", "Canceled"];
-const CREW_ROLES = ["Director", "Writer", "Producer", "Cinematographer", "Composer", "Editor"];
+const DEFAULT_CREW_JOBS = ["Director", "Writer", "Producer", "Cinematographer", "Composer", "Editor", "Makeup Artist"];
 
 // Lock indicator next to a field label. Clickable for moderators.
 function LockIcon({ locked, canToggle, onToggle }) {
@@ -36,7 +38,7 @@ function LockIcon({ locked, canToggle, onToggle }) {
       type="button"
       onClick={canToggle ? onToggle : undefined}
       title={locked ? "Field locked by moderators" : canToggle ? "Click to lock this field" : "Field is unlocked"}
-      className={`float-right inline-flex items-center justify-center w-6 h-6 rounded-md transition ${locked ? "text-amber-600 hover:bg-amber-50" : "text-slate-300 hover:text-slate-500 hover:bg-slate-100"} ${canToggle ? "cursor-pointer" : "cursor-default"}`}
+      className={`float-right inline-flex items-center justify-center w-6 h-6 rounded-md transition ${locked ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"} ${canToggle ? "cursor-pointer" : "cursor-default"}`}
       data-testid={`lock-${locked ? "on" : "off"}`}
     >
       {locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
@@ -49,11 +51,11 @@ function Field({ name, label, locked, canToggleLocks, onToggleLock, disabled, ch
   return (
     <div className={`${disabled ? "opacity-70" : ""}`}>
       <div className="flex items-start justify-between mb-1.5">
-        <Label className="text-slate-900 font-semibold text-sm">{label}</Label>
+        <Label className="text-slate-200 font-semibold text-sm">{label}</Label>
         <LockIcon locked={locked} canToggle={canToggleLocks} onToggle={() => onToggleLock(name)} />
       </div>
       {children}
-      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
+      {hint && <div className="mt-1 text-xs text-slate-400">{hint}</div>}
     </div>
   );
 }
@@ -69,12 +71,12 @@ function ChipInput({ value = [], onChange, placeholder, disabled, testid }) {
     setText("");
   };
   return (
-    <div className={`rounded-md border border-slate-300 bg-white p-2 flex flex-wrap gap-1.5 min-h-[40px] ${disabled ? "bg-slate-100" : ""}`} data-testid={testid}>
+    <div className={`rounded-xl border border-white/10 bg-[#0f1318] p-2 flex flex-wrap gap-1.5 min-h-[40px] ${disabled ? "bg-[#111827]" : ""}`} data-testid={testid}>
       {value.map((v) => (
-        <span key={v} className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-700">
+        <span key={v} className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-100">
           {v}
           {!disabled && (
-            <button type="button" onClick={() => onChange(value.filter((x) => x !== v))} className="text-slate-400 hover:text-rose-500">
+            <button type="button" onClick={() => onChange(value.filter((x) => x !== v))} className="text-amber-200 transition hover:text-rose-300">
               <X className="w-3 h-3" />
             </button>
           )}
@@ -90,7 +92,7 @@ function ChipInput({ value = [], onChange, placeholder, disabled, testid }) {
           }}
           onBlur={add}
           placeholder={value.length === 0 ? placeholder : ""}
-          className="flex-1 min-w-[120px] outline-none text-sm bg-transparent"
+          className="flex-1 min-w-[120px] bg-transparent text-sm text-white placeholder:text-slate-500 outline-none"
         />
       )}
     </div>
@@ -103,6 +105,7 @@ export default function MovieEdit() {
   const { user } = useAuth();
   const [movie, setMovie] = useState(null);
   const [actors, setActors] = useState([]);
+  const [crewJobs, setCrewJobs] = useState(DEFAULT_CREW_JOBS);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [autoStatus, setAutoStatus] = useState("idle"); // idle | pending | saving | saved | error
@@ -110,6 +113,8 @@ export default function MovieEdit() {
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
   const [castDialog, setCastDialog] = useState({ open: false, index: null });
+  const [bulkCastOpen, setBulkCastOpen] = useState(false);
+  const [crewDialog, setCrewDialog] = useState({ open: false, index: null });
   const [dragIdx, setDragIdx] = useState(null);
   const sectionRefs = useRef({});
   const savedFormRef = useRef(null);
@@ -124,17 +129,20 @@ export default function MovieEdit() {
   useEffect(() => {
     (async () => {
       try {
-        const [m, a, s] = await Promise.all([
+        const [m, a, s, jobs] = await Promise.all([
           api.get(`/movies/${id}`),
           api.get("/actors"),
           api.get(`/movies/${id}/stats`).catch(() => ({ data: { content_score: 0 } })),
+          api.get("/crew-jobs").catch(() => ({ data: DEFAULT_CREW_JOBS })),
         ]);
         setMovie(m.data);
         setActors(a.data);
+        setCrewJobs(jobs.data?.length ? jobs.data : DEFAULT_CREW_JOBS);
         setStats(s.data);
         setLocked(m.data.locked_fields || []);
         setForm({
           title: m.data.title || "",
+          imdb_id: m.data.imdb_id || "",
           release_date: m.data.release_date || "",
           runtime: m.data.runtime ?? "",
           synopsis: m.data.synopsis || "",
@@ -151,10 +159,11 @@ export default function MovieEdit() {
           backdrop_urls: m.data.backdrop_urls || (m.data.backdrop_url ? [m.data.backdrop_url] : []),
           trailer_url: m.data.trailer_url || "",
           video_urls: m.data.video_urls || [],
+          purchase_options: m.data.purchase_options || [],
           genres: m.data.genres || [],
           keywords: m.data.keywords || [],
           cast: (m.data.cast || []).map((c) => ({ actor_id: c.actor?.id || c.actor_id, character_name: c.character_name })),
-          crew: (m.data.crew || []).map((c) => ({ name: c.name, role: c.role })),
+          crew: (m.data.crew || []).map((c) => ({ actor_id: c.actor?.id || c.actor_id || "", name: c.actor?.name || c.name || "", role: c.role || "Director" })),
           gallery: m.data.gallery || [],
         });
         savedFormRef.current = null; // will be set on first render after mount
@@ -212,9 +221,9 @@ export default function MovieEdit() {
     if (silent) setAutoStatus("saving");
     try {
       const payload = {};
-      const fields = ["title", "release_date", "runtime", "synopsis", "tagline", "status", "original_language",
+      const fields = ["title", ...(isMod ? ["imdb_id"] : []), "release_date", "runtime", "synopsis", "tagline", "status", "original_language",
         "budget", "revenue", "awards_wins", "awards_nominations", "poster_url", "poster_urls", "backdrop_url", "backdrop_urls", "trailer_url",
-        "video_urls", "genres", "keywords", "cast", "crew", "gallery"];
+        "video_urls", "purchase_options", "genres", "keywords", "cast", "crew", "gallery"];
       for (const f of fields) {
         // Skip locked fields for non-mods (server would 403 anyway)
         if (!isMod && locked.includes(f)) continue;
@@ -225,7 +234,8 @@ export default function MovieEdit() {
         payload[f] = v;
       }
       payload.cast = (src.cast || []).filter((c) => c.actor_id && c.character_name);
-      payload.crew = (src.crew || []).filter((c) => c.name && c.role);
+      payload.crew = (src.crew || []).filter((c) => (c.actor_id || c.name) && c.role);
+      payload.purchase_options = (src.purchase_options || []).filter((option) => option.provider?.trim() && option.url?.trim());
       const r = await api.patch(`/movies/${id}`, payload);
       // Snapshot the just-saved form so auto-save doesn't re-fire
       savedFormRef.current = JSON.stringify(src);
@@ -238,11 +248,14 @@ export default function MovieEdit() {
       }
       setMovie(r.data);
       try { const s = await api.get(`/movies/${id}/stats`); setStats(s.data); } catch {}
+      return true;
     } catch (e) {
       if (silent) setAutoStatus("error");
       toast.error(e.response?.data?.detail || "Save failed");
+      return false;
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   // Debounced auto-save: whenever the form changes, save 900ms after the last change.
@@ -285,7 +298,10 @@ export default function MovieEdit() {
   }
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const remCast = (i) => setForm((f) => ({ ...f, cast: f.cast.filter((_, x) => x !== i) }));
+  const remCast = async (i) => {
+    const nextForm = { ...form, cast: form.cast.filter((_, x) => x !== i) };
+    if (await save(nextForm, { silent: true })) setForm(nextForm);
+  };
   const addCast = () => setCastDialog({ open: true, index: null });
   const openCastEdit = (i) => setCastDialog({ open: true, index: i });
   const reorderCast = (from, to) => {
@@ -326,17 +342,57 @@ export default function MovieEdit() {
     setForm(nextForm);
     save(nextForm);
   };
+  const handleBulkCastSave = (rows) => {
+    const currentCast = form.cast || [];
+    const existingIds = new Set(currentCast.map((row) => row.actor_id));
+    if (rows.length > 10 || rows.some((row) => existingIds.has(row.actor_id))) {
+      toast.error(rows.length > 10 ? "You can add up to 10 cast members at a time." : "One or more selected actors are already in the cast.");
+      return false;
+    }
+    const nextForm = { ...form, cast: [...currentCast, ...rows] };
+    setForm(nextForm);
+    save(nextForm);
+    return true;
+  };
   const handleActorCreated = (actor) => {
     setActors((prev) => [...prev, { id: actor.id, name: actor.name, photo_url: actor.photo_url || "" }]);
   };
-  const updCrew = (i, k, v) => setForm((f) => ({ ...f, crew: f.crew.map((c, x) => x === i ? { ...c, [k]: v } : c) }));
   const remCrew = (i) => setForm((f) => ({ ...f, crew: f.crew.filter((_, x) => x !== i) }));
-  const addCrew = () => setForm((f) => ({ ...f, crew: [...f.crew, { name: "", role: "Director" }] }));
+  const updatePurchaseOption = (index, key, value) => setForm((current) => ({
+    ...current,
+    purchase_options: current.purchase_options.map((option, rowIndex) => rowIndex === index ? { ...option, [key]: value } : option),
+  }));
+  const addPurchaseOption = () => setForm((current) => ({
+    ...current,
+    purchase_options: [...current.purchase_options, { provider: "", url: "" }],
+  }));
+  const removePurchaseOption = (index) => setForm((current) => ({
+    ...current,
+    purchase_options: current.purchase_options.filter((_, rowIndex) => rowIndex !== index),
+  }));
+  const addCrew = () => setCrewDialog({ open: true, index: null });
+  const openCrewEdit = (index) => setCrewDialog({ open: true, index });
+  const handleCrewSave = (row) => {
+    const duplicate = (form.crew || []).some((credit, index) =>
+      index !== crewDialog.index
+      && credit.actor_id === row.actor_id
+      && credit.role.toLowerCase() === row.role.toLowerCase()
+    );
+    if (duplicate) {
+      toast.error("This actor already has that crew job on this movie.");
+      return;
+    }
+    const nextCrew = crewDialog.index == null
+      ? [...form.crew, row]
+      : form.crew.map((credit, index) => index === crewDialog.index ? row : credit);
+    const nextForm = { ...form, crew: nextCrew };
+    setForm(nextForm);
+    save(nextForm);
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900" data-testid="movie-edit-page">
-      {/* Slim top bar */}
-      <div className="bg-slate-900 text-white">
+    <div className="min-h-screen bg-[#0d0f12] text-white" data-testid="movie-edit-page">
+      <div className="border-b border-white/10 bg-[#111827] text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
           <button onClick={() => navigate(`/movie/${id}`)} className="flex items-center gap-2 text-slate-200 hover:text-white text-sm" data-testid="back-to-movie">
             <ArrowLeft className="w-4 h-4" /> Back to {movie.title}
@@ -356,7 +412,7 @@ export default function MovieEdit() {
                 autoStatus === "pending" ? "Unsaved changes…" :
                 autoStatus === "error" ? "Save failed" : "\u00A0"}
             </span>
-            <Button onClick={() => save()} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600 text-white h-9 font-semibold" data-testid="top-save-btn">
+            <Button onClick={() => save()} disabled={saving} className="bg-amber-500 hover:bg-amber-600 text-black h-9 font-semibold" data-testid="top-save-btn">
               <Save className="w-4 h-4 mr-2" /> {saving ? "Saving…" : "Save Changes"}
             </Button>
           </div>
@@ -364,12 +420,11 @@ export default function MovieEdit() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-8">
-        {/* ============= LEFT SIDEBAR ============= */}
         <aside className="lg:sticky lg:top-4 lg:self-start space-y-4" data-testid="edit-sidebar">
-          <div className="rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm">
-            <div className="bg-cyan-500 text-white px-4 py-3 font-bold flex items-center justify-between">
-              <span>Edit</span>
-              <span className="text-xs bg-white/20 rounded-full w-5 h-5 flex items-center justify-center">?</span>
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#14181f]/80 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+            <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-3 text-sm font-bold text-black">
+              <span>CineVerse Editor</span>
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px]">?</span>
             </div>
             <nav className="py-2">
               {SECTIONS.map((s) => (
@@ -377,7 +432,7 @@ export default function MovieEdit() {
                   key={s.id}
                   type="button"
                   onClick={() => scrollTo(s.id)}
-                  className={`w-full text-left px-4 py-2 text-sm transition ${activeSection === s.id ? "text-cyan-600 font-semibold bg-cyan-50" : "text-slate-700 hover:bg-slate-50"}`}
+                  className={`w-full text-left px-4 py-2 text-sm transition ${activeSection === s.id ? "bg-amber-500/10 font-semibold text-amber-200" : "text-slate-300 hover:bg-white/5"}`}
                   data-testid={`section-link-${s.id}`}
                 >
                   {s.label}
@@ -386,23 +441,28 @@ export default function MovieEdit() {
             </nav>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 border-l-4 border-l-emerald-500">
-            <div className="text-3xl font-bold text-slate-900" data-testid="edit-content-score">{stats.content_score || 0}</div>
-            <div className="text-xs text-slate-500 mt-0.5">{scoreLabel}</div>
-            <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-              <div className="h-full bg-emerald-500" style={{ width: `${stats.content_score || 0}%` }} />
+          <div className="rounded-2xl border border-emerald-500/20 bg-[#14181f]/80 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
+            <div className="text-3xl font-bold text-white" data-testid="edit-content-score">{stats.content_score || 0}</div>
+            <div className="mt-0.5 text-xs text-slate-400">{scoreLabel}</div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/5">
+              <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400" style={{ width: `${stats.content_score || 0}%` }} />
             </div>
           </div>
 
-          <div className="text-xs text-slate-500 flex items-center gap-1 px-1">
-            <Keyboard className="w-3.5 h-3.5" /> Keyboard Shortcuts <span className="ml-auto text-slate-400">Ctrl+S</span>
+          <div className="flex items-center gap-1 px-1 text-xs text-slate-400">
+            <Keyboard className="w-3.5 h-3.5" /> Keyboard shortcuts <span className="ml-auto text-slate-500">Ctrl+S</span>
           </div>
         </aside>
 
         {/* ============= FORM SECTIONS ============= */}
         <div className="space-y-8 min-w-0">
           {/* ---- Primary Facts ---- */}
-          <section id="primary-facts" ref={(el) => (sectionRefs.current["primary-facts"] = el)} className="space-y-5">
+          <section id="primary-facts" ref={(el) => (sectionRefs.current["primary-facts"] = el)} className="space-y-5 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+            <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-amber-400">Primary facts</div>
+            <div>
+              <Label className="text-slate-200 font-semibold text-sm">IMDb ID</Label>
+              <Input value={form.imdb_id} onChange={(e) => setField("imdb_id", e.target.value.trim())} disabled={!isMod} required={isMod} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" placeholder="tt1234567" className="mt-1.5 bg-white border-slate-300 text-slate-900 disabled:opacity-70" data-testid="field-imdb-id" />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="original_language" label="Original Movie Language" locked={isFieldLocked("original_language")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("original_language")}>
                 <Input value={form.original_language} onChange={(e) => setField("original_language", e.target.value)} disabled={!canEditField("original_language")} className="bg-white border-slate-300 text-slate-900" data-testid="field-original-language" />
@@ -452,9 +512,9 @@ export default function MovieEdit() {
           </section>
 
           {/* ---- Cast ---- */}
-          <section id="cast" ref={(el) => (sectionRefs.current["cast"] = el)} className="space-y-3">
+          <section id="cast" ref={(el) => (sectionRefs.current["cast"] = el)} className="space-y-3 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-slate-900">Cast</h2>
+              <h2 className="font-heading text-xl font-bold text-white">Cast</h2>
               <LockIcon locked={isFieldLocked("cast")} canToggle={isMod} onToggle={() => toggleLock("cast")} />
             </div>
             {(movie?.locked_cast_actor_ids || []).length > 0 && (
@@ -499,7 +559,7 @@ export default function MovieEdit() {
                     )}
                     <Button type="button" size="sm" variant="outline" onClick={() => openCastEdit(i)} disabled={!rowEditable} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid={`cast-edit-${i}`}>Edit</Button>
                     {!(rowLocked && !canLockCast) && (
-                      <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={!rowEditable} className="text-slate-400 hover:text-rose-500" data-testid={`cast-remove-${i}`}><X className="w-4 h-4" /></Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => remCast(i)} disabled={saving || !rowEditable} className="text-slate-400 hover:text-rose-500" data-testid={`cast-remove-${i}`}><X className="w-4 h-4" /></Button>
                     )}
                   </div>
                 );
@@ -509,40 +569,86 @@ export default function MovieEdit() {
               )}
             </div>
             <Button type="button" variant="outline" onClick={addCast} disabled={!canEditField("cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="edit-add-cast"><Plus className="w-4 h-4 mr-1" /> Add cast</Button>
+            {isMod && <Button type="button" variant="outline" onClick={() => setBulkCastOpen(true)} disabled={!canEditField("cast")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="edit-bulk-add-cast"><Plus className="w-4 h-4 mr-1" /> Add multiple</Button>}
           </section>
 
           {/* ---- Crew ---- */}
-          <section id="crew" ref={(el) => (sectionRefs.current["crew"] = el)} className="space-y-3">
+          <section id="crew" ref={(el) => (sectionRefs.current["crew"] = el)} className="space-y-3 rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-slate-900">Crew</h2>
+              <h2 className="font-heading text-xl font-bold text-white">Crew</h2>
               <LockIcon locked={isFieldLocked("crew")} canToggle={isMod} onToggle={() => toggleLock("crew")} />
             </div>
             <div className="space-y-2">
               {form.crew.map((c, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Input placeholder="Name" value={c.name} onChange={(e) => updCrew(i, "name", e.target.value)} disabled={!canEditField("crew")} className="flex-1 bg-white border-slate-300 text-slate-900" data-testid={`edit-crew-name-${i}`} />
-                  <Select value={c.role} onValueChange={(v) => updCrew(i, "role", v)} disabled={!canEditField("crew")}>
-                    <SelectTrigger className="w-[180px] bg-white border-slate-300 text-slate-900" data-testid={`edit-crew-role-${i}`}><SelectValue /></SelectTrigger>
-                    <SelectContent>{CREW_ROLES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Button type="button" variant="ghost" onClick={() => remCrew(i)} disabled={!canEditField("crew")} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></Button>
+                <div key={`${c.actor_id || c.name}-${c.role}-${i}`} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white p-2.5">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs text-slate-500">
+                    {actors.find((actor) => actor.id === c.actor_id)?.photo_url
+                      ? <img src={fileUrl(actors.find((actor) => actor.id === c.actor_id).photo_url)} alt="" className="h-full w-full object-cover" />
+                      : (c.name?.[0] || "?")}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-900">{c.name || "Unknown actor"}</div>
+                    <div className="text-xs text-slate-500">{c.role}</div>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={() => openCrewEdit(i)} disabled={!canEditField("crew")} className="border-slate-300 text-slate-700 hover:bg-slate-100" data-testid={`edit-crew-${i}`}>Edit</Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => remCrew(i)} disabled={!canEditField("crew")} className="text-slate-400 hover:text-rose-500" data-testid={`remove-crew-${i}`}><X className="w-4 h-4" /></Button>
                 </div>
               ))}
             </div>
+            {form.crew.length === 0 && <div className="rounded-md border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">No crew yet. Add a person and select their job.</div>}
             <Button type="button" variant="outline" onClick={addCrew} disabled={!canEditField("crew")} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="edit-add-crew"><Plus className="w-4 h-4 mr-1" /> Add crew</Button>
           </section>
 
           {/* ---- Genres ---- */}
-          <section id="genres" ref={(el) => (sectionRefs.current["genres"] = el)}>
+          <section id="genres" ref={(el) => (sectionRefs.current["genres"] = el)} className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <Field name="genres" label="Genres" locked={isFieldLocked("genres")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("genres")} hint="Press Enter or comma to add a tag">
               <ChipInput value={form.genres} onChange={(v) => setField("genres", v)} placeholder="Drama, Sci-Fi…" disabled={!canEditField("genres")} testid="field-genres" />
             </Field>
           </section>
 
           {/* ---- Keywords ---- */}
-          <section id="keywords" ref={(el) => (sectionRefs.current["keywords"] = el)}>
+          <section id="keywords" ref={(el) => (sectionRefs.current["keywords"] = el)} className="rounded-2xl border border-white/10 bg-[#14181f]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
             <Field name="keywords" label="Keywords" locked={isFieldLocked("keywords")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("keywords")} hint="Short descriptive tags surfaced in the sidebar">
               <ChipInput value={form.keywords} onChange={(v) => setField("keywords", v)} placeholder="chocolate, factory, family…" disabled={!canEditField("keywords")} testid="field-keywords" />
+            </Field>
+          </section>
+
+          <section id="purchase-options" ref={(el) => (sectionRefs.current["purchase-options"] = el)} className="space-y-3">
+            <Field name="purchase_options" label="Where to Buy" locked={isFieldLocked("purchase_options")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("purchase_options")} hint="Add only services where this movie is currently available for purchase.">
+              <div className="space-y-2">
+                {(form.purchase_options || []).map((option, index) => (
+                  <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] sm:items-center" data-testid={`purchase-option-${index}`}>
+                    <Input
+                      value={option.provider}
+                      onChange={(event) => updatePurchaseOption(index, "provider", event.target.value)}
+                      maxLength={80}
+                      disabled={!canEditField("purchase_options")}
+                      placeholder="Amazon, Apple TV, YouTube Movies…"
+                      aria-label={`Purchase provider ${index + 1}`}
+                      className="bg-white border-slate-300 text-slate-900"
+                      data-testid={`purchase-provider-${index}`}
+                    />
+                    <Input
+                      type="url"
+                      value={option.url}
+                      onChange={(event) => updatePurchaseOption(index, "url", event.target.value)}
+                      maxLength={2048}
+                      disabled={!canEditField("purchase_options")}
+                      placeholder="https://…"
+                      aria-label={`${option.provider || "Provider"} purchase URL`}
+                      className="bg-white border-slate-300 text-slate-900"
+                      data-testid={`purchase-url-${index}`}
+                    />
+                    <Button type="button" size="icon" variant="ghost" onClick={() => removePurchaseOption(index)} disabled={!canEditField("purchase_options")} aria-label={`Remove ${option.provider || "purchase service"}`} className="text-slate-500 hover:text-rose-500" data-testid={`remove-purchase-option-${index}`}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                {(form.purchase_options || []).length === 0 && <p className="text-sm text-slate-500">No purchase services listed.</p>}
+                <Button type="button" variant="outline" onClick={addPurchaseOption} disabled={!canEditField("purchase_options") || form.purchase_options.length >= 20} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="add-purchase-option">
+                  <Plus className="mr-1 h-4 w-4" /> Add service
+                </Button>
+              </div>
             </Field>
           </section>
 
@@ -618,6 +724,24 @@ export default function MovieEdit() {
         value={castDialog.index != null ? form.cast[castDialog.index] : null}
         onSave={handleCastSave}
         onActorCreated={handleActorCreated}
+      />
+      {isMod && <BulkCastAddDialog
+        open={bulkCastOpen}
+        onOpenChange={setBulkCastOpen}
+        actors={actors}
+        excludedActorIds={(form.cast || []).map((row) => row.actor_id)}
+        onSave={handleBulkCastSave}
+        onActorCreated={handleActorCreated}
+      />}
+      <CastEditDialog
+        open={crewDialog.open}
+        onOpenChange={(open) => setCrewDialog((current) => ({ ...current, open }))}
+        actors={actors}
+        value={crewDialog.index != null ? form.crew[crewDialog.index] : null}
+        onSave={handleCrewSave}
+        onActorCreated={handleActorCreated}
+        mode="crew"
+        jobs={crewJobs}
       />
     </div>
   );

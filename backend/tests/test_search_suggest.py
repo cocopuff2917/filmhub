@@ -1,5 +1,6 @@
 """Tests for /api/search/suggest typeahead endpoint (new feature)."""
 import os
+import uuid
 import requests
 import pytest
 

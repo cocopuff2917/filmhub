@@ -360,15 +360,15 @@ export function EditHistoryTab() {
     date_to: "",
   });
 
-  const load = async () => {
+  const load = async (activeFilters = filters) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (filters.q) params.set("q", filters.q);
-      if (filters.entity_type !== "all") params.set("entity_type", filters.entity_type);
-      if (filters.action !== "all") params.set("action", filters.action);
-      if (filters.date_from) params.set("date_from", filters.date_from);
-      if (filters.date_to) params.set("date_to", filters.date_to);
+      if (activeFilters.q) params.set("q", activeFilters.q);
+      if (activeFilters.entity_type !== "all") params.set("entity_type", activeFilters.entity_type);
+      if (activeFilters.action !== "all") params.set("action", activeFilters.action);
+      if (activeFilters.date_from) params.set("date_from", activeFilters.date_from);
+      if (activeFilters.date_to) params.set("date_to", activeFilters.date_to);
       params.set("limit", "200");
       const r = await api.get(`/edits?${params.toString()}`);
       setEdits(r.data);
@@ -378,8 +378,15 @@ export function EditHistoryTab() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const resetFilters = () => {
-    setFilters({ q: "", entity_type: "all", action: "all", date_from: "", date_to: "" });
-    setTimeout(load, 0);
+    const clearedFilters = { q: "", entity_type: "all", action: "all", date_from: "", date_to: "" };
+    setFilters(clearedFilters);
+    load(clearedFilters);
+  };
+
+  const loadVandalismFilter = () => {
+    const vandalismFilters = { q: "vandalism", entity_type: "user", action: "suspend", date_from: "", date_to: "" };
+    setFilters(vandalismFilters);
+    load(vandalismFilters);
   };
 
   return (
@@ -435,6 +442,7 @@ export function EditHistoryTab() {
           data-testid="edits-date-to"
         />
         <div className="md:col-span-6 flex items-center gap-2 justify-end">
+          <Button size="sm" variant="outline" className="h-8 border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" onClick={loadVandalismFilter} data-testid="edits-vandalism-filter">Vandalism</Button>
           <Button size="sm" variant="outline" className="h-8 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={resetFilters} data-testid="edits-reset">Reset</Button>
           <Button size="sm" className="h-8 bg-amber-500 hover:bg-amber-600 text-black font-semibold" onClick={load} data-testid="edits-apply">Apply</Button>
         </div>

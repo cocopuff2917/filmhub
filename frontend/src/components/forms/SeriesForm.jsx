@@ -8,12 +8,17 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
+import { useAuth } from "@/context/AuthContext";
 
 export default function SeriesForm({ series, onSaved, onCancel }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const canEditImdb = ["admin", "moderator"].includes(user?.effective_role || user?.role);
   const [actors, setActors] = useState([]);
   const empty = {
-    title: "", first_air_date: "", last_air_date: "", genres: "",
+    title: "", imdb_id: "", first_air_date: "", last_air_date: "", genres: "",
     synopsis: "", poster_url: "", backdrop_url: "", trailer_url: "",
     status: "Ongoing", is_trending: false, main_cast: [], seasons: [], gallery: [],
   };
@@ -27,7 +32,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
         // fetch full details
         const full = (await api.get(`/series/${series.id}`)).data;
         setForm({
-          title: full.title, first_air_date: full.first_air_date || "", last_air_date: full.last_air_date || "",
+          title: full.title, imdb_id: full.imdb_id || "", first_air_date: full.first_air_date || "", last_air_date: full.last_air_date || "",
           genres: (full.genres || []).join(", "), synopsis: full.synopsis || "",
           poster_url: full.poster_url || "", backdrop_url: full.backdrop_url || "",
           trailer_url: full.trailer_url || "", status: full.status || "Ongoing",
@@ -55,6 +60,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
     e.preventDefault();
     const payload = {
       ...form,
+      ...(canEditImdb && !series?.id ? { imdb_id: form.imdb_id || null } : {}),
       genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
       main_cast: form.main_cast.filter((c) => c.actor_id && c.character_name),
       seasons: form.seasons.map((se) => ({
@@ -65,6 +71,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
         })),
       })),
     };
+    if (series?.id || !canEditImdb) delete payload.imdb_id;
     try {
       let result;
       if (series?.id) {
@@ -76,7 +83,14 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
       }
       onSaved && onSaved(result);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to save series");
+      const detail = e.response?.data?.detail;
+      if (detail && typeof detail === "object") {
+        toast.error(detail.message || "This IMDb ID already exists", {
+          action: detail.url ? { label: "Edit existing", onClick: () => navigate(detail.url) } : undefined,
+        });
+      } else {
+        toast.error(detail || "Failed to save series");
+      }
     }
   };
 
@@ -128,6 +142,10 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
         <Label className="text-slate-300">Title</Label>
         <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-title-input" />
       </div>
+      {!series?.id && canEditImdb && <div>
+        <Label className="text-slate-300">IMDb ID</Label>
+        <Input required pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-imdb-input" />
+      </div>}
       <div className="grid grid-cols-3 gap-3">
         <div>
           <Label className="text-slate-300">First air date</Label>

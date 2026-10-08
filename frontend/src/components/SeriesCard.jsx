@@ -11,32 +11,37 @@ export default function SeriesCard({ series, testid }) {
   return (
     <Link
       to={`/series/${series.id}`}
-      className="group block poster-hover rounded-xl overflow-hidden bg-[#14181f] border border-white/5"
+      className="group block overflow-hidden rounded-2xl border border-white/10 bg-[#14181f]/80 shadow-[0_20px_45px_rgba(0,0,0,0.14)] transition hover:border-amber-500/40 hover:-translate-y-0.5"
       data-testid={testid || `series-card-${series.id}`}
     >
       <div className="relative aspect-[2/3] overflow-hidden bg-[#1e2430]">
         {poster ? (
-          <img src={poster} alt={series.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
+          <img src={poster} alt={series.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-2xl">
+          <div className="flex h-full w-full items-center justify-center text-2xl font-display text-slate-600">
             NO POSTER
           </div>
         )}
-        <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/70 backdrop-blur px-2 py-1 rounded-full">
-          <Tv className="w-3 h-3 text-amber-400" />
-          <span className="text-[10px] font-bold text-white uppercase tracking-wider">Series</span>
+        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/90 to-transparent" />
+        <div className="absolute left-2 top-2 flex items-center gap-1 rounded-full border border-amber-500/40 bg-black/70 px-2 py-1 backdrop-blur-sm">
+          <Tv className="h-3 w-3 text-amber-400" />
+          <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-white">Series</span>
         </div>
-        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black to-transparent" />
+        {series.avg_rating != null && (
+          <div className="absolute right-2 top-2 rounded-full border border-white/10 bg-black/70 px-2 py-1 text-[10px] font-bold text-amber-300 backdrop-blur-sm">
+            {series.avg_rating}
+          </div>
+        )}
       </div>
       <div className="p-3">
-        <div className="font-heading text-white font-semibold line-clamp-1 group-hover:text-amber-400 transition-colors">
+        <div className="font-heading text-sm font-semibold text-white transition-colors group-hover:text-amber-300 line-clamp-1">
           {series.title}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
           <span>{years || "—"}</span>
           {series.season_count > 0 && (
             <>
-              <span className="w-1 h-1 rounded-full bg-slate-600" />
+              <span className="h-1 w-1 rounded-full bg-slate-600" />
               <span>{series.season_count} season{series.season_count !== 1 && "s"}</span>
             </>
           )}

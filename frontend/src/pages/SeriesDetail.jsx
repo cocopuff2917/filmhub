@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Calendar, Tv, Bookmark, BookmarkCheck, PlayCircle, Heart, Share2, Edit, Trash2, Flag, Lock,
+  Calendar, Tv, Film, Bookmark, BookmarkCheck, PlayCircle, Heart, Share2, Edit, Trash2, Flag, Lock,
   Award, ChevronRight, ChevronDown, TrendingUp, Star, MessageSquare, History as HistoryIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
 import EditHistoryPanel from "@/components/EditHistoryPanel";
 import SimilarSection from "@/components/SimilarSection";
-import DiscussionSection from "@/components/DiscussionSection";
+import EntityForumThreads from "@/components/EntityForumThreads";
 import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 import VideosSection from "@/components/VideosSection";
@@ -54,7 +54,7 @@ function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
     <div className="rounded-xl bg-[#14181f] border border-white/10 overflow-hidden" data-testid={`season-block-${season.season_number}`}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/5 transition">
         <div className="w-16 flex-shrink-0 aspect-[2/3] rounded-md overflow-hidden bg-[#1e2430]">
-          {season.poster_url ? <img src={fileUrl(season.poster_url)} alt="" className="w-full h-full object-cover" /> : (fallbackPoster ? <img src={fallbackPoster} alt="" className="w-full h-full object-cover opacity-60" /> : null)}
+          {season.poster_url ? <img src={fileUrl(season.poster_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" /> : (fallbackPoster ? <img src={fallbackPoster} alt="" className="w-full h-full object-cover opacity-60" loading="lazy" decoding="async" /> : null)}
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-heading text-lg font-bold">{season.name || `Season ${season.season_number}`}</div>
@@ -70,7 +70,7 @@ function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
           ) : episodes.map((ep, i) => (
             <div key={i} className="flex gap-4 p-4" data-testid={`episode-${season.season_number}-${ep.episode_number}`}>
               <div className="w-32 flex-shrink-0 aspect-video rounded-md overflow-hidden bg-[#1e2430]">
-                {ep.still_url ? <img src={fileUrl(ep.still_url)} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs">No image</div>}
+                {ep.still_url ? <img src={fileUrl(ep.still_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs">No image</div>}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 flex-wrap">
@@ -90,7 +90,7 @@ function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
                           className="flex items-center gap-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 pl-1 pr-2.5 py-1 transition group"
                         >
                           <div className="w-6 h-6 rounded-full overflow-hidden bg-[#1e2430] flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
-                            {g.actor?.photo_url ? <img src={fileUrl(g.actor.photo_url)} alt="" className="w-full h-full object-cover" /> : (g.actor?.name?.[0] || "?")}
+                            {g.actor?.photo_url ? <img src={fileUrl(g.actor.photo_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" /> : (g.actor?.name?.[0] || "?")}
                           </div>
                           <span className="text-xs text-slate-200 group-hover:text-amber-400 font-medium">{g.actor?.name || "Unknown"}</span>
                           {g.character_name && <span className="text-xs text-slate-500">as {g.character_name}</span>}
@@ -206,76 +206,118 @@ export default function SeriesDetail() {
   const gallery = (series.gallery || []).filter(Boolean);
 
   return (
-    <div className="text-white">
-      {/* ================= HERO ================= */}
-      <section className="relative overflow-hidden" data-testid="series-hero">
+    <div className="text-white bg-[#0d0f12]">
+      <section className="relative overflow-hidden border-b border-white/10 bg-[#0d0f12]" data-testid="series-hero">
         <div className="absolute inset-0">
-          {backdrop && <img src={backdrop} alt="" className="w-full h-full object-cover" />}
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f12] via-[#0d0f12]/90 to-[#0d0f12]/40" />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#0d0f12]" />
+          {backdrop && <img src={backdrop} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
+          <div className="absolute inset-0 bg-[#0d0f12]/75" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,197,94,0.18),transparent_24%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.14),transparent_18%)]" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f12] via-[#0d0f12]/90 to-[#0d0f12]/65" />
         </div>
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-14">
+
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
           <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] lg:grid-cols-[260px_1fr] gap-8 items-start">
-            <div className="rounded-xl overflow-hidden bg-[#1e2430] border border-white/10 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] aspect-[2/3]">
-              {poster ? <img src={poster} alt={series.title} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-2xl">NO POSTER</div>}
+            <div className="overflow-hidden rounded-2xl border border-amber-500/20 bg-[#14181f]/80 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-sm ring-1 ring-white/5">
+              <div className="aspect-[2/3]">
+                {poster ? <img src={poster} alt={series.title} className="h-full w-full object-cover" loading="eager" decoding="async" fetchPriority="high" /> : <div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
+              </div>
             </div>
-            <div>
-              <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl leading-none tracking-tight" data-testid="series-title">
-                {series.title}
-                {yearRange && <span className="text-slate-400 font-normal ml-3">({yearRange})</span>}
-              </h1>
-              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-300">
-                {series.status && <span className="text-[10px] px-1.5 py-0.5 rounded border border-white/20 uppercase tracking-widest">{series.status}</span>}
-                {(series.genres || []).length > 0 && <span>{(series.genres || []).join(", ")}</span>}
-                {series.season_count ? <span className="flex items-center gap-1.5"><Tv className="w-3.5 h-3.5" /> {series.season_count} season{series.season_count !== 1 && "s"} · {series.episode_count || 0} ep</span> : null}
+
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.22em] text-amber-300/90">
+                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">Now streaming</span>
+                {series.status && <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-200">{series.status}</span>}
+              </div>
+
+              <div>
+                <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl leading-none tracking-tight text-white" data-testid="series-title">
+                  {series.title}
+                  {yearRange && <span className="ml-3 text-slate-400 font-normal">({yearRange})</span>}
+                </h1>
+
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-200">
+                  {(series.genres || []).length > 0 && <span className="inline-flex items-center gap-2"><Tv className="h-4 w-4 text-amber-400" /> {(series.genres || []).join(" · ")}</span>}
+                  {series.season_count ? <span className="inline-flex items-center gap-2"><Film className="h-4 w-4 text-amber-400" /> {series.season_count} season{series.season_count !== 1 && "s"} · {series.episode_count || 0} ep</span> : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-500/20 bg-[#0f1318]/80 p-4 shadow-[0_10px_30px_rgba(0,0,0,0.24)]">
+                <div className="mb-3 text-[10px] uppercase tracking-[0.22em] text-amber-400">CineVerse dossier</div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-transparent p-3">
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">First aired</div>
+                    <div className="mt-2 text-sm font-semibold text-white">{series.first_air_date ? fmtDate(series.first_air_date) : "TBA"}</div>
+                  </div>
+                  <div className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-transparent p-3">
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Seasons</div>
+                    <div className="mt-2 text-sm font-semibold text-white">{series.season_count || "—"}</div>
+                  </div>
+                  <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-transparent p-3">
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Creator</div>
+                    <div className="mt-2 text-sm font-semibold text-white">{creators[0]?.name || "—"}</div>
+                  </div>
+                </div>
               </div>
 
               {(series.first_air_date || series.last_air_date) && (
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400" data-testid="air-dates-row">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400" data-testid="air-dates-row">
                   {series.first_air_date && (
-                    <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-emerald-400" /> First aired <span className="text-slate-200 font-semibold">{fmtDate(series.first_air_date)}</span></span>
+                    <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-amber-400" /> First aired <span className="text-slate-200 font-semibold">{fmtDate(series.first_air_date)}</span></span>
                   )}
                   {series.last_air_date && (
-                    <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-rose-400" /> Last aired <span className="text-slate-200 font-semibold">{fmtDate(series.last_air_date)}</span></span>
+                    <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-amber-400" /> Last aired <span className="text-slate-200 font-semibold">{fmtDate(series.last_air_date)}</span></span>
                   )}
                 </div>
               )}
 
-              <div className="mt-6 flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-3 rounded-full border border-white/10 bg-[#14181f]/80 px-3 py-2 backdrop-blur-sm">
                   <ScoreCircle score={score100} />
-                  <div className="text-sm"><div className="font-bold uppercase tracking-widest text-slate-300 text-xs">User<br/>Score</div></div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">CineVerse</div>
+                    <div className="font-semibold text-white">Score</div>
+                  </div>
                 </div>
-                <div className="hidden sm:block h-10 w-px bg-white/10" />
-                <button className="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-[#14181f] text-white hover:bg-white/10 transition" title="Watchlist" data-testid="watchlist-btn"><Bookmark className="w-5 h-5" /></button>
-                <button className="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-[#14181f] text-white hover:bg-white/10 transition" title="Favorite"><Heart className="w-5 h-5" /></button>
-                <button onClick={share} className="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-[#14181f] text-white hover:bg-white/10 transition" title="Share"><Share2 className="w-5 h-5" /></button>
+
+                <div className="hidden sm:block h-12 w-px bg-white/10" />
+
+                <button className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-[#14181f]/80 text-white transition hover:border-amber-500/40 hover:bg-white/10" title="Watchlist" data-testid="watchlist-btn">
+                  <Bookmark className="h-5 w-5" />
+                </button>
+                <button className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-[#14181f]/80 text-white transition hover:border-amber-500/40 hover:bg-white/10" title="Favorite">
+                  <Heart className="h-5 w-5" />
+                </button>
+                <button onClick={share} className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-[#14181f]/80 text-white transition hover:border-amber-500/40 hover:bg-white/10" title="Share">
+                  <Share2 className="h-5 w-5" />
+                </button>
                 {series.trailer_url && (
                   <TrailerPlayer url={series.trailer_url} title={`${series.title} — Trailer`} testId="play-trailer-inline">
-                    <Button className="bg-white/10 hover:bg-white/15 text-white border border-white/20"><PlayCircle className="w-4 h-4 mr-2" /> Play Trailer</Button>
+                    <Button className="border border-amber-500/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20">
+                      <PlayCircle className="mr-2 h-4 w-4" /> Play trailer
+                    </Button>
                   </TrailerPlayer>
                 )}
               </div>
 
-              {series.tagline && <p className="mt-6 italic text-slate-400 text-lg" data-testid="series-tagline">{series.tagline}</p>}
+              {series.tagline && <p className="max-w-3xl text-lg italic text-amber-100/90" data-testid="series-tagline">“{series.tagline}”</p>}
 
-              <div className="mt-5">
-                <h3 className="font-heading text-2xl font-semibold">Overview</h3>
-                <p className="mt-2 text-slate-300 leading-relaxed max-w-3xl" data-testid="series-synopsis">{series.synopsis || "No synopsis available."}</p>
+              <div className="rounded-2xl border border-white/10 bg-[#14181f]/75 p-5 backdrop-blur-sm">
+                <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">Story</div>
+                <p className="text-base leading-relaxed text-slate-200" data-testid="series-synopsis">{series.synopsis || "No synopsis available."}</p>
               </div>
 
               {creators.length > 0 && (
-                <div className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-2xl">
+                <div className="grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-3">
                   {creators.map((d, i) => (
-                    <div key={i} data-testid={`creator-${i}`}>
-                      <div className="font-semibold text-white">{d.name}</div>
-                      <div className="text-xs text-slate-400">{d.role || "Creator"}</div>
+                    <div key={i} className="rounded-xl border border-white/10 bg-[#14181f]/70 p-3" data-testid={`creator-${i}`}>
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Creator</div>
+                      <div className="mt-2 font-semibold text-white">{d.name}</div>
                     </div>
                   ))}
                 </div>
               )}
 
-              <div className="mt-6 flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
                 {user && <Button size="sm" variant="outline" onClick={() => navigate(`/series/${id}/edit`)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-series-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>}
                 {user && (
                   <InlineMediaEditor
@@ -316,13 +358,13 @@ export default function SeriesDetail() {
           <section data-testid="cast-section">
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="font-heading text-2xl font-bold">Series Cast</h2>
-              <Link to="#" className="text-sm text-amber-400 hover:text-amber-300 inline-flex items-center">Full Cast &amp; Crew <ChevronRight className="w-4 h-4" /></Link>
+              <Link to={`/series/${id}/credits`} className="text-sm text-amber-400 hover:text-amber-300 inline-flex items-center" data-testid="series-full-credits-link">Full Cast &amp; Crew <ChevronRight className="w-4 h-4" /></Link>
             </div>
             {(!series.main_cast || series.main_cast.length === 0) ? (
               <div className="mt-4 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-10 text-center text-slate-500 text-sm">No cast added yet.</div>
             ) : (
               <div className="mt-4 flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 snap-x">
-                {series.main_cast.map((c, idx) => (
+                {series.main_cast.filter((c) => c && c.actor && c.actor.id).map((c, idx) => (
                   <Link to={`/actor/${c.actor.id}`} key={idx} className="group block flex-shrink-0 w-[140px] rounded-xl overflow-hidden bg-[#14181f] border border-white/5 snap-start hover:border-amber-500/30 transition" data-testid={`series-cast-${c.actor.id}`}>
                     <div className="aspect-[3/4] bg-[#1e2430] overflow-hidden">
                       <ImageWithFallback
@@ -430,7 +472,7 @@ export default function SeriesDetail() {
                 </div>
               </TabsContent>
               <TabsContent value="discussions" className="mt-6">
-                <DiscussionSection entityType="series" entityId={id} embedded />
+                <EntityForumThreads entityType="series" entityId={id} entityTitle={series.title} />
               </TabsContent>
             </Tabs>
           </section>
@@ -483,29 +525,38 @@ export default function SeriesDetail() {
             </TrailerPlayer>
           )}
 
-          <div className="rounded-xl bg-[#14181f] border border-white/10 divide-y divide-white/5 text-sm">
-            <div className="p-4">
-              <div className="text-xs uppercase tracking-widest text-slate-500">Status</div>
-              <div className="mt-1 font-semibold" data-testid="sidebar-status">{series.status || "—"}</div>
-            </div>
-            {(series.network || series.network_logo_url) && (
-              <div className="p-4">
-                <div className="text-xs uppercase tracking-widest text-slate-500">Network</div>
-                <div className="mt-1 font-semibold flex items-center gap-2" data-testid="sidebar-network">
-                  {series.network_logo_url && <img src={fileUrl(series.network_logo_url)} alt="" className="h-6 max-w-[100px] object-contain" />}
-                  {series.network && <span>{series.network}</span>}
-                </div>
+          <section className="rounded-2xl border border-amber-500/20 bg-[#14181f]/80 p-4 shadow-[0_18px_48px_rgba(0,0,0,0.28)]">
+            <div className="mb-3 text-[10px] uppercase tracking-[0.22em] text-amber-400">Collector notes</div>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5">
+                <span className="text-slate-400">Status</span>
+                <span className="font-semibold text-white" data-testid="sidebar-status">{series.status || "—"}</span>
               </div>
-            )}
-            <div className="p-4">
-              <div className="text-xs uppercase tracking-widest text-slate-500">Type</div>
-              <div className="mt-1 font-semibold" data-testid="sidebar-type">{series.type || "Scripted"}</div>
+              {(series.network || series.network_logo_url) && (
+                <div className="rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5">
+                  <div className="text-slate-400">Network</div>
+                  {series.network ? (
+                    <Link to={`/network/${encodeURIComponent(series.network)}`} className="mt-1 inline-flex items-center gap-2 font-semibold text-white hover:text-amber-300" data-testid="sidebar-network">
+                      {series.network_logo_url && <img src={fileUrl(series.network_logo_url)} alt="" className="h-6 max-w-[100px] object-contain" />}
+                      <span>{series.network}</span>
+                    </Link>
+                  ) : (
+                    <div className="mt-1 flex items-center gap-2" data-testid="sidebar-network">
+                      {series.network_logo_url && <img src={fileUrl(series.network_logo_url)} alt="" className="h-6 max-w-[100px] object-contain" />}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5">
+                <span className="text-slate-400">Type</span>
+                <span className="font-semibold text-white" data-testid="sidebar-type">{series.type || "Scripted"}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5">
+                <span className="text-slate-400">Original language</span>
+                <span className="font-semibold text-white" data-testid="sidebar-language">{series.original_language || "—"}</span>
+              </div>
             </div>
-            <div className="p-4">
-              <div className="text-xs uppercase tracking-widest text-slate-500">Original Language</div>
-              <div className="mt-1 font-semibold" data-testid="sidebar-language">{series.original_language || "—"}</div>
-            </div>
-          </div>
+          </section>
 
           <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
             <div className="text-xs uppercase tracking-widest text-slate-500">Keywords</div>

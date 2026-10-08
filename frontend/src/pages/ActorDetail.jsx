@@ -12,6 +12,7 @@ import EditHistoryPanel from "@/components/EditHistoryPanel";
 import ReportDialog from "@/components/ReportDialog";
 import LockFieldsDialog from "@/components/LockFieldsDialog";
 import ImageWithFallback from "@/components/ImageWithFallback";
+import InlineMediaEditor from "@/components/InlineMediaEditor";
 
 function parseLocalDate(str) {
   // Parse "YYYY-MM-DD" (or "YYYY-MM-DDTHH:MM..." leading date) as a LOCAL date so
@@ -69,28 +70,31 @@ export default function ActorDetail() {
   const photo = actor.photo_url ? fileUrl(actor.photo_url) : null;
   const isDeceased = !!actor.death_date;
   const age = computeAge(actor.birth_date, actor.death_date);
-  const totalCredits = (actor.movies?.length || 0) + (actor.series?.length || 0);
+  const totalCredits = (actor.movies?.length || 0) + (actor.series?.length || 0) + (actor.crew_credits?.length || 0);
 
   return (
-    <div>
-      <section className="hero-radial">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-8 items-start">
-            <div className="rounded-2xl overflow-hidden aspect-[2/3] bg-[#1e2430] border border-white/10">
+    <div className="bg-[#0a0d12] text-white">
+      <section className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_20%),linear-gradient(120deg,#0a0d12_0%,#10151d_45%,#0a0d12_100%)]">
+        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 items-start gap-8 md:grid-cols-[220px_1fr]">
+            <div className="overflow-hidden rounded-2xl border border-amber-500/20 bg-[#14181f]/80 shadow-[0_30px_80px_rgba(0,0,0,0.45)] aspect-[2/3]">
               <ImageWithFallback
                 src={photo}
                 fallbackSrc={fileUrl(actor.photo_url, "jpeg")}
                 alt={actor.name}
                 className="w-full h-full object-cover"
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
                 fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-5xl">{actor.name?.[0]}</div>}
               />
             </div>
             <div>
               <div className="flex items-center gap-3">
-                <div className="text-xs uppercase tracking-widest text-amber-400 font-semibold">Actor Profile</div>
-                {isDeceased && <span className="text-xs uppercase tracking-widest text-slate-400 flex items-center gap-1"><Skull className="w-3 h-3" /> Deceased</span>}
+                <div className="text-[10px] uppercase tracking-[0.22em] text-amber-300 font-semibold">Actor Profile</div>
+                {isDeceased && <span className="flex items-center gap-1 text-[10px] uppercase tracking-[0.22em] text-slate-400"><Skull className="w-3 h-3" /> Deceased</span>}
               </div>
-              <h1 className="mt-2 font-display text-5xl sm:text-6xl tracking-tight text-white" data-testid="actor-name">{actor.name}</h1>
+              <h1 className="mt-2 font-display text-5xl tracking-tight text-white sm:text-6xl" data-testid="actor-name">{actor.name}</h1>
 
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm text-slate-300 max-w-2xl">
                 {actor.birth_date && (
@@ -142,6 +146,13 @@ export default function ActorDetail() {
                   <Button variant="outline" onClick={() => setEditOpen(true)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="edit-actor-btn">
                     <Edit className="w-4 h-4 mr-2" /> Edit
                   </Button>
+                )}
+                {user && (
+                  <InlineMediaEditor
+                    kind="actor"
+                    entity={actor}
+                    onUpdated={(patch) => setActor((current) => ({ ...current, ...patch }))}
+                  />
                 )}
                 {user && (
                   <Button variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-actor-btn">
@@ -244,6 +255,24 @@ export default function ActorDetail() {
           </div>
         </section>
       )}
+
+      {/* Crew Credits */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="actor-crew-credits-section">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold"><Film className="w-4 h-4" /> Behind the scenes</div>
+        <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">Crew Credits</h2>
+        {(!actor.crew_credits || actor.crew_credits.length === 0) ? (
+          <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">No movie crew credits listed.</div>
+        ) : (
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 sm:gap-6">
+            {actor.crew_credits.map((credit, index) => (
+              <div key={`${credit.id}-${credit.role}-${index}`} data-testid={`actor-crew-credit-${index}`}>
+                <MovieCard movie={credit} />
+                <div className="mt-2 px-1 text-xs text-slate-400">{credit.role}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* History */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">

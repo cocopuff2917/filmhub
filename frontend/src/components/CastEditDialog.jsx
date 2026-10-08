@@ -4,8 +4,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Save, Ban, UserPlus, HelpCircle } from "lucide-react";
 import { toast } from "sonner";
+
+const EMPTY_JOBS = [];
 
 // Props:
 //   open, onOpenChange
@@ -13,10 +16,12 @@ import { toast } from "sonner";
 //   value: {actor_id?, character_name?} — the row being edited (empty for new)
 //   onSave(nextRow)  — called with {actor_id, character_name}
 //   onActorCreated(actor) — optional: when a new actor is created, parent can refresh its actors list
-export default function CastEditDialog({ open, onOpenChange, actors = [], value, onSave, onActorCreated }) {
+export default function CastEditDialog({ open, onOpenChange, actors = [], value, onSave, onActorCreated, mode = "cast", jobs = EMPTY_JOBS }) {
+  const isCrew = mode === "crew";
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(null); // {id, name, photo_url}
   const [character, setCharacter] = useState("");
+  const [role, setRole] = useState("");
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [remoteMatches, setRemoteMatches] = useState([]); // live search results from backend
@@ -25,22 +30,23 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
   const characterRef = useRef(null);
   const characterValRef = useRef("");
 
-  useEffect(() => { characterValRef.current = character; }, [character]);
+  useEffect(() => { characterValRef.current = isCrew ? role : character; }, [character, isCrew, role]);
 
   useEffect(() => {
     if (!open) return;
     if (value?.actor_id) {
-      const a = actors.find((x) => x.id === value.actor_id) || null;
+      const a = actors.find((x) => x.id === value.actor_id) || value.actor || null;
       setSelected(a);
-      setQuery(a?.name || "");
+      setQuery(a?.name || value.name || "");
     } else {
       setSelected(null);
-      setQuery("");
+      setQuery(isCrew ? value?.name || "" : "");
     }
     setCharacter(value?.character_name || "");
+    setRole(value?.role || jobs[0] || "");
     setRemoteMatches([]);
     setTimeout(() => inputRef.current?.focus(), 30);
-  }, [open, value, actors]);
+  }, [open, value, actors, isCrew, jobs]);
 
   // Debounced live search against the backend so actors beyond the preloaded cache (and newly-created ones) always show up.
   useEffect(() => {
@@ -110,7 +116,10 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
       setQuery(newActor.name);
       setCreating(false);
       if (autoSaveIfCharacter && (characterValRef.current || "").trim()) {
-        onSave?.({ actor_id: newActor.id, character_name: characterValRef.current.trim() });
+        const credit = characterValRef.current.trim();
+        onSave?.(isCrew
+          ? { actor_id: newActor.id, name: newActor.name, role: credit }
+          : { actor_id: newActor.id, character_name: credit });
         onOpenChange(false);
       } else {
         focusCharacter();
@@ -162,9 +171,10 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
       toast.error("Pick an actor or type a name to create one");
       return;
     }
-    if (!character.trim()) {
-      toast.error("Character name is required");
-      characterRef.current?.focus();
+    const credit = isCrew ? role.trim() : character.trim();
+    if (!credit) {
+      toast.error(isCrew ? "A crew job is required" : "Character name is required");
+      if (!isCrew) characterRef.current?.focus();
       return;
     }
     // Make sure the parent cache knows about this actor so the cast row renders their real name/photo.
@@ -172,23 +182,28 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
       onActorCreated?.(actor);
     }
     setSaving(true);
-    onSave?.({ actor_id: actor.id, character_name: character.trim() });
+    onSave?.(isCrew
+      ? { actor_id: actor.id, name: actor.name, role: credit }
+      : { actor_id: actor.id, character_name: credit });
     setSaving(false);
     onOpenChange(false);
   };
 
   const showCreate = query.trim() && !exactMatch && !selected && !searching;
+  const availableJobs = role && !jobs.some((job) => job.toLowerCase() === role.toLowerCase())
+    ? [...jobs, role]
+    : jobs;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-white text-slate-900 border-slate-200 max-w-xl p-0 gap-0 overflow-hidden" data-testid="cast-edit-dialog">
+      <DialogContent className="bg-white text-slate-900 border-slate-200 max-w-xl p-0 gap-0 overflow-hidden" data-testid={isCrew ? "crew-edit-dialog" : "cast-edit-dialog"}>
         <DialogHeader className="px-6 py-4 border-b border-slate-200">
-          <DialogTitle className="font-heading text-xl">Edit</DialogTitle>
+          <DialogTitle className="font-heading text-xl">{isCrew ? "Edit crew credit" : "Edit cast credit"}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
           <div>
-            <Label className="text-slate-900 font-semibold text-sm">Person</Label>
+            <Label className="text-slate-900 font-semibold text-sm">{isCrew ? "Crew member" : "Person"}</Label>
             <div className="relative mt-1.5">
               {selected ? (
                 <div className="flex items-center gap-2 rounded border border-cyan-400 bg-cyan-50/50 pl-2 pr-1 py-1.5" data-testid="selected-person">
@@ -207,7 +222,7 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
                     onKeyDown={onSearchKeyDown}
                     placeholder="Type a name and press Enter to pick or create…"
                     className="bg-white border-slate-300 pr-8 focus-visible:ring-cyan-400 focus-visible:border-cyan-400"
-                    data-testid="person-search-input"
+                    data-testid={isCrew ? "crew-person-search-input" : "person-search-input"}
                     autoComplete="off"
                   />
                   {query && (
@@ -253,28 +268,38 @@ export default function CastEditDialog({ open, onOpenChange, actors = [], value,
             </p>
           </div>
 
-          <div>
-            <div className="flex items-center gap-1.5">
-              <Label className="text-slate-900 font-semibold text-sm">Character</Label>
-              <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+          {isCrew ? (
+            <div>
+              <Label className="text-slate-900 font-semibold text-sm">Job</Label>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger className="mt-1.5 bg-white border-slate-300 text-slate-900" data-testid="crew-job-select"><SelectValue placeholder="Select a job" /></SelectTrigger>
+                <SelectContent>{availableJobs.map((job) => <SelectItem key={job} value={job}>{job}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
-            <Input
-              ref={characterRef}
-              value={character}
-              onChange={(e) => setCharacter(e.target.value)}
-              placeholder="Character name"
-              className="mt-1.5 bg-white border-slate-300 focus-visible:ring-cyan-400 focus-visible:border-cyan-400"
-              data-testid="character-input"
-              required
-            />
-          </div>
+          ) : (
+            <div>
+              <div className="flex items-center gap-1.5">
+                <Label className="text-slate-900 font-semibold text-sm">Character</Label>
+                <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+              </div>
+              <Input
+                ref={characterRef}
+                value={character}
+                onChange={(e) => setCharacter(e.target.value)}
+                placeholder="Character name"
+                className="mt-1.5 bg-white border-slate-300 focus-visible:ring-cyan-400 focus-visible:border-cyan-400"
+                data-testid="character-input"
+                required
+              />
+            </div>
+          )}
 
           <DialogFooter className="pt-2 -mx-6 -mb-5 px-6 py-3 bg-slate-50 border-t border-slate-200 gap-2 sm:justify-end">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="border-slate-300 text-slate-700 hover:bg-white" data-testid="cast-cancel-btn">
               <Ban className="w-4 h-4 mr-2" /> Cancel
             </Button>
-            <Button type="submit" disabled={saving || creating} className="bg-cyan-500 hover:bg-cyan-600 text-white" data-testid="cast-save-btn">
-              <Save className="w-4 h-4 mr-2" /> {creating ? "Creating…" : "Save"}
+            <Button type="submit" disabled={saving || creating} className="bg-cyan-500 hover:bg-cyan-600 text-white" data-testid={isCrew ? "crew-save-btn" : "cast-save-btn"}>
+              <Save className="w-4 h-4 mr-2" /> {creating ? "Creating…" : isCrew ? "Save crew credit" : "Save"}
             </Button>
           </DialogFooter>
         </form>
