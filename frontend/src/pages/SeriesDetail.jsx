@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, recoverTmdbImage } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -247,6 +247,7 @@ export default function SeriesDetail() {
   const endYear = year(series.last_air_date);
   const yearRange = startYear ? (endYear && endYear !== startYear ? `${startYear}–${endYear}` : startYear) : "";
   const backdrop = series.backdrop_url ? fileUrl(series.backdrop_url) : (series.poster_url ? fileUrl(series.poster_url) : null);
+  const backdropField = series.backdrop_url ? "backdrop_url" : "poster_url";
   const poster = series.poster_url ? fileUrl(series.poster_url) : null;
   const score100 = series.avg_rating != null ? series.avg_rating * 10 : 0;
   const sortedSeasons = [...(series.seasons || [])].sort((a, b) => (a.season_number || 0) - (b.season_number || 0));
@@ -270,7 +271,7 @@ export default function SeriesDetail() {
     <div className="text-white bg-[#0d0f12]">
       <section className="relative overflow-hidden border-b border-white/10 bg-[#0d0f12]" data-testid="series-hero">
         <div className="absolute inset-0">
-          {backdrop && <img src={backdrop} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
+          {backdrop && <ImageWithFallback src={backdrop} resolveFallback={() => recoverTmdbImage("series", series.id, backdropField)} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
           <div className="absolute inset-0 bg-[#0d0f12]/75" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,197,94,0.18),transparent_24%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.14),transparent_18%)]" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f12] via-[#0d0f12]/90 to-[#0d0f12]/65" />
@@ -280,7 +281,7 @@ export default function SeriesDetail() {
           <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] lg:grid-cols-[260px_1fr] gap-8 items-start">
             <div className="overflow-hidden rounded-2xl border border-amber-500/20 bg-[#14181f]/80 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-sm ring-1 ring-white/5">
               <div className="aspect-[2/3]">
-                {poster ? <img src={poster} alt={series.title} className="h-full w-full object-cover" loading="eager" decoding="async" fetchPriority="high" /> : <div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
+                {poster ? <ImageWithFallback src={poster} resolveFallback={() => recoverTmdbImage("series", series.id, "poster_url")} alt={series.title} className="h-full w-full object-cover" loading="eager" decoding="async" fetchPriority="high" fallback={<div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>} /> : <div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
               </div>
             </div>
 
@@ -436,6 +437,7 @@ export default function SeriesDetail() {
                       <ImageWithFallback
                         src={fileUrl(c.actor.photo_url)}
                         fallbackSrc={fileUrl(c.actor.photo_url, "jpeg")}
+                        resolveFallback={() => recoverTmdbImage("actor", c.actor.id, "photo_url")}
                         alt={c.actor.name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}

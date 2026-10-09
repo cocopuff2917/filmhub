@@ -4523,6 +4523,95 @@ async def _tmdb_match_id(kind: str, title: str, date: Optional[str], tmdb_id: Op
             matches.append(result["id"])
     return matches[0] if len(matches) == 1 else None
 
+
+async def _tmdb_match_person_id(name: str, tmdb_id: Optional[int] = None) -> Optional[int]:
+    if tmdb_id:
+        return tmdb_id
+    search = await _tmdb_request("/search/person", {"query": name, "include_adult": "false"})
+    normalized_name = (name or "").strip().casefold()
+    matches = [
+        person.get("id")
+        for person in search.get("results", []) or []
+        if person.get("id") and (person.get("name") or "").strip().casefold() == normalized_name
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+class TMDBImageFallbackRequest(BaseModel):
+    entity_type: str
+    entity_id: str
+    image_field: str
+
+
+def _is_external_image_url(value: Optional[str]) -> bool:
+    return isinstance(value, str) and value.lower().startswith(("http://", "https://", "//", "data:"))
+
+
+@api_router.post("/images/tmdb-fallback")
+async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
+    kind = payload.entity_type.strip().lower()
+    image_field = payload.image_field.strip()
+    if kind not in ("movie", "series", "actor"):
+        raise HTTPException(status_code=400, detail="Unsupported image entity type")
+    valid_fields = {"actor": {"photo_url"}, "movie": {"poster_url", "backdrop_url"}, "series": {"poster_url", "backdrop_url"}}
+    if image_field not in valid_fields[kind]:
+        raise HTTPException(status_code=400, detail="Unsupported image field")
+    if not _tmdb_credentials_configured():
+        raise HTTPException(status_code=503, detail="TMDB image recovery is unavailable")
+    try:
+        object_id = ObjectId(payload.entity_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image owner not found")
+
+    collection = db.actors if kind == "actor" else db.movies if kind == "movie" else db.series
+    doc = await collection.find_one(_alive({"_id": object_id}))
+    if not doc:
+        raise HTTPException(status_code=404, detail="Image owner not found")
+    current_value = doc.get(image_field) or ""
+    if _is_external_image_url(current_value):
+        return {"url": current_value, "recovered": False}
+
+    if kind == "actor":
+        matched_id = await _tmdb_match_person_id(doc.get("name") or "", doc.get("tmdb_id"))
+        if not matched_id:
+            return {"url": "", "recovered": False}
+        details = await _tmdb_request(f"/person/{matched_id}")
+        image_url = _tmdb_image(details.get("profile_path"))
+    else:
+        date_field = "release_date" if kind == "movie" else "first_air_date"
+        matched_id = await _tmdb_match_id(kind, doc.get("title") or "", doc.get(date_field), doc.get("tmdb_id"))
+        if not matched_id:
+            return {"url": "", "recovered": False}
+        media_type = "movie" if kind == "movie" else "tv"
+        details = await _tmdb_request(f"/{media_type}/{matched_id}")
+        path_field = "poster_path" if image_field == "poster_url" else "backdrop_path"
+        image_url = _tmdb_image(details.get(path_field))
+
+    if not image_url:
+        return {"url": "", "recovered": False}
+
+    update = {
+        image_field: image_url,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if not doc.get("tmdb_id"):
+        update["tmdb_id"] = matched_id
+    await collection.update_one(
+        {"_id": object_id, image_field: current_value},
+        {"$set": update},
+    )
+    bot = await _ensure_tmdb_bot_user()
+    await log_edit(
+        bot,
+        "actor" if kind == "actor" else kind,
+        payload.entity_id,
+        "update",
+        doc.get("name") if kind == "actor" else doc.get("title") or "",
+        f"Cineverse BOT restored a missing {image_field.replace('_url', '').replace('_', ' ')} from TMDB",
+        compute_field_changes(doc, {image_field: image_url}),
+    )
+    return {"url": image_url, "recovered": True}
+
 async def _get_title_watch_providers(kind: str, title_id: str, region: str) -> dict:
     collection = db.movies if kind == "movie" else db.series
     try:

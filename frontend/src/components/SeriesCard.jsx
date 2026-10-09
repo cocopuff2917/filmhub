@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Star, Tv } from "lucide-react";
-import { fileUrl } from "@/lib/api";
+import { fileUrl, recoverTmdbImage } from "@/lib/api";
 import ImageWithFallback from "@/components/ImageWithFallback";
 
 export default function SeriesCard({ series, testid }) {
@@ -23,6 +23,7 @@ export default function SeriesCard({ series, testid }) {
         {poster ? (
           <ImageWithFallback
             src={poster}
+            resolveFallback={() => recoverTmdbImage("series", series.id, "poster_url")}
             alt={series.title}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             loading="lazy"

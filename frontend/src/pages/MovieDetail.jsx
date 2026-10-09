@@ -1,6 +1,6 @@
  import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, recoverTmdbImage } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -158,6 +158,7 @@ export default function MovieDetail() {
   if (!movie) return <div className="max-w-7xl mx-auto px-4 py-20 text-slate-500">Loading...</div>;
 
   const backdrop = movie.backdrop_url ? fileUrl(movie.backdrop_url) : (movie.poster_url ? fileUrl(movie.poster_url) : null);
+  const backdropField = movie.backdrop_url ? "backdrop_url" : "poster_url";
   const poster = movie.poster_url ? fileUrl(movie.poster_url) : null;
   const score100 = movie.avg_rating != null ? movie.avg_rating * 10 : 0;
   const directors = (movie.crew || []).filter((c) => c.role === "Director");
@@ -186,7 +187,7 @@ export default function MovieDetail() {
       />
       <section className="relative overflow-hidden border-b border-white/10 bg-[#0d0f12]" data-testid="movie-hero">
         <div className="absolute inset-0">
-          {backdrop && <ImageWithFallback src={backdrop} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
+          {backdrop && <ImageWithFallback src={backdrop} resolveFallback={() => recoverTmdbImage("movie", movie.id, backdropField)} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
           <div className="absolute inset-0 bg-[#0d0f12]/75" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.22),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.12),transparent_20%)]" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f12] via-[#0d0f12]/90 to-[#0d0f12]/65" />
@@ -199,6 +200,7 @@ export default function MovieDetail() {
                 {poster ? (
                   <ImageWithFallback
                     src={poster}
+                    resolveFallback={() => recoverTmdbImage("movie", movie.id, "poster_url")}
                     alt={movie.title}
                     className="h-full w-full object-cover"
                     loading="eager"
@@ -377,6 +379,7 @@ export default function MovieDetail() {
                       <ImageWithFallback
                         src={fileUrl(c.actor.photo_url)}
                         fallbackSrc={fileUrl(c.actor.photo_url, "jpeg")}
+                        resolveFallback={() => recoverTmdbImage("actor", c.actor.id, "photo_url")}
                         alt={c.actor.name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}

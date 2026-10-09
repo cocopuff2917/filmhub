@@ -1,10 +1,44 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-export default function ImageWithFallback({ src, fallbackSrc, alt = "", className, fallback, referrerPolicy = "no-referrer", loading = "lazy", decoding = "async", ...imageProps }) {
+export default function ImageWithFallback({ src, fallbackSrc, resolveFallback, alt = "", className, fallback, referrerPolicy = "no-referrer", loading = "lazy", decoding = "async", ...imageProps }) {
   const [failedSources, setFailedSources] = useState([]);
-  const displaySrc = failedSources.includes(src) && fallbackSrc ? fallbackSrc : src;
+  const [resolvedFallback, setResolvedFallback] = useState("");
+  const [resolverAttempted, setResolverAttempted] = useState(false);
+  const resolverRef = useRef(resolveFallback);
+  resolverRef.current = resolveFallback;
+  const sources = [src, fallbackSrc, resolvedFallback].filter(Boolean);
+  const displaySrc = sources.find((source) => !failedSources.includes(source));
+
+  useEffect(() => {
+    setFailedSources([]);
+    setResolvedFallback("");
+    setResolverAttempted(false);
+    if (!src && resolverRef.current) {
+      setResolverAttempted(true);
+      Promise.resolve()
+        .then(() => resolverRef.current?.())
+        .then((url) => { if (url) setResolvedFallback(url); })
+        .catch(() => {});
+    }
+  }, [src]);
 
   if (!displaySrc || failedSources.includes(displaySrc)) return fallback ?? null;
+
+  const handleError = () => {
+    const nextFailedSources = [...new Set([...failedSources, displaySrc])];
+    setFailedSources(nextFailedSources);
+    if (
+      sources.every((source) => nextFailedSources.includes(source))
+      && !resolverAttempted
+      && resolverRef.current
+    ) {
+      setResolverAttempted(true);
+      Promise.resolve()
+        .then(() => resolverRef.current?.())
+        .then((url) => { if (url) setResolvedFallback(url); })
+        .catch(() => {});
+    }
+  };
 
   return (
     <img
@@ -15,7 +49,7 @@ export default function ImageWithFallback({ src, fallbackSrc, alt = "", classNam
       referrerPolicy={referrerPolicy}
       loading={loading}
       decoding={decoding}
-      onError={() => setFailedSources((sources) => sources.includes(displaySrc) ? sources : [...sources, displaySrc])}
+      onError={handleError}
     />
   );
 }

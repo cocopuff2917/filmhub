@@ -27,6 +27,15 @@ export function fileUrl(path, format) {
   return format ? `${url}?format=${encodeURIComponent(format)}` : url;
 }
 
+export async function recoverTmdbImage(entityType, entityId, imageField) {
+  const response = await api.post("/images/tmdb-fallback", {
+    entity_type: entityType,
+    entity_id: entityId,
+    image_field: imageField,
+  });
+  return response.data?.url || "";
+}
+
 /** Upload a single image file and return the stored file key (relative path). */
 export async function uploadImage(file) {
   const fd = new FormData();

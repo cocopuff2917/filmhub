@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, recoverTmdbImage } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
@@ -81,6 +81,7 @@ export default function ActorDetail() {
               <ImageWithFallback
                 src={photo}
                 fallbackSrc={fileUrl(actor.photo_url, "jpeg")}
+                resolveFallback={() => recoverTmdbImage("actor", actor.id, "photo_url")}
                 alt={actor.name}
                 className="w-full h-full object-cover"
                 loading="eager"
