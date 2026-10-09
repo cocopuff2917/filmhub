@@ -6,6 +6,13 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: episode-reminders
+    description: "Send in-app reminders for followed series airing tomorrow"
+    cron: "0 9 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/episode-reminders"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true
   - name: hourly-backup
     description: "Snapshots all MongoDB collections to /app/backups every hour (keeps last 24)"
     cron: "0 * * * *"

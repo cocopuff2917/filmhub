@@ -4,8 +4,9 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageSquare, Trash2, Send, ThumbsUp, Quote as QuoteIcon, Languages, Flag, EyeOff } from "lucide-react";
+import { MessageSquare, Trash2, Send, ThumbsUp, Quote as QuoteIcon, Languages, Flag } from "lucide-react";
 import { toast } from "sonner";
+import BlockUserButton from "@/components/BlockUserButton";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -27,6 +28,7 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
   const { user } = useAuth();
   const [comments, setComments] = useState([]);
   const [text, setText] = useState("");
+  const [containsSpoilers, setContainsSpoilers] = useState(false);
   const [posting, setPosting] = useState(false);
 
   const load = async () => {
@@ -43,8 +45,9 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
     if (!text.trim()) return;
     setPosting(true);
     try {
-      await api.post("/comments", { entity_type: entityType, entity_id: entityId, text });
+      await api.post("/comments", { entity_type: entityType, entity_id: entityId, text, contains_spoilers: containsSpoilers });
       setText("");
+      setContainsSpoilers(false);
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to post"); }
     setPosting(false);
@@ -56,7 +59,7 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const canDelete = (c) => user && (c.user_id === user.id || ["moderator", "admin"].includes(user.role));
+  const canDelete = (c) => user && (c.user_id === user.id || ["moderator", "admin"].includes(user.effective_role || user.role) || (user.permissions || []).includes("comment.moderate"));
 
   const inner = (
     <>
@@ -87,6 +90,7 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
                 className="bg-[#0d0f12] border-white/10 text-white resize-none"
                 data-testid="discussion-input"
               />
+              <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={containsSpoilers} onChange={(event) => setContainsSpoilers(event.target.checked)} className="accent-amber-500" data-testid="comment-spoiler-checkbox" /> Contains spoilers</label>
               <div className="mt-2 flex items-center justify-between">
                 <span className="text-xs text-slate-500">{text.length}/2000</span>
                 <Button type="submit" disabled={posting || !text.trim()} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="discussion-submit-btn">
@@ -125,13 +129,21 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
                   )}
                   <span className="text-xs text-slate-500">· {timeAgo(c.created_at)}</span>
                 </div>
-                <p className="mt-2 text-slate-200 text-sm whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                {c.contains_spoilers ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-sm text-amber-300">Spoiler · reveal comment</summary>
+                    <p className="mt-2 text-slate-200 text-sm whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                  </details>
+                ) : <p className="mt-2 text-slate-200 text-sm whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>}
               </div>
-              {canDelete(c) && (
-                <button onClick={() => del(c.id)} className="text-slate-500 hover:text-rose-400 transition p-1" data-testid={`delete-comment-${c.id}`}>
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
+              <div className="flex items-center gap-1">
+                <BlockUserButton userId={c.user_id} userName={c.user_name} onBlocked={(blockedId) => setComments((current) => current.filter((comment) => comment.user_id !== blockedId))} />
+                {canDelete(c) && (
+                  <button onClick={() => del(c.id)} className="text-slate-500 hover:text-rose-400 transition p-1" title="Delete comment" aria-label="Delete comment" data-testid={`delete-comment-${c.id}`}>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex items-center justify-between px-4 py-2 border-t border-white/5 bg-white/[0.02] text-xs text-slate-400">
               <div className="flex items-center gap-4">
@@ -141,7 +153,6 @@ export default function DiscussionSection({ entityType, entityId, embedded = fal
               </div>
               <div className="flex items-center gap-4">
                 <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Flag className="w-3.5 h-3.5" /> Report</button>
-                <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><EyeOff className="w-3.5 h-3.5" /> Ignore</button>
               </div>
             </div>
           </div>

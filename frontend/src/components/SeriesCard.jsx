@@ -1,12 +1,17 @@
 import { Link } from "react-router-dom";
 import { Star, Tv } from "lucide-react";
 import { fileUrl } from "@/lib/api";
+import ImageWithFallback from "@/components/ImageWithFallback";
 
 export default function SeriesCard({ series, testid }) {
   const startYear = series.first_air_date ? series.first_air_date.slice(0, 4) : "";
   const endYear = series.last_air_date ? series.last_air_date.slice(0, 4) : "";
   const years = startYear ? (endYear && endYear !== startYear ? `${startYear}–${endYear}` : startYear) : "";
   const poster = series.poster_url ? fileUrl(series.poster_url) : null;
+  const nextEpisode = series.next_episode;
+  const nextEpisodeDate = nextEpisode?.air_date
+    ? new Date(`${nextEpisode.air_date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+    : "";
 
   return (
     <Link
@@ -16,7 +21,14 @@ export default function SeriesCard({ series, testid }) {
     >
       <div className="relative aspect-[2/3] overflow-hidden bg-[#1e2430]">
         {poster ? (
-          <img src={poster} alt={series.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
+          <ImageWithFallback
+            src={poster}
+            alt={series.title}
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
+            decoding="async"
+            fallback={<div className="flex h-full w-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-2xl font-display text-slate-600">
             NO POSTER
@@ -46,6 +58,14 @@ export default function SeriesCard({ series, testid }) {
             </>
           )}
         </div>
+        {nextEpisode && (
+          <div className="mt-2 border-t border-white/10 pt-2 text-[11px]" data-testid={`series-next-episode-${series.id}`}>
+            <div className="font-medium text-amber-300">
+              S{nextEpisode.season_number} E{nextEpisode.episode_number}{nextEpisode.name ? ` · ${nextEpisode.name}` : ""}
+            </div>
+            {nextEpisodeDate && <time className="mt-0.5 block text-slate-400" dateTime={nextEpisode.air_date}>Airs {nextEpisodeDate}</time>}
+          </div>
+        )}
       </div>
     </Link>
   );

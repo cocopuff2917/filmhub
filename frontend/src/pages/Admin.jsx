@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash, Layers, Plus, Search, Download } from "lucide-react";
+import { Trash2, Edit, Shield, ShieldOff, Ban, CheckCircle, Users, Network, ChevronDown, ChevronUp, MessageSquare, RotateCcw, Trash, Layers, Plus, Search, Download, Bot } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import MovieForm from "@/components/forms/MovieForm";
@@ -27,83 +27,150 @@ import CrewJobsTab from "@/components/admin/CrewJobsTab";
 export default function Admin() {
   const { user, initializing } = useAuth();
   const navigate = useNavigate();
+  const [contentEditsFrozen, setContentEditsFrozen] = useState(false);
+  const [freezeSettingLoading, setFreezeSettingLoading] = useState(true);
+  const [freezeSettingSaving, setFreezeSettingSaving] = useState(false);
+  const isSiteAdmin = [user?.role, user?.effective_role].includes("admin");
+  const currentRole = user?.effective_role || user?.role;
+  const isModerator = ["moderator", "admin"].includes(currentRole);
+  const perms = user?.permissions || [];
+  const hasPermission = (permission) => isModerator || perms.includes(permission);
+  const canDeleteContent = hasPermission("content.delete");
+  const canSuspendUsers = hasPermission("user.suspend");
+  const canUnsuspendUsers = hasPermission("user.unsuspend");
+  const canAccessMovies = hasPermission("admin.movies.access");
+  const canAccessSeries = hasPermission("admin.series.access");
+  const canAccessActors = hasPermission("admin.actors.access");
+  const canAccessCollections = ["collections.create", "collections.update", "collections.delete"].some(hasPermission);
+  const canAccessTrash = hasPermission("content.trash.view");
+  const canViewIps = hasPermission("user.view_ips");
+  const canMessageUsers = hasPermission("user.message");
+  const canModifyAccounts = hasPermission("user.account.modify");
+  const canViewIpOverlap = hasPermission("moderation.ip_overlap.view");
+  const canAccessIpBans = ["moderation.ip_bans.view", "moderation.ip_bans.create", "moderation.ip_bans.delete"].some(hasPermission);
+  const canManageCrewJobs = hasPermission("crew_jobs.create");
+  const canManageRoles = isSiteAdmin || perms.includes("roles.manage");
+  const canAssignRoles = isSiteAdmin || perms.includes("user.assign_role");
+  const canAssignCustomRoles = isSiteAdmin || perms.includes("user.assign_custom_role");
+  const hasPanelAccess = isModerator || [
+    canManageRoles, canManageCrewJobs, canAssignRoles, canAssignCustomRoles,
+    canAccessMovies, canAccessSeries, canAccessActors, canAccessCollections, canAccessTrash,
+    canViewIpOverlap, canAccessIpBans, canSuspendUsers, canUnsuspendUsers, canViewIps,
+    canMessageUsers, canModifyAccounts, hasPermission("moderation.dashboard.view"),
+    hasPermission("moderation.reports.view"), hasPermission("moderation.edits.view"),
+  ].some(Boolean);
 
   useEffect(() => {
     if (initializing) return;
     if (!user) { navigate("/login"); return; }
-    const perms = user.permissions || [];
-    const hasAnyModPerm = ["moderator", "admin"].includes(user.role)
-      || ["moderator", "admin"].includes(user.effective_role)
-      || perms.some((p) => ["user.suspend", "content.lock_cast", "content.protect_fields", "moderation.messages.read_reply", "content.delete", "content.lock", "user.view_ips", "thread.moderate", "comment.moderate"].includes(p));
-    if (!hasAnyModPerm) { navigate("/"); }
-  }, [user, initializing, navigate]);
+    if (!hasPanelAccess) { navigate("/"); }
+  }, [user, initializing, navigate, hasPanelAccess]);
+
+  useEffect(() => {
+    if (!user) {
+      setFreezeSettingLoading(false);
+      return;
+    }
+    setFreezeSettingLoading(true);
+    api.get("/moderation/content-edit-freeze")
+      .then((response) => setContentEditsFrozen(!!response.data.frozen))
+      .catch(() => toast.error("Could not load movie and TV edit status"))
+      .finally(() => setFreezeSettingLoading(false));
+  }, [user]);
 
   if (initializing || !user) return null;
-  const perms = user.permissions || [];
-  const hasAnyModPerm = ["moderator", "admin"].includes(user.role)
-    || ["moderator", "admin"].includes(user.effective_role)
-    || perms.some((p) => ["user.suspend", "content.lock_cast", "content.protect_fields", "moderation.messages.read_reply", "content.delete", "content.lock", "user.view_ips", "thread.moderate", "comment.moderate"].includes(p));
-  if (!hasAnyModPerm) return null;
+  if (!hasPanelAccess) return null;
 
-  const canManageRoles = user.role === "admin" || user.effective_role === "admin";
-  const canManageCrewJobs = [user.role, user.effective_role].some((role) => ["moderator", "admin"].includes(role));
+  const panelLabel = currentRole === "admin" ? "Admin" : isModerator ? "Moderator" : "Custom Permissions";
+
+  const updateContentEditFreeze = async (frozen) => {
+    setFreezeSettingSaving(true);
+    try {
+      const response = await api.put("/moderation/content-edit-freeze", { frozen });
+      setContentEditsFrozen(!!response.data.frozen);
+      toast.success(frozen ? "Movie and TV edits paused" : "Movie and TV edits resumed");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update movie and TV edit status");
+    } finally {
+      setFreezeSettingSaving(false);
+    }
+  };
 
   return (
     <div className="admin-shell min-h-screen text-white">
       <section className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_20%),linear-gradient(120deg,#0a0d12_0%,#10151d_45%,#0a0d12_100%)]">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-amber-300 font-semibold">
-            <Shield className="w-4 h-4" /> {user.role === "admin" ? "Admin" : "Moderator"} Console
+            <Shield className="w-4 h-4" /> {panelLabel} Console
           </div>
           <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <h1 className="font-display text-4xl tracking-[0.14em] text-white md:text-5xl">MANAGE</h1>
               <p className="mt-2 max-w-xl text-sm text-slate-300">Keep the catalog, users, and moderation workflow running under the CineVerse brand.</p>
             </div>
-            <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-amber-200">
-              moderation tools
+            <div className="flex flex-wrap items-center gap-4">
+              {isSiteAdmin && (
+                <div className="flex items-center gap-3 rounded-md border border-white/10 bg-black/20 px-3 py-2" data-testid="content-edit-freeze-control">
+                  <div>
+                    <div className="text-xs font-semibold text-white">Catalog editing and creation</div>
+                    <div className="text-[11px] text-slate-400">{contentEditsFrozen ? "Paused for moderators and users" : "Available to moderators and users"}</div>
+                  </div>
+                  <Switch
+                    checked={contentEditsFrozen}
+                    onCheckedChange={updateContentEditFreeze}
+                    disabled={freezeSettingLoading || freezeSettingSaving}
+                    aria-label="Pause catalog editing and creation"
+                    data-testid="content-edit-freeze-switch"
+                  />
+                </div>
+              )}
+              <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-amber-200">
+                moderation tools
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <Tabs defaultValue="dashboard" className="mt-2">
+        <Tabs defaultValue={isModerator ? "dashboard" : canAccessMovies ? "movies" : canAccessSeries ? "series" : canAccessActors ? "actors" : canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles ? "users" : canAccessTrash ? "trash" : canAccessCollections ? "collections" : hasPermission("moderation.dashboard.view") ? "dashboard" : hasPermission("moderation.reports.view") ? "reports" : hasPermission("moderation.edits.view") ? "edits" : canViewIpOverlap ? "ips" : canAccessIpBans ? "ipbans" : canManageCrewJobs ? "crew-jobs" : canManageRoles ? "roles" : "users"} className="mt-2">
           <TabsList className="admin-tab-list h-auto">
-            <TabsTrigger className="admin-tab-trigger" value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="reports" data-testid="tab-reports">Reports</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="suspensions" data-testid="tab-suspensions">Suspensions</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="edits" data-testid="tab-edits">Edit History</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="movies" data-testid="tab-movies">Movies</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="series" data-testid="tab-series">TV Series</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="actors" data-testid="tab-actors">Actors</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="users" data-testid="tab-users">Users</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="trash" data-testid="tab-trash">Trash</TabsTrigger>
-            <TabsTrigger className="admin-tab-trigger" value="collections" data-testid="tab-collections">Collections</TabsTrigger>
+            {hasPermission("moderation.dashboard.view") && <TabsTrigger className="admin-tab-trigger" value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>}
+            {hasPermission("moderation.reports.view") && <TabsTrigger className="admin-tab-trigger" value="reports" data-testid="tab-reports">Reports</TabsTrigger>}
+            {(canSuspendUsers || canUnsuspendUsers) && <TabsTrigger className="admin-tab-trigger" value="suspensions" data-testid="tab-suspensions">Suspensions</TabsTrigger>}
+            {hasPermission("moderation.edits.view") && <TabsTrigger className="admin-tab-trigger" value="edits" data-testid="tab-edits">Edit History</TabsTrigger>}
+            {canAccessMovies && <TabsTrigger className="admin-tab-trigger" value="movies" data-testid="tab-movies">Movies</TabsTrigger>}
+            {canAccessSeries && <TabsTrigger className="admin-tab-trigger" value="series" data-testid="tab-series">TV Series</TabsTrigger>}
+            {canAccessActors && <TabsTrigger className="admin-tab-trigger" value="actors" data-testid="tab-actors">Actors</TabsTrigger>}
+            {(canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles) && <TabsTrigger className="admin-tab-trigger" value="users" data-testid="tab-users">Users</TabsTrigger>}
+            {canViewIpOverlap && <TabsTrigger className="admin-tab-trigger" value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>}
+            {canAccessIpBans && <TabsTrigger className="admin-tab-trigger" value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>}
+            {canAccessTrash && <TabsTrigger className="admin-tab-trigger" value="trash" data-testid="tab-trash">Trash</TabsTrigger>}
+            {canAccessCollections && <TabsTrigger className="admin-tab-trigger" value="collections" data-testid="tab-collections">Collections</TabsTrigger>}
             {canManageCrewJobs && <TabsTrigger className="admin-tab-trigger" value="crew-jobs" data-testid="tab-crew-jobs">Crew Jobs</TabsTrigger>}
-            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
-            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="guidelines" data-testid="tab-guidelines">Guidelines</TabsTrigger>}
-            {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="username-cooldown" data-testid="tab-username-cooldown">Username Cooldown</TabsTrigger>}
+            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
+            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="cineverse-bot" data-testid="tab-cineverse-bot"><Bot className="mr-2 h-4 w-4" /> Cineverse BOT</TabsTrigger>}
+            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="guidelines" data-testid="tab-guidelines">Guidelines</TabsTrigger>}
+            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="username-cooldown" data-testid="tab-username-cooldown">Username Cooldown</TabsTrigger>}
             {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
           </TabsList>
-          <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>
-          <TabsContent value="reports" className="mt-6"><ReportsTab /></TabsContent>
-          <TabsContent value="suspensions" className="mt-6"><SuspensionsTab /></TabsContent>
-          <TabsContent value="edits" className="mt-6"><EditHistoryTab /></TabsContent>
-          <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" /></TabsContent>
-          <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" /></TabsContent>
-          <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" /></TabsContent>
-          <TabsContent value="users" className="mt-6"><UsersTab currentRole={user.effective_role || user.role} /></TabsContent>
-          <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>
-          <TabsContent value="ipbans" className="mt-6"><IpBansTab /></TabsContent>
-          <TabsContent value="trash" className="mt-6"><TrashTab currentRole={user.effective_role || user.role} /></TabsContent>
-          <TabsContent value="collections" className="mt-6"><CollectionsTab /></TabsContent>
-          {canManageCrewJobs && <TabsContent value="crew-jobs" className="mt-6"><CrewJobsTab /></TabsContent>}
-          {canManageRoles && <TabsContent value="homepage" className="mt-6"><HomepageTab /></TabsContent>}
-          {canManageRoles && <TabsContent value="guidelines" className="mt-6"><ContributorGuidelinesTab /></TabsContent>}
-          {canManageRoles && <TabsContent value="username-cooldown" className="mt-6"><UsernameCooldownTab /></TabsContent>}
+          {hasPermission("moderation.dashboard.view") && <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>}
+          {hasPermission("moderation.reports.view") && <TabsContent value="reports" className="mt-6"><ReportsTab /></TabsContent>}
+          {(canSuspendUsers || canUnsuspendUsers) && <TabsContent value="suspensions" className="mt-6"><SuspensionsTab canUnsuspend={canUnsuspendUsers} /></TabsContent>}
+          {hasPermission("moderation.edits.view") && <TabsContent value="edits" className="mt-6"><EditHistoryTab /></TabsContent>}
+          {canAccessMovies && <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" contentEditsFrozen={contentEditsFrozen} canDeleteContent={canDeleteContent} /></TabsContent>}
+          {canAccessSeries && <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" contentEditsFrozen={contentEditsFrozen} canDeleteContent={canDeleteContent} /></TabsContent>}
+          {canAccessActors && <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" contentEditsFrozen={contentEditsFrozen} canDeleteContent={canDeleteContent} /></TabsContent>}
+          {(canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles) && <TabsContent value="users" className="mt-6"><UsersTab currentRole={currentRole} permissions={perms} canAssignRoles={canAssignRoles} canAssignCustomRoles={canAssignCustomRoles} /></TabsContent>}
+          {canViewIpOverlap && <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>}
+          {canAccessIpBans && <TabsContent value="ipbans" className="mt-6"><IpBansTab permissions={perms} currentRole={currentRole} /></TabsContent>}
+          {canAccessTrash && <TabsContent value="trash" className="mt-6"><TrashTab currentRole={currentRole} canRestore={hasPermission("content.restore")} canPurge={isSiteAdmin || perms.includes("content.purge")} /></TabsContent>}
+          {canAccessCollections && <TabsContent value="collections" className="mt-6"><CollectionsTab canCreate={hasPermission("collections.create")} canUpdate={hasPermission("collections.update")} canDelete={hasPermission("collections.delete")} /></TabsContent>}
+          {canManageCrewJobs && <TabsContent value="crew-jobs" className="mt-6"><CrewJobsTab createOnly={!isModerator} /></TabsContent>}
+          {isSiteAdmin && <TabsContent value="homepage" className="mt-6"><HomepageTab /></TabsContent>}
+          {isSiteAdmin && <TabsContent value="cineverse-bot" className="mt-6"><CineverseBotTab /></TabsContent>}
+          {isSiteAdmin && <TabsContent value="guidelines" className="mt-6"><ContributorGuidelinesTab /></TabsContent>}
+          {isSiteAdmin && <TabsContent value="username-cooldown" className="mt-6"><UsernameCooldownTab /></TabsContent>}
           {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
         </Tabs>
       </div>
@@ -111,7 +178,81 @@ export default function Admin() {
   );
 }
 
-function EntityAdmin({ kind }) {
+function CineverseBotTab() {
+  const [action, setAction] = useState("actor_birth_details");
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const descriptions = {
+    actor_birth_details: "Fill missing birth dates and birthplaces for actors linked to a TMDB person record. Existing values are preserved.",
+    audit_movies: "Compare movie cast and selected catalog details with TMDB. This can add or remove cast entries that do not match TMDB.",
+    audit_series: "Compare TV cast and selected catalog details with TMDB. This can add or remove cast entries that do not match TMDB.",
+  };
+
+  const runAction = async () => {
+    if (action !== "actor_birth_details" && !window.confirm("Run this TMDB audit? It may remove cast entries that do not match TMDB.")) return;
+    setRunning(true);
+    setResult(null);
+    try {
+      const response = await api.post("/admin/cineverse-bot/run", { action, limit: 25 });
+      setResult(response.data);
+      const updated = response.data.updated || 0;
+      toast.success(`Cineverse BOT completed the action; updated ${updated} item${updated === 1 ? "" : "s"}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Cineverse BOT action failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <section className="max-w-3xl" data-testid="cineverse-bot-panel">
+      <header className="border-b border-white/10 pb-5">
+        <div className="flex items-center gap-3">
+          <Bot className="h-5 w-5 text-amber-300" aria-hidden="true" />
+          <h2 className="text-lg font-semibold text-white">Cineverse BOT actions</h2>
+        </div>
+        <p className="mt-2 text-sm text-slate-400">Run a supported catalog maintenance action as Cineverse BOT. Each run checks up to 25 records.</p>
+      </header>
+
+      <div className="mt-6 max-w-xl">
+        <label className="block text-sm font-medium text-slate-300" htmlFor="cineverse-bot-action">Action</label>
+        <Select value={action} onValueChange={(value) => { setAction(value); setResult(null); }}>
+          <SelectTrigger id="cineverse-bot-action" className="mt-2 border-white/10 bg-[#0d0f12] text-white" data-testid="cineverse-bot-action-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="border-white/10 bg-[#14181f] text-white">
+            <SelectItem value="actor_birth_details">Fill missing actor birth details</SelectItem>
+            <SelectItem value="audit_movies">Audit movie data with TMDB</SelectItem>
+            <SelectItem value="audit_series">Audit TV-series data with TMDB</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="mt-3 min-h-10 text-sm leading-relaxed text-slate-400" data-testid="cineverse-bot-action-description">{descriptions[action]}</p>
+        <Button type="button" onClick={runAction} disabled={running} className="mt-4 bg-amber-500 text-black hover:bg-amber-400" data-testid="cineverse-bot-run-button">
+          <Bot className="mr-2 h-4 w-4" />{running ? "Running…" : "Run action"}
+        </Button>
+      </div>
+
+      {result && (
+        <div className="mt-6 border-t border-white/10 pt-5" role="status" data-testid="cineverse-bot-result">
+          <h3 className="text-sm font-semibold text-white">Run complete</h3>
+          <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+            {Object.entries(result)
+              .filter(([key, value]) => key !== "action" && key !== "bot" && typeof value === "number")
+              .map(([key, value]) => (
+                <div key={key}>
+                  <dt className="text-xs capitalize text-slate-500">{key.replaceAll("_", " ")}</dt>
+                  <dd className="mt-1 text-lg font-semibold text-slate-100">{value.toLocaleString()}</dd>
+                </div>
+              ))}
+          </dl>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = false }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [editing, setEditing] = useState(null);
@@ -129,12 +270,14 @@ function EntityAdmin({ kind }) {
   const endpoint = kind === "movie" ? "/movies" : kind === "series" ? "/series" : "/actors";
   const label = kind === "movie" ? "Movie" : kind === "series" ? "Series" : "Actor";
   const supportsTMDB = kind === "movie" || kind === "series";
+  const canUseTMDB = supportsTMDB && ["moderator", "admin"].includes(user?.effective_role || user?.role);
   const canManageTMDB = [user?.role, user?.effective_role].includes("admin");
+  const canBypassCatalogFreeze = canManageTMDB || (user?.permissions || []).includes("content.bypass_edit_freeze");
 
   const load = async () => { const r = await api.get(endpoint); setItems(r.data); };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [kind]);
   useEffect(() => {
-    if (!supportsTMDB) {
+    if (!canUseTMDB) {
       setTmdbSettingLoading(false);
       return undefined;
     }
@@ -149,7 +292,7 @@ function EntityAdmin({ kind }) {
       })
       .finally(() => { if (active) setTmdbSettingLoading(false); });
     return () => { active = false; };
-  }, [supportsTMDB]);
+  }, [canUseTMDB]);
 
   const updateTMDBSetting = async (enabled) => {
     setTmdbSettingSaving(true);
@@ -223,6 +366,18 @@ function EntityAdmin({ kind }) {
     }
   };
 
+  if (mode === "form" && contentEditsFrozen && !canBypassCatalogFreeze) {
+    return (
+      <Card className="bg-[#14181f] border-white/10 text-white" data-testid={`content-edit-frozen-${kind}`}>
+        <CardHeader><CardTitle>{label} editing and creation are paused</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-slate-400">An administrator will resume catalog changes when maintenance is complete.</p>
+          <Button type="button" variant="outline" onClick={() => { setMode("list"); setEditing(null); }} className="border-white/20 text-white hover:bg-white/10">Back to {label.toLowerCase()} list</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (mode === "form") {
     return (
       <Card className="bg-[#14181f] border-white/10 text-white">
@@ -241,7 +396,7 @@ function EntityAdmin({ kind }) {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>All {label}s ({items.length})</CardTitle>
         <div className="flex items-center gap-2">
-          {supportsTMDB && (
+          {canUseTMDB && (
             <div className="flex items-center gap-3 flex-wrap justify-end">
               <div className="flex items-center gap-2 text-xs text-slate-300" data-testid={`tmdb-import-status-${kind}`}>
                 <span>{tmdbEnabled ? "TMDB imports on" : "TMDB imports paused"}</span>
@@ -270,7 +425,7 @@ function EntityAdmin({ kind }) {
               <Button
                 variant="outline"
                 onClick={() => setTmdbOpen((open) => !open)}
-                disabled={!tmdbEnabled || tmdbSettingLoading}
+                disabled={!tmdbEnabled || tmdbSettingLoading || (contentEditsFrozen && !canBypassCatalogFreeze)}
                 title={tmdbEnabled ? "Import from TMDB" : "TMDB imports are paused by an administrator"}
                 className="border-white/20 text-white hover:bg-white/10 hover:text-white disabled:opacity-50"
                 data-testid={`admin-import-${kind}-tmdb`}
@@ -279,7 +434,7 @@ function EntityAdmin({ kind }) {
               </Button>
             </div>
           )}
-          <Button onClick={() => { setEditing(null); setMode("form"); }} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`admin-new-${kind}`}>
+          <Button onClick={() => { setEditing(null); setMode("form"); }} disabled={contentEditsFrozen && !canBypassCatalogFreeze} title={contentEditsFrozen && !canBypassCatalogFreeze ? "Catalog editing and creation are paused" : undefined} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`admin-new-${kind}`}>
             + New {label}
           </Button>
         </div>
@@ -312,7 +467,7 @@ function EntityAdmin({ kind }) {
                       <div className="text-xs text-slate-400">{result.date || "Release date unknown"}</div>
                       {result.overview && <p className="mt-1 line-clamp-2 text-xs text-slate-400">{result.overview}</p>}
                     </div>
-                    <Button size="sm" onClick={() => importTMDB(result)} disabled={tmdbImporting !== null} className="flex-shrink-0 bg-amber-500 hover:bg-amber-600 text-black" data-testid={`tmdb-import-result-${kind}-${result.tmdb_id}`}>
+                    <Button size="sm" onClick={() => importTMDB(result)} disabled={tmdbImporting !== null || (contentEditsFrozen && !canBypassCatalogFreeze)} className="flex-shrink-0 bg-amber-500 hover:bg-amber-600 text-black" data-testid={`tmdb-import-result-${kind}-${result.tmdb_id}`}>
                       {tmdbImporting === result.tmdb_id ? "Importing..." : "Import"}
                     </Button>
                   </div>
@@ -337,8 +492,8 @@ function EntityAdmin({ kind }) {
                 </div>
                 {it.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
               </div>
-              <Button size="sm" variant="outline" onClick={() => { setEditing(it); setMode("form"); }} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-${kind}-${it.id}`}><Edit className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" onClick={() => del(it.id)} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-${kind}-${it.id}`}><Trash2 className="w-4 h-4" /></Button>
+              <Button size="sm" variant="outline" onClick={() => { setEditing(it); setMode("form"); }} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-${kind}-${it.id}`}><Edit className="w-4 h-4" /></Button>
+              {canDeleteContent && <Button size="sm" variant="ghost" onClick={() => del(it.id)} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-${kind}-${it.id}`}><Trash2 className="w-4 h-4" /></Button>}
             </div>
           ))}
           {items.length === 0 && <div className="text-slate-500 text-sm col-span-2">No {label.toLowerCase()}s yet.</div>}
@@ -404,7 +559,7 @@ function CustomRolesMultiPicker({ all, value, onToggle, onClear, testid }) {
 }
 
 
-function UsersTab({ currentRole }) {
+function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAssignCustomRoles = false }) {
   const [users, setUsers] = useState([]);
   const [customRoles, setCustomRoles] = useState([]);
   const [query, setQuery] = useState("");
@@ -418,6 +573,12 @@ function UsersTab({ currentRole }) {
   const [ipData, setIpData] = useState({});
   const [ipLoading, setIpLoading] = useState({});
   const [ipOpen, setIpOpen] = useState({});
+  const isModerator = ["moderator", "admin"].includes(currentRole);
+  const canSuspendUsers = isModerator || permissions.includes("user.suspend");
+  const canUnsuspendUsers = isModerator || permissions.includes("user.unsuspend");
+  const canViewUserIps = isModerator || permissions.includes("user.view_ips");
+  const canMessageUsers = isModerator || permissions.includes("user.message") || permissions.includes("moderation.messages.read_reply");
+  const canModifyAccounts = currentRole === "admin" || permissions.includes("user.account.modify");
 
   const load = async () => {
     const [u, r] = await Promise.all([api.get("/moderation/users"), api.get("/roles")]);
@@ -577,23 +738,23 @@ function UsersTab({ currentRole }) {
               </div>
               <div className="flex items-center gap-2">
                 {u.is_deleted ? (
-                  currentRole === "admin" && (
+                  canModifyAccounts && (
                     <Button size="sm" variant="outline" onClick={() => restoreAccount(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`restore-account-${u.id}`}>
                       <RotateCcw className="w-4 h-4 mr-1" /> Restore Account
                     </Button>
                   )
                 ) : (
                   <>
-                {currentRole === "admin" && (
+                {canModifyAccounts && (
                   <Button size="sm" variant="outline" onClick={() => setProfileTarget(u)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-user-profile-${u.id}`}>
                     <Edit className="w-4 h-4 mr-1" /> Profile
                   </Button>
                 )}
-                <Button size="sm" variant="outline" onClick={() => toggleIps(u.id)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`ips-toggle-${u.id}`}>
+                {canViewUserIps && <Button size="sm" variant="outline" onClick={() => toggleIps(u.id)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`ips-toggle-${u.id}`}>
                   <Network className="w-4 h-4 mr-1" /> IPs
                   {ipOpen[u.id] ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
-                </Button>
-                {currentRole === "admin" && u.role !== "admin" && (
+                </Button>}
+                {canAssignRoles && u.role !== "admin" && (
                   <Select value={u.role} onValueChange={(v) => setRole(u.id, v)}>
                     <SelectTrigger className="w-[140px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#14181f] text-white border-white/10">
@@ -603,7 +764,7 @@ function UsersTab({ currentRole }) {
                     </SelectContent>
                   </Select>
                 )}
-                {currentRole === "admin" && u.role !== "admin" && (
+                {canAssignCustomRoles && u.role !== "admin" && (
                   <CustomRolesMultiPicker
                     all={customRoles}
                     value={(u.custom_roles && u.custom_roles.length ? u.custom_roles.map((cr) => cr.id) : (u.custom_role ? [u.custom_role.id] : []))}
@@ -612,23 +773,23 @@ function UsersTab({ currentRole }) {
                     testid={`custom-roles-picker-${u.id}`}
                   />
                 )}
-                {u.role !== "admin" && (
+                {canMessageUsers && u.role !== "admin" && (
                   <Button size="sm" variant="outline" onClick={() => setMessageTarget(u)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid={`message-user-${u.id}`}>
                     <MessageSquare className="w-4 h-4 mr-1" /> Message
                   </Button>
                 )}
-                {u.role !== "admin" && (
+                {(canSuspendUsers || canUnsuspendUsers) && u.role !== "admin" && (
                   isSuspended(u) ? (
                     <>
-                      <Button size="sm" variant="outline" onClick={() => openSuspendDialog(u, true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid={`modify-suspension-${u.id}`}>
+                      {canSuspendUsers && <Button size="sm" variant="outline" onClick={() => openSuspendDialog(u, true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid={`modify-suspension-${u.id}`}>
                         <Edit className="w-4 h-4 mr-1" /> Modify
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>
+                      </Button>}
+                      {canUnsuspendUsers && <Button size="sm" variant="outline" onClick={() => unsuspend(u.id)} className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" data-testid={`unsuspend-${u.id}`}>
                         <CheckCircle className="w-4 h-4 mr-1" /> Unsuspend
-                      </Button>
+                      </Button>}
                     </>
                   ) : (
-                    <Button size="sm" variant="outline" onClick={() => openSuspendDialog(u, false)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`suspend-${u.id}`}>
+                    canSuspendUsers && <Button size="sm" variant="outline" onClick={() => openSuspendDialog(u, false)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`suspend-${u.id}`}>
                       <Ban className="w-4 h-4 mr-1" /> Suspend
                     </Button>
                   )
@@ -916,13 +1077,6 @@ function RolesTab() {
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const derivedBase = (() => {
-    const perms = new Set(form.permissions);
-    if ([...perms].some((p) => ["user.assign_role", "user.assign_custom_role", "roles.manage"].includes(p))) return "admin";
-    if ([...perms].some((p) => ["content.delete","content.lock","content.protect_fields","content.lock_cast","user.suspend","user.view_ips","moderation.messages.read_reply","thread.moderate","comment.moderate","content.edit_locked"].includes(p))) return "moderator";
-    return "user";
-  })();
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card className="bg-[#14181f] border-white/10 text-white">
@@ -951,7 +1105,7 @@ function RolesTab() {
             <div className="pt-2 border-t border-white/10">
               <div className="flex items-baseline justify-between mb-2">
                 <label className="text-sm text-slate-300 font-semibold">Permissions</label>
-                <span className="text-[10px] uppercase tracking-widest text-slate-500">Derived tier: <span className={derivedBase === "admin" ? "text-rose-400" : derivedBase === "moderator" ? "text-sky-400" : "text-slate-400"}>{derivedBase}</span></span>
+                <span className="text-[10px] uppercase tracking-widest text-slate-500">Independent permissions</span>
               </div>
               <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
                 {Object.entries(permGroups).map(([group, items]) => (
@@ -966,7 +1120,7 @@ function RolesTab() {
                               <div className="text-sm text-white">{p.label}</div>
                               <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2">
                                 <span>{p.key}</span>
-                                <span className={p.tier === "admin" ? "text-rose-400" : "text-sky-400"}>{p.tier}</span>
+                                <span className="text-slate-500">independent</span>
                               </div>
                             </div>
                           </label>
@@ -996,7 +1150,7 @@ function RolesTab() {
                   <span className="text-[10px] px-2 py-1 rounded border uppercase tracking-widest font-semibold" style={{ color: r.color, borderColor: r.color + "66", background: r.color + "22" }}>{r.name}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-slate-300 truncate">{r.description || <span className="text-slate-600">No description</span>}</div>
-                    <div className="text-xs text-slate-500">Tier: <span className={r.base === "admin" ? "text-rose-400" : r.base === "moderator" ? "text-sky-400" : ""}>{r.base}</span> • {r.permissions.length} permission{r.permissions.length !== 1 && "s"}</div>
+                    <div className="text-xs text-slate-500">Independent grants • {r.permissions.length} permission{r.permissions.length !== 1 && "s"}</div>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => { setEditing(r); setForm({ name: r.name, color: r.color, description: r.description || "", permissions: r.permissions || [] }); }} className="border-white/20 text-white hover:bg-white/10 hover:text-white">
                     <Edit className="w-4 h-4" />
@@ -1020,11 +1174,10 @@ function RolesTab() {
   );
 }
 
-function TrashTab({ currentRole }) {
+function TrashTab({ currentRole, canRestore = false, canPurge = false }) {
   const [trash, setTrash] = useState({ movies: [], series: [], actors: [] });
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
-  const isAdmin = currentRole === "admin";
 
   const load = async () => {
     setLoading(true);
@@ -1091,7 +1244,7 @@ function TrashTab({ currentRole }) {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Button
+        {canRestore && <Button
           size="sm"
           variant="outline"
           onClick={() => restore(item.type, item.id)}
@@ -1100,8 +1253,8 @@ function TrashTab({ currentRole }) {
           data-testid={`trash-restore-${item.type}-${item.id}`}
         >
           <RotateCcw className="w-4 h-4 mr-1" /> Restore
-        </Button>
-        {isAdmin && (
+        </Button>}
+        {canPurge && (
           <Button
             size="sm"
             variant="outline"
@@ -1134,9 +1287,9 @@ function TrashTab({ currentRole }) {
           <Trash2 className="w-5 h-5" /> Trash ({totalCount})
         </CardTitle>
         <div className="text-xs text-slate-500">
-          {isAdmin
-            ? "Restore any deleted item, or permanently delete it."
-            : "Restore any deleted item. Only admins can permanently delete."}
+          {canPurge
+            ? "Restore or permanently delete deleted content."
+            : canRestore ? "Restore deleted content." : "View deleted content."}
         </div>
       </CardHeader>
       <CardContent>
@@ -1159,7 +1312,7 @@ function TrashTab({ currentRole }) {
   );
 }
 
-function CollectionsTab() {
+function CollectionsTab({ canCreate = false, canUpdate = false, canDelete = false }) {
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // null | {} | {id, name, ...}
@@ -1249,7 +1402,7 @@ function CollectionsTab() {
     <Card className="bg-[#14181f] border-white/10 text-white">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2"><Layers className="w-5 h-5" /> Collections ({collections.length})</CardTitle>
-        {editing === null && (
+        {editing === null && canCreate && (
           <Button onClick={startCreate} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="collection-new-btn">
             <Plus className="w-4 h-4 mr-1" /> New Collection
           </Button>
@@ -1306,12 +1459,12 @@ function CollectionsTab() {
                     <Button size="sm" variant="outline" onClick={() => toggleExpand(c)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`collection-toggle-${c.id}`}>
                       {expanded[c.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />} Titles
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => startEdit(c)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`collection-edit-${c.id}`}>
+                    {canUpdate && <Button size="sm" variant="outline" onClick={() => startEdit(c)} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`collection-edit-${c.id}`}>
                       <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => remove(c)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`collection-delete-${c.id}`}>
+                    </Button>}
+                    {canDelete && <Button size="sm" variant="outline" onClick={() => remove(c)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid={`collection-delete-${c.id}`}>
                       <Trash2 className="w-4 h-4" />
-                    </Button>
+                    </Button>}
                   </div>
                 </div>
                 {expanded[c.id] && (
@@ -1327,15 +1480,15 @@ function CollectionsTab() {
                               {t.poster_url ? <img src={fileUrl(t.poster_url)} alt="" className="w-6 h-9 rounded object-cover" /> : <div className="w-6 h-9 rounded bg-[#1e2430]" />}
                               <span className="text-xs text-white">{t.title}</span>
                               <span className="text-[10px] text-slate-500 uppercase">{t.kind}{t.year && ` · ${t.year}`}</span>
-                              <button type="button" onClick={() => detachTitle(c.id, t.kind, t.id)} className="text-slate-500 hover:text-rose-300" title="Remove from collection">
+                              {canUpdate && <button type="button" onClick={() => detachTitle(c.id, t.kind, t.id)} className="text-slate-500 hover:text-rose-300" title="Remove from collection">
                                 <Trash className="w-3.5 h-3.5" />
-                              </button>
+                              </button>}
                             </div>
                           ))}
                         </div>
-                        <Button size="sm" onClick={() => openPicker(c.id)} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`collection-add-title-${c.id}`}>
+                        {canUpdate && <Button size="sm" onClick={() => openPicker(c.id)} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid={`collection-add-title-${c.id}`}>
                           <Plus className="w-4 h-4 mr-1" /> Add title
-                        </Button>
+                        </Button>}
                       </>
                     )}
                   </div>

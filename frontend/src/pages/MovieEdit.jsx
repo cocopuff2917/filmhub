@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { api, fileUrl } from "@/lib/api";
+import { api, fileUrl, formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import PosterListField from "@/components/PosterListField";
 import CastEditDialog from "@/components/CastEditDialog";
 import BulkCastAddDialog from "@/components/BulkCastAddDialog";
 import CollectionsPicker from "@/components/CollectionsPicker";
+import AvailabilityEditor from "@/components/AvailabilityEditor";
 
 const SECTIONS = [
   { id: "primary-facts", label: "Primary Facts" },
@@ -112,6 +113,7 @@ export default function MovieEdit() {
   const [activeSection, setActiveSection] = useState("primary-facts");
   const [stats, setStats] = useState({ content_score: 0 });
   const [locked, setLocked] = useState([]);
+  const [contentEditsFrozen, setContentEditsFrozen] = useState(false);
   const [castDialog, setCastDialog] = useState({ open: false, index: null });
   const [bulkCastOpen, setBulkCastOpen] = useState(false);
   const [crewDialog, setCrewDialog] = useState({ open: false, index: null });
@@ -121,25 +123,30 @@ export default function MovieEdit() {
   const savedAtRef = useRef(null);
 
   const isMod = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+  const isAdmin = user && (user.effective_role || user.role) === "admin";
   const perms = (user && user.permissions) || [];
+  const canBypassCatalogFreeze = isAdmin || perms.includes("content.bypass_edit_freeze");
+  const canEditImdbId = isMod || perms.includes("content.edit_imdb_id");
   const canLockCast = isMod || perms.includes("content.lock_cast");
-  const canProtectFields = isMod || perms.includes("content.protect_fields");
+  const canProtectFields = isMod || perms.includes("content.fields.lock") || perms.includes("content.protect_fields");
   const canDelete = isMod || perms.includes("content.delete");
 
   useEffect(() => {
     (async () => {
       try {
-        const [m, a, s, jobs] = await Promise.all([
+        const [m, a, s, jobs, freeze] = await Promise.all([
           api.get(`/movies/${id}`),
           api.get("/actors"),
           api.get(`/movies/${id}/stats`).catch(() => ({ data: { content_score: 0 } })),
           api.get("/crew-jobs").catch(() => ({ data: DEFAULT_CREW_JOBS })),
+          api.get("/moderation/content-edit-freeze").catch(() => ({ data: { frozen: false } })),
         ]);
         setMovie(m.data);
         setActors(a.data);
         setCrewJobs(jobs.data?.length ? jobs.data : DEFAULT_CREW_JOBS);
         setStats(s.data);
         setLocked(m.data.locked_fields || []);
+        setContentEditsFrozen(!!freeze.data.frozen);
         setForm({
           title: m.data.title || "",
           imdb_id: m.data.imdb_id || "",
@@ -159,7 +166,7 @@ export default function MovieEdit() {
           backdrop_urls: m.data.backdrop_urls || (m.data.backdrop_url ? [m.data.backdrop_url] : []),
           trailer_url: m.data.trailer_url || "",
           video_urls: m.data.video_urls || [],
-          purchase_options: m.data.purchase_options || [],
+          purchase_options: (m.data.purchase_options || []).map((option) => ({ ...option, availability_type: option.availability_type || "buy" })),
           genres: m.data.genres || [],
           keywords: m.data.keywords || [],
           cast: (m.data.cast || []).map((c) => ({ actor_id: c.actor?.id || c.actor_id, character_name: c.character_name })),
@@ -206,7 +213,7 @@ export default function MovieEdit() {
       setLocked(r.data.locked_fields || next);
       toast.success(locked.includes(fieldName) ? "Field unlocked" : "Field locked");
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Failed");
     }
   };
 
@@ -221,7 +228,7 @@ export default function MovieEdit() {
     if (silent) setAutoStatus("saving");
     try {
       const payload = {};
-      const fields = ["title", ...(isMod ? ["imdb_id"] : []), "release_date", "runtime", "synopsis", "tagline", "status", "original_language",
+      const fields = ["title", ...(canEditImdbId && src.imdb_id ? ["imdb_id"] : []), "release_date", "runtime", "synopsis", "tagline", "status", "original_language",
         "budget", "revenue", "awards_wins", "awards_nominations", "poster_url", "poster_urls", "backdrop_url", "backdrop_urls", "trailer_url",
         "video_urls", "purchase_options", "genres", "keywords", "cast", "crew", "gallery"];
       for (const f of fields) {
@@ -251,7 +258,7 @@ export default function MovieEdit() {
       return true;
     } catch (e) {
       if (silent) setAutoStatus("error");
-      toast.error(e.response?.data?.detail || "Save failed");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Save failed");
       return false;
     } finally {
       setSaving(false);
@@ -296,6 +303,18 @@ export default function MovieEdit() {
   if (!user) {
     return <div className="max-w-6xl mx-auto px-4 py-20 text-slate-500">Please <Link to="/login" className="text-sky-600">sign in</Link> to edit.</div>;
   }
+  if (contentEditsFrozen && !canBypassCatalogFreeze) {
+    return (
+      <main className="min-h-screen bg-[#0d0f12] px-4 py-20 text-white" data-testid="content-edit-frozen">
+        <div className="mx-auto max-w-3xl space-y-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Editing paused</p>
+          <h1 className="text-2xl font-bold">Catalog editing and creation are temporarily paused</h1>
+          <p className="text-sm text-slate-400">An administrator will resume catalog changes when maintenance is complete.</p>
+          <Link to={`/movie/${id}`} className="inline-flex text-sm text-amber-300 hover:text-amber-200">Back to {movie.title}</Link>
+        </div>
+      </main>
+    );
+  }
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const remCast = async (i) => {
@@ -321,7 +340,7 @@ export default function MovieEdit() {
       const actor = actors.find((a) => a.id === actorId);
       toast.success(`${nowLocked ? "Locked" : "Unlocked"} ${actor?.name || "cast member"}`);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Failed");
     }
   };
   const handleCastSave = (row) => {
@@ -358,18 +377,6 @@ export default function MovieEdit() {
     setActors((prev) => [...prev, { id: actor.id, name: actor.name, photo_url: actor.photo_url || "" }]);
   };
   const remCrew = (i) => setForm((f) => ({ ...f, crew: f.crew.filter((_, x) => x !== i) }));
-  const updatePurchaseOption = (index, key, value) => setForm((current) => ({
-    ...current,
-    purchase_options: current.purchase_options.map((option, rowIndex) => rowIndex === index ? { ...option, [key]: value } : option),
-  }));
-  const addPurchaseOption = () => setForm((current) => ({
-    ...current,
-    purchase_options: [...current.purchase_options, { provider: "", url: "" }],
-  }));
-  const removePurchaseOption = (index) => setForm((current) => ({
-    ...current,
-    purchase_options: current.purchase_options.filter((_, rowIndex) => rowIndex !== index),
-  }));
   const addCrew = () => setCrewDialog({ open: true, index: null });
   const openCrewEdit = (index) => setCrewDialog({ open: true, index });
   const handleCrewSave = (row) => {
@@ -461,7 +468,7 @@ export default function MovieEdit() {
             <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-amber-400">Primary facts</div>
             <div>
               <Label className="text-slate-200 font-semibold text-sm">IMDb ID</Label>
-              <Input value={form.imdb_id} onChange={(e) => setField("imdb_id", e.target.value.trim())} disabled={!isMod} required={isMod} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" placeholder="tt1234567" className="mt-1.5 bg-white border-slate-300 text-slate-900 disabled:opacity-70" data-testid="field-imdb-id" />
+              <Input value={form.imdb_id} onChange={(e) => setField("imdb_id", e.target.value.trim())} disabled={!canEditImdbId} required={canEditImdbId} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" placeholder="tt1234567" className="mt-1.5 bg-white border-slate-300 text-slate-900 disabled:opacity-70" data-testid="field-imdb-id" />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field name="original_language" label="Original Movie Language" locked={isFieldLocked("original_language")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("original_language")}>
@@ -614,41 +621,8 @@ export default function MovieEdit() {
           </section>
 
           <section id="purchase-options" ref={(el) => (sectionRefs.current["purchase-options"] = el)} className="space-y-3">
-            <Field name="purchase_options" label="Where to Buy" locked={isFieldLocked("purchase_options")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("purchase_options")} hint="Add only services where this movie is currently available for purchase.">
-              <div className="space-y-2">
-                {(form.purchase_options || []).map((option, index) => (
-                  <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] sm:items-center" data-testid={`purchase-option-${index}`}>
-                    <Input
-                      value={option.provider}
-                      onChange={(event) => updatePurchaseOption(index, "provider", event.target.value)}
-                      maxLength={80}
-                      disabled={!canEditField("purchase_options")}
-                      placeholder="Amazon, Apple TV, YouTube Movies…"
-                      aria-label={`Purchase provider ${index + 1}`}
-                      className="bg-white border-slate-300 text-slate-900"
-                      data-testid={`purchase-provider-${index}`}
-                    />
-                    <Input
-                      type="url"
-                      value={option.url}
-                      onChange={(event) => updatePurchaseOption(index, "url", event.target.value)}
-                      maxLength={2048}
-                      disabled={!canEditField("purchase_options")}
-                      placeholder="https://…"
-                      aria-label={`${option.provider || "Provider"} purchase URL`}
-                      className="bg-white border-slate-300 text-slate-900"
-                      data-testid={`purchase-url-${index}`}
-                    />
-                    <Button type="button" size="icon" variant="ghost" onClick={() => removePurchaseOption(index)} disabled={!canEditField("purchase_options")} aria-label={`Remove ${option.provider || "purchase service"}`} className="text-slate-500 hover:text-rose-500" data-testid={`remove-purchase-option-${index}`}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                {(form.purchase_options || []).length === 0 && <p className="text-sm text-slate-500">No purchase services listed.</p>}
-                <Button type="button" variant="outline" onClick={addPurchaseOption} disabled={!canEditField("purchase_options") || form.purchase_options.length >= 20} className="border-slate-300 text-slate-700 hover:bg-slate-100 h-8" data-testid="add-purchase-option">
-                  <Plus className="mr-1 h-4 w-4" /> Add service
-                </Button>
-              </div>
+            <Field name="purchase_options" label="Where to Watch" locked={isFieldLocked("purchase_options")} canToggleLocks={isMod} onToggleLock={toggleLock} disabled={!canEditField("purchase_options")}>
+              <AvailabilityEditor value={form.purchase_options || []} onChange={(value) => setField("purchase_options", value)} disabled={!canEditField("purchase_options")} />
             </Field>
           </section>
 

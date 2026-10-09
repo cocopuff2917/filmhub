@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Lock, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import ForumSidebar from "@/components/ForumSidebar";
+import BlockUserButton from "@/components/BlockUserButton";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -156,11 +157,8 @@ export default function ThreadsList() {
                   <ul className="divide-y divide-white/5">
                     {rows.map((t) => (
                       <li key={t.id}>
-                        <Link
-                          to={`/threads/${t.id}`}
-                          className="flex items-start gap-4 px-5 py-4 transition hover:bg-white/[0.03]"
-                          data-testid={`thread-row-${t.id}`}
-                        >
+                        <div className="flex items-start gap-2 px-5 py-4 transition hover:bg-white/[0.03]" data-testid={`thread-row-${t.id}`}>
+                          <Link to={`/threads/${t.id}`} className="flex min-w-0 flex-1 items-start gap-4">
                           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-[#1e2430] text-xs text-slate-300">
                             {t.user_avatar ? (
                               <img src={fileUrl(t.user_avatar)} alt="" className="h-full w-full object-cover" />
@@ -191,7 +189,9 @@ export default function ThreadsList() {
                               </span>
                             </div>
                           </div>
-                        </Link>
+                          </Link>
+                          <BlockUserButton userId={t.user_id} userName={t.user_name} onBlocked={load} />
+                        </div>
                       </li>
                     ))}
                   </ul>

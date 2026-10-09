@@ -33,6 +33,7 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
         <div className={`relative w-16 h-16 overflow-hidden bg-[#1e2430] border border-white/10 ${roundedCls}`}>
           <ImageWithFallback
             src={fileUrl(value)}
+            fallbackSrc={fileUrl(value, "jpeg")}
             alt=""
             className="w-full h-full object-cover"
             fallback={<div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] text-slate-500">Preview unavailable</div>}
@@ -93,6 +94,7 @@ export function GalleryUpload({ value, onChange, testid, canDelete = true, allow
           <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden bg-[#1e2430] border border-white/10 group">
             <ImageWithFallback
               src={fileUrl(p)}
+              fallbackSrc={fileUrl(p, "jpeg")}
               alt=""
               className="w-full h-full object-cover"
               fallback={<div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] text-slate-500">Preview unavailable</div>}

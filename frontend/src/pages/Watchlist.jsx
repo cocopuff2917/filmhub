@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import MovieCard from "@/components/MovieCard";
+import SeriesCard from "@/components/SeriesCard";
 import { Bookmark } from "lucide-react";
 
 export default function Watchlist() {
@@ -47,7 +48,9 @@ export default function Watchlist() {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
-              {movies.map((m) => <MovieCard key={m.id} movie={m} />)}
+              {movies.map((item) => item.type === "series"
+                ? <SeriesCard key={`series-${item.id}`} series={item} />
+                : <MovieCard key={`movie-${item.id}`} movie={item} />)}
             </div>
           )}
         </div>

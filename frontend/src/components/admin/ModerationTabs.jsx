@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Users, Film, Tv, UserRound, Layers, Trash2, Ban, FileWarning,
-  Clock, Activity, TrendingUp, History, RotateCcw, ArrowRight, Shield,
+  Clock, Activity, TrendingUp, History, RotateCcw, ArrowRight, Shield, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -154,6 +154,8 @@ export function ReportsTab() {
   const [status, setStatus] = useState("open");
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [triagingId, setTriagingId] = useState(null);
+  const [triageResults, setTriageResults] = useState({});
   const load = async () => {
     setLoading(true);
     try {
@@ -170,6 +172,19 @@ export function ReportsTab() {
       toast.success(`Report ${newStatus}`);
       load();
     } catch { toast.error("Failed to update"); }
+  };
+
+  const triageReport = async (report) => {
+    setTriagingId(report.id);
+    try {
+      const response = await api.post(`/moderation/reports/${report.id}/triage`);
+      setTriageResults((current) => ({ ...current, [report.id]: response.data }));
+      toast.success("Triage suggestion ready for review");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not triage report");
+    } finally {
+      setTriagingId(null);
+    }
   };
 
   return (
@@ -196,34 +211,51 @@ export function ReportsTab() {
           <div className="p-6 text-slate-500 text-sm">No reports.</div>
         ) : (
           <ul className="divide-y divide-white/5">
-            {threads.map((t) => (
-              <li key={t.id} className="px-4 py-3 hover:bg-white/5" data-testid={`report-${t.id}`}>
-                <div className="flex items-start gap-3">
-                  <div className={`w-1 self-stretch rounded ${t.status === "open" ? "bg-rose-500" : "bg-slate-600"}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Link to={`/threads/${t.id}`} className="text-white font-medium hover:text-amber-300 truncate max-w-md" data-testid={`report-title-${t.id}`}>
-                        {t.title}
-                      </Link>
-                      <Badge className={`text-[10px] uppercase ${t.status === "open" ? "bg-rose-500/15 text-rose-300 border-rose-500/40" : "bg-white/5 text-slate-300 border-white/10"}`}>{t.status}</Badge>
-                      {t.entity_type && <Badge className="text-[10px] bg-white/5 text-slate-300 border-white/10">{t.entity_type}</Badge>}
+            {threads.map((t) => {
+              const triageResult = triageResults[t.id] || t.ai_triage;
+              return (
+                <li key={t.id} className="px-4 py-3 hover:bg-white/5" data-testid={`report-${t.id}`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-1 self-stretch rounded ${t.status === "open" ? "bg-rose-500" : "bg-slate-600"}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link to={`/threads/${t.id}`} className="text-white font-medium hover:text-amber-300 truncate max-w-md" data-testid={`report-title-${t.id}`}>
+                          {t.title}
+                        </Link>
+                        <Badge className={`text-[10px] uppercase ${t.status === "open" ? "bg-rose-500/15 text-rose-300 border-rose-500/40" : "bg-white/5 text-slate-300 border-white/10"}`}>{t.status}</Badge>
+                        {t.entity_type && <Badge className="text-[10px] bg-white/5 text-slate-300 border-white/10">{t.entity_type}</Badge>}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        by {t.user_name || "—"} · {timeAgo(t.created_at)} · {t.message_count || 0} replies
+                      </div>
+                      {t.body && <div className="text-[12px] text-slate-400 mt-1 line-clamp-2">{t.body}</div>}
+                      {triageResult && (
+                        <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-xs" data-testid={`report-triage-${t.id}`}>
+                          <div className="flex flex-wrap items-center gap-2 text-amber-200">
+                            <span className="font-semibold uppercase">{triageResult.priority} priority</span>
+                            <Badge className="text-[9px] uppercase bg-white/5 text-slate-300 border-white/10">{triageResult.category}</Badge>
+                          </div>
+                          {triageResult.summary && <p className="mt-1 text-slate-200">{triageResult.summary}</p>}
+                          {triageResult.suggested_action && <p className="mt-1 text-slate-400">Suggestion: {triageResult.suggested_action}</p>}
+                          <p className="mt-1 text-[10px] text-slate-500">AI suggestion only. Review the report before acting.</p>
+                        </div>
+                      )}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">
-                      by {t.user_name || "—"} · {timeAgo(t.created_at)} · {t.message_count || 0} replies
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" className="h-7 border-amber-500/30 text-amber-200 hover:bg-amber-500/10 hover:text-white" onClick={() => triageReport(t)} disabled={triagingId === t.id} data-testid={`triage-report-${t.id}`}>
+                        <Sparkles className="mr-1 h-3.5 w-3.5" /> {triagingId === t.id ? "Analyzing…" : triageResult ? "Re-triage" : "AI triage"}
+                      </Button>
+                      {t.status === "open" ? (
+                        <Button size="sm" variant="outline" className="h-7 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={() => changeStatus(t.id, "closed")} data-testid={`close-report-${t.id}`}>Close</Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="h-7 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={() => changeStatus(t.id, "open")} data-testid={`reopen-report-${t.id}`}>Reopen</Button>
+                      )}
+                      <Link to={`/threads/${t.id}`} className="h-7 inline-flex items-center text-xs px-3 rounded border border-amber-500/50 text-amber-300 hover:bg-amber-500/10" data-testid={`open-report-${t.id}`}>Open</Link>
                     </div>
-                    {t.body && <div className="text-[12px] text-slate-400 mt-1 line-clamp-2">{t.body}</div>}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {t.status === "open" ? (
-                      <Button size="sm" variant="outline" className="h-7 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={() => changeStatus(t.id, "closed")} data-testid={`close-report-${t.id}`}>Close</Button>
-                    ) : (
-                      <Button size="sm" variant="outline" className="h-7 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={() => changeStatus(t.id, "open")} data-testid={`reopen-report-${t.id}`}>Reopen</Button>
-                    )}
-                    <Link to={`/threads/${t.id}`} className="h-7 inline-flex items-center text-xs px-3 rounded border border-amber-500/50 text-amber-300 hover:bg-amber-500/10" data-testid={`open-report-${t.id}`}>Open</Link>
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -234,7 +266,7 @@ export function ReportsTab() {
 // =====================================================
 // SUSPENSIONS TAB
 // =====================================================
-export function SuspensionsTab() {
+export function SuspensionsTab({ canUnsuspend = true }) {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
   const [includeExpired, setIncludeExpired] = useState(false);
@@ -311,8 +343,22 @@ export function SuspensionsTab() {
                       <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-700 flex items-center justify-center text-xs text-white flex-shrink-0">
                         {u.avatar_url ? <img src={fileUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" /> : (u.name?.[0]?.toUpperCase() || "?")}
                       </div>
+                      {triageResult && (
+                        <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-xs" data-testid={`report-triage-${t.id}`}>
+                          <div className="flex flex-wrap items-center gap-2 text-amber-200">
+                            <span className="font-semibold uppercase">{triageResult.priority} priority</span>
+                            <Badge className="text-[9px] uppercase bg-white/5 text-slate-300 border-white/10">{triageResult.category}</Badge>
+                          </div>
+                          {triageResult.summary && <p className="mt-1 text-slate-200">{triageResult.summary}</p>}
+                          {triageResult.suggested_action && <p className="mt-1 text-slate-400">Suggestion: {triageResult.suggested_action}</p>}
+                          <p className="mt-1 text-[10px] text-slate-500">AI suggestion only. Review the report before acting.</p>
+                        </div>
+                      )}
                       <div>
                         <div className="text-white font-medium">{u.name}</div>
+                      <Button size="sm" variant="outline" className="h-7 border-amber-500/30 text-amber-200 hover:bg-amber-500/10 hover:text-white" onClick={() => triageReport(t)} disabled={triagingId === t.id} data-testid={`triage-report-${t.id}`}>
+                        <Sparkles className="mr-1 h-3.5 w-3.5" /> {triagingId === t.id ? "Analyzing…" : triageResult ? "Re-triage" : "AI triage"}
+                      </Button>
                         <div className="text-[11px] text-slate-500">{u.email}</div>
                       </div>
                       {!u.is_active && <Badge className="text-[10px] bg-white/5 text-slate-400 border-white/10">expired</Badge>}
@@ -329,7 +375,7 @@ export function SuspensionsTab() {
                   <td className="px-4 py-2.5 text-right">
                     <div className="inline-flex items-center gap-2">
                       <Link to={`/user/${u.id}`} className="text-[11px] text-amber-400 hover:text-amber-300" data-testid={`sus-view-${u.id}`}>View</Link>
-                      {u.is_active && (
+                      {canUnsuspend && u.is_active && (
                         <Button size="sm" variant="outline" className="h-7 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" onClick={() => unsuspend(u.id, u.name)} data-testid={`sus-lift-${u.id}`}>
                           <RotateCcw className="w-3 h-3 mr-1" /> Unsuspend
                         </Button>
@@ -478,7 +524,7 @@ export function EditHistoryTab() {
 // =====================================================
 // IP BANS TAB
 // =====================================================
-export function IpBansTab() {
+export function IpBansTab({ permissions = [], currentRole }) {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
   const [includeExpired, setIncludeExpired] = useState(false);
@@ -491,6 +537,9 @@ export function IpBansTab() {
   const [amount, setAmount] = useState(1);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const isModerator = ["moderator", "admin"].includes(currentRole);
+  const canCreate = isModerator || permissions.includes("moderation.ip_bans.create");
+  const canDelete = isModerator || permissions.includes("moderation.ip_bans.delete");
 
   const load = async () => {
     setLoading(true);
@@ -544,7 +593,7 @@ export function IpBansTab() {
       </h3>
 
       {/* Create form */}
-      <form onSubmit={submit} className="rounded-xl border border-white/10 bg-[#0d0f12] p-4 grid grid-cols-1 md:grid-cols-6 gap-3" data-testid="ipban-create-form">
+      {canCreate && <form onSubmit={submit} className="rounded-xl border border-white/10 bg-[#0d0f12] p-4 grid grid-cols-1 md:grid-cols-6 gap-3" data-testid="ipban-create-form">
         <Input
           value={ip}
           onChange={(e) => setIp(e.target.value)}
@@ -600,7 +649,7 @@ export function IpBansTab() {
             {saving ? "Banning…" : "Ban IP"}
           </Button>
         </div>
-      </form>
+      </form>}
 
       {/* Filter row */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -660,9 +709,9 @@ export function IpBansTab() {
                   <td className="px-4 py-2.5 text-slate-400">{b.created_by_name || "—"}</td>
                   <td className="px-4 py-2.5 text-slate-500 text-[11px]">{b.created_at ? timeAgo(b.created_at) : "—"}</td>
                   <td className="px-4 py-2.5 text-right">
-                    <Button size="sm" variant="outline" className="h-7 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" onClick={() => lift(b.id, b.ip)} data-testid={`ipban-lift-${b.id}`}>
+                    {canDelete && <Button size="sm" variant="outline" className="h-7 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" onClick={() => lift(b.id, b.ip)} data-testid={`ipban-lift-${b.id}`}>
                       <RotateCcw className="w-3 h-3 mr-1" /> Lift
-                    </Button>
+                    </Button>}
                   </td>
                 </tr>
               ))}

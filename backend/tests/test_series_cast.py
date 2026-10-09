@@ -151,10 +151,40 @@ def test_main_cast_entries_have_episode_count_equal_to_total(admin_session, crea
     assert len(data["main_cast"]) == 2
     for c in data["main_cast"]:
         assert c.get("episode_count") == 3, f"expected 3, got {c}"
+        assert c.get("episode_appearance_count") == 0, f"expected no episode selections by default, got {c}"
         assert not c.get("recurring")
     # order preserved
     assert data["main_cast"][0]["actor"]["id"] == a1
     assert data["main_cast"][1]["actor"]["id"] == a2
+
+
+def test_main_cast_is_assigned_to_episodes_not_seasons(admin_session, created_ids):
+    actor = _make_actor(admin_session, created_ids, "EpisodeOnlyRegular")
+    created = admin_session.post(f"{API}/series", json={
+        "title": "TEST_Series_EpisodeOnlyCast",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        "main_cast": [{"actor_id": actor, "character_name": "Episode Regular"}],
+        "seasons": [
+            {"season_number": 1, "episodes": [
+                {"episode_number": 1, "name": "Appears", "main_cast_actor_ids": [actor]},
+                {"episode_number": 2, "name": "Absent", "main_cast_actor_ids": []},
+            ]},
+            {"season_number": 2, "episodes": [
+                {"episode_number": 1, "name": "Returns", "main_cast_actor_ids": [actor]},
+            ]},
+        ],
+    }, timeout=20)
+    assert created.status_code in (200, 201), created.text
+    series_id = created.json()["id"]
+    created_ids["series"].append(series_id)
+
+    data = admin_session.get(f"{API}/series/{series_id}", timeout=15).json()
+    assert all(not season.get("main_cast") for season in data["seasons"])
+    assert data["seasons"][0]["episodes"][0]["main_cast_members"][0]["actor"]["id"] == actor
+    assert data["seasons"][0]["episodes"][1]["main_cast_actor_ids"] == []
+    assert data["seasons"][1]["episodes"][0]["main_cast_members"][0]["actor"]["id"] == actor
+    cast_credit = next(member for member in data["main_cast"] if member["actor"]["id"] == actor)
+    assert cast_credit["episode_appearance_count"] == 2
 
 
 # Feature: guest star with >=5 episode appearances is promoted to main_cast as recurring
@@ -363,3 +393,157 @@ def test_linked_movie_crew_appears_on_actor_profile(admin_session, created_ids):
 
     actor = admin_session.get(f"{API}/actors/{actor_id}", timeout=15).json()
     assert any(credit["id"] == movie_id and credit["role"] == "Makeup Artist" for credit in actor["crew_credits"])
+
+
+def test_episode_main_cast_selection_appears_on_actor_profile(admin_session, created_ids):
+    actor_id = _make_actor(admin_session, created_ids, "EpisodeRegular")
+    response = admin_session.post(f"{API}/series", json={
+        "title": f"TEST_EpisodeMainCast_{uuid.uuid4().hex}",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        "main_cast": [{"actor_id": actor_id, "character_name": "Regular"}],
+        "seasons": [
+            {"season_number": 1, "episodes": [
+                {"episode_number": 1, "name": "Pilot", "main_cast_actor_ids": [actor_id]},
+                    {"episode_number": 2, "name": "Absent", "main_cast_actor_ids": []},
+                {"episode_number": 3, "name": "Return", "main_cast_actor_ids": [actor_id]},
+            ]},
+            {"season_number": 2, "episodes": [
+                {"episode_number": 1, "name": "Season two appearance", "main_cast_actor_ids": [actor_id]},
+            ]},
+        ],
+    }, timeout=20)
+    assert response.status_code in (200, 201), response.text
+    series_id = response.json()["id"]
+    created_ids["series"].append(series_id)
+
+    series = admin_session.get(f"{API}/series/{series_id}", timeout=15).json()
+    first_season_episodes = series["seasons"][0]["episodes"]
+    cast_credit = next(member for member in series["main_cast"] if member["actor"]["id"] == actor_id)
+    assert cast_credit["episode_appearance_count"] == 3
+    assert first_season_episodes[0]["main_cast_members"][0]["actor"]["id"] == actor_id
+    assert first_season_episodes[1]["main_cast_actor_ids"] == []
+    assert series["seasons"][1]["episodes"][0]["main_cast_actor_ids"] == [actor_id]
+
+    actor = admin_session.get(f"{API}/actors/{actor_id}", timeout=15).json()
+    episode_numbers = [credit["episode_number"] for credit in actor["main_cast_episodes"]]
+    episode_coordinates = [(credit["season_number"], credit["episode_number"]) for credit in actor["main_cast_episodes"]]
+    assert episode_coordinates == [(1, 1), (1, 3), (2, 1)]
+
+    updated = admin_session.patch(
+        f"{API}/series/{series_id}/seasons/1/episodes/2/main-cast",
+        json={"main_cast_actor_ids": [actor_id]},
+        timeout=20,
+    )
+    assert updated.status_code == 200, updated.text
+    second_episode = updated.json()["seasons"][0]["episodes"][1]
+    assert second_episode["main_cast_members"][0]["actor"]["id"] == actor_id
+    cast_credit = next(member for member in updated.json()["main_cast"] if member["actor"]["id"] == actor_id)
+    assert cast_credit["episode_appearance_count"] == 4
+
+    invalid_assignment = admin_session.patch(
+        f"{API}/series/{series_id}/seasons/2/episodes/1/main-cast",
+        json={"main_cast_actor_ids": [actor_id]},
+        timeout=20,
+    )
+    assert invalid_assignment.status_code == 200, invalid_assignment.text
+    assert invalid_assignment.json()["seasons"][1]["episodes"][0]["main_cast_actor_ids"] == [actor_id]
+
+    actor = admin_session.get(f"{API}/actors/{actor_id}", timeout=15).json()
+    episode_coordinates = [(credit["season_number"], credit["episode_number"]) for credit in actor["main_cast_episodes"]]
+    assert episode_coordinates == [(1, 1), (1, 2), (1, 3), (2, 1)]
+
+    lock_response = admin_session.post(
+        f"{API}/series/{series_id}/main-cast-episode-lock",
+        json={"season_number": 1, "episode_number": 1},
+        timeout=15,
+    )
+    assert lock_response.status_code == 200, lock_response.text
+    assert "1:1" in lock_response.json()["locked_main_cast_episodes"]
+
+    unlock_response = admin_session.post(
+        f"{API}/series/{series_id}/main-cast-episode-lock",
+        json={"season_number": 1, "episode_number": 1},
+        timeout=15,
+    )
+    assert unlock_response.status_code == 200, unlock_response.text
+    assert "1:1" not in unlock_response.json()["locked_main_cast_episodes"]
+
+
+def test_episode_guest_stars_can_be_edited(admin_session, created_ids):
+    actor_id = _make_actor(admin_session, created_ids, "EpisodeGuest")
+    response = admin_session.post(f"{API}/series", json={
+        "title": f"TEST_EpisodeGuestStars_{uuid.uuid4().hex}",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        "seasons": [{"season_number": 1, "episodes": [
+            {"episode_number": 1, "name": "Pilot", "guest_stars": []},
+            {"episode_number": 2, "name": "Finale", "guest_stars": []},
+        ]}],
+    }, timeout=20)
+    assert response.status_code in (200, 201), response.text
+    series_id = response.json()["id"]
+    created_ids["series"].append(series_id)
+
+    updated = admin_session.patch(
+        f"{API}/series/{series_id}/seasons/1/episodes/1/guest-stars",
+        json={"guest_stars": [{"actor_id": actor_id, "character_name": "Mystery Guest"}]},
+        timeout=20,
+    )
+    assert updated.status_code == 200, updated.text
+    episodes = updated.json()["seasons"][0]["episodes"]
+    assert episodes[0]["guest_stars"][0]["actor"]["id"] == actor_id
+    assert episodes[0]["guest_stars"][0]["character_name"] == "Mystery Guest"
+    assert episodes[1]["guest_stars"] == []
+
+    edited = admin_session.patch(
+        f"{API}/series/{series_id}/seasons/1/episodes/1/guest-stars",
+        json={"guest_stars": [{"actor_id": actor_id, "character_name": "Updated Character"}]},
+        timeout=20,
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["seasons"][0]["episodes"][0]["guest_stars"][0]["character_name"] == "Updated Character"
+
+
+def test_episode_details_can_be_edited_without_changing_credits(admin_session, created_ids):
+    regular_actor = _make_actor(admin_session, created_ids, "DetailsRegular")
+    guest_actor = _make_actor(admin_session, created_ids, "DetailsGuest")
+    response = admin_session.post(f"{API}/series", json={
+        "title": f"TEST_EpisodeDetails_{uuid.uuid4().hex}",
+        "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        "main_cast": [{"actor_id": regular_actor, "character_name": "Regular"}],
+        "seasons": [{"season_number": 1, "episodes": [
+            {
+                "episode_number": 1,
+                "name": "Original title",
+                "overview": "Original overview",
+                "main_cast_actor_ids": [regular_actor],
+                "guest_stars": [{"actor_id": guest_actor, "character_name": "Guest"}],
+            },
+            {"episode_number": 2, "name": "Untouched episode", "overview": "Keep this"},
+        ]}],
+    }, timeout=20)
+    assert response.status_code in (200, 201), response.text
+    series_id = response.json()["id"]
+    created_ids["series"].append(series_id)
+
+    updated = admin_session.patch(
+        f"{API}/series/{series_id}/seasons/1/episodes/1/details",
+        json={
+            "name": "Updated title",
+            "air_date": "2026-10-09",
+            "overview": "Updated overview",
+            "still_url": "/uploads/episode-still.jpg",
+            "stills": ["/uploads/episode-still.jpg", "/uploads/episode-still-2.jpg"],
+        },
+        timeout=20,
+    )
+    assert updated.status_code == 200, updated.text
+    first, second = updated.json()["seasons"][0]["episodes"]
+    assert first["name"] == "Updated title"
+    assert first["air_date"] == "2026-10-09"
+    assert first["overview"] == "Updated overview"
+    assert first["still_url"] == "/uploads/episode-still.jpg"
+    assert first["stills"] == ["/uploads/episode-still.jpg", "/uploads/episode-still-2.jpg"]
+    assert first["main_cast_actor_ids"] == [regular_actor]
+    assert first["guest_stars"][0]["actor"]["id"] == guest_actor
+    assert second["name"] == "Untouched episode"
+    assert second["overview"] == "Keep this"

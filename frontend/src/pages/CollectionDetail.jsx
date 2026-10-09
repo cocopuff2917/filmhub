@@ -4,6 +4,44 @@ import { api, fileUrl } from "@/lib/api";
 import { Layers, Film, Tv, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+function getCollectionCast(titles, limit = 10) {
+  const groups = titles
+    .filter((title) => (title.main_cast || []).length > 0)
+    .map((title) => ({ title, members: title.main_cast || [] }));
+  const cast = [];
+  const byActorId = new Map();
+  let depth = 0;
+  let hasMore = true;
+
+  while (cast.length < limit && hasMore) {
+    hasMore = false;
+    for (const { title, members } of groups) {
+      const member = members[depth];
+      if (!member) continue;
+      hasMore = true;
+      const actorId = member.actor?.id || member.actor_id;
+      if (!actorId) continue;
+      const existing = byActorId.get(actorId);
+      if (existing) {
+        if (!existing.credits.some((credit) => credit.titleId === title.id)) {
+          existing.credits.push({ titleId: title.id, title: title.title, kind: title.kind, character: member.character_name || "" });
+        }
+        continue;
+      }
+      const entry = {
+        actorId,
+        actor: member.actor || { id: actorId, name: "Unknown actor", photo_url: "" },
+        credits: [{ titleId: title.id, title: title.title, kind: title.kind, character: member.character_name || "" }],
+      };
+      byActorId.set(actorId, entry);
+      cast.push(entry);
+      if (cast.length >= limit) break;
+    }
+    depth += 1;
+  }
+  return cast;
+}
+
 export default function CollectionDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -37,6 +75,7 @@ export default function CollectionDetail() {
   const poster = coll.poster_url ? fileUrl(coll.poster_url) : "";
   const movies = coll.titles.filter((t) => t.kind === "movie");
   const series = coll.titles.filter((t) => t.kind === "series");
+  const castPreview = getCollectionCast(coll.titles, 10);
 
   return (
     <div data-testid="collection-detail-page" className="min-h-screen bg-[#0a0d12] text-white">
@@ -72,6 +111,32 @@ export default function CollectionDetail() {
           </div>
         </div>
       </section>
+
+      {castPreview.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8" data-testid="collection-cast-previews">
+          <div className="flex items-baseline justify-between gap-3 border-b border-white/10 pb-3">
+            <h2 className="font-heading text-xl font-bold text-white">Cast across this collection</h2>
+            <span className="text-xs text-slate-500">{castPreview.length} of 10</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {castPreview.map(({ actorId, actor, credits }) => (
+              <div key={actorId} className="flex min-w-0 items-center gap-3 border-b border-white/5 py-2" data-testid={`collection-cast-${actorId}`}>
+                <Link to={`/actor/${actorId}`} className="group flex min-w-0 flex-1 items-center gap-3">
+                  <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#1e2430] text-sm text-slate-400">
+                    {actor.photo_url ? <img src={fileUrl(actor.photo_url)} alt="" className="h-full w-full object-cover" loading="lazy" /> : (actor.name?.[0] || "?")}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-white group-hover:text-amber-300">{actor.name || "Unknown actor"}</span>
+                    <span className="block truncate text-[10px] text-slate-500">
+                      {credits.slice(0, 2).map((credit) => credit.title).join(", ")}{credits.length > 2 ? ` +${credits.length - 2} more` : ""}
+                    </span>
+                  </span>
+                </Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         {coll.titles.length === 0 ? (

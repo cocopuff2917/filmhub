@@ -1,9 +1,9 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Film, LogOut, User, Bookmark, Shield, Plus, Sparkles, Inbox as InboxIcon } from "lucide-react";
+import { Film, LogOut, User, Bookmark, Shield, Plus, Sparkles, Inbox as InboxIcon, Settings } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -17,11 +17,43 @@ export default function Navbar() {
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [createKind, setCreateKind] = useState("movie");
+  const [contentEditsFrozen, setContentEditsFrozen] = useState(true);
+  const [freezeStatusLoaded, setFreezeStatusLoaded] = useState(false);
+  const isAdmin = [user?.role, user?.effective_role].includes("admin");
+  const permissions = user?.permissions || [];
+  const hasPanelPermission = permissions.some((permission) => [
+    "moderation.dashboard.view", "moderation.reports.view", "moderation.edits.view",
+    "admin.movies.access", "admin.series.access", "admin.actors.access",
+    "user.suspend", "user.unsuspend", "user.message", "user.view_ips", "user.account.modify",
+    "moderation.ip_overlap.view", "moderation.ip_bans.view", "moderation.ip_bans.create",
+    "moderation.ip_bans.delete", "content.trash.view",
+    "collections.create", "collections.update", "collections.delete",
+    "crew_jobs.create", "roles.manage", "user.assign_role", "user.assign_custom_role",
+  ].includes(permission));
+  const canBypassCatalogFreeze = isAdmin || (user?.permissions || []).includes("content.bypass_edit_freeze");
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!userId) return undefined;
+    let active = true;
+    api.get("/moderation/content-edit-freeze")
+      .then((response) => { if (active) setContentEditsFrozen(!!response.data.frozen); })
+      .catch(() => { if (active) setContentEditsFrozen(true); })
+      .finally(() => { if (active) setFreezeStatusLoaded(true); });
+    return () => { active = false; };
+  }, [userId]);
 
   const linkClass = ({ isActive }) => `text-sm font-medium tracking-wide transition-colors ${isActive ? "text-amber-400" : "text-slate-300 hover:text-white"}`;
   const initial = user && user.name ? user.name.charAt(0).toUpperCase() : "U";
 
-  const startCreate = (kind) => { setCreateKind(kind); setCreateOpen(true); };
+  const startCreate = (kind) => {
+    if (kind === "movie" || kind === "series") {
+      navigate(`/create/${kind}`);
+      return;
+    }
+    setCreateKind(kind);
+    setCreateOpen(true);
+  };
 
   const onCreated = (result) => {
     if (createKind === "movie") navigate(`/movie/${result.id}`);
@@ -48,8 +80,8 @@ export default function Navbar() {
               <NavLink to="/threads" className={linkClass} data-testid="nav-threads">Forum</NavLink>
               <NavLink to="/contributor-guidelines" className={linkClass} data-testid="nav-guidelines">Guidelines</NavLink>
               {user && <NavLink to="/watchlist" className={linkClass} data-testid="nav-watchlist">Watchlist</NavLink>}
-              {user && (["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || (user.permissions || []).some((p) => ["user.suspend","content.lock_cast","content.protect_fields","moderation.messages.read_reply","content.delete","content.lock","user.view_ips","thread.moderate","comment.moderate"].includes(p))) && (
-                <NavLink to="/admin" className={linkClass} data-testid="nav-admin">{user.role === "admin" || user.effective_role === "admin" ? "Admin" : "Mod"}</NavLink>
+              {user && (["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || hasPanelPermission) && (
+                <NavLink to="/admin" className={linkClass} data-testid="nav-admin">{user.role === "admin" || user.effective_role === "admin" ? "Admin" : ["moderator", "admin"].includes(user.effective_role || user.role) ? "Mod" : "Manage"}</NavLink>
               )}
             </nav>
           )}
@@ -64,7 +96,12 @@ export default function Navbar() {
             {user && !user.is_suspended && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button className="bg-amber-500 hover:bg-amber-600 text-black font-semibold hidden sm:inline-flex" data-testid="nav-create-btn">
+                  <Button
+                    disabled={!canBypassCatalogFreeze && (!freezeStatusLoaded || contentEditsFrozen)}
+                    title={!canBypassCatalogFreeze && contentEditsFrozen ? "Catalog editing and creation are paused" : undefined}
+                    className="bg-amber-500 hover:bg-amber-600 text-black font-semibold hidden sm:inline-flex"
+                    data-testid="nav-create-btn"
+                  >
                     <Plus className="w-4 h-4 mr-1" /> Create
                   </Button>
                 </DropdownMenuTrigger>
@@ -96,9 +133,10 @@ export default function Navbar() {
                   {!user.is_suspended && (
                     <>
                       <DropdownMenuItem onClick={() => navigate(`/user/${user.id}`)} data-testid="menu-profile"><User className="w-4 h-4 mr-2" /> My Profile</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-settings"><Settings className="w-4 h-4 mr-2" /> Account settings</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => navigate("/watchlist")} data-testid="menu-watchlist"><Bookmark className="w-4 h-4 mr-2" /> Watchlist</DropdownMenuItem>
-                      {(["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || (user.permissions || []).some((p) => ["user.suspend","content.lock_cast","content.protect_fields","moderation.messages.read_reply","content.delete","content.lock","user.view_ips","thread.moderate","comment.moderate"].includes(p))) && (
-                        <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin"><Shield className="w-4 h-4 mr-2" /> {user.role === "admin" || user.effective_role === "admin" ? "Admin" : "Moderator"} Console</DropdownMenuItem>
+                      {(["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || hasPanelPermission) && (
+                        <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin"><Shield className="w-4 h-4 mr-2" /> {user.role === "admin" || user.effective_role === "admin" ? "Admin" : ["moderator", "admin"].includes(user.effective_role || user.role) ? "Moderator" : "Manage"} Console</DropdownMenuItem>
                       )}
                     </>
                   )}

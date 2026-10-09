@@ -201,12 +201,30 @@ export default function ActorDetail() {
           <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">No series credits yet.</div>
         ) : (
           <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
-            {actor.series.map((s) => (
-              <div key={s.id}>
-                <SeriesCard series={s} />
-                {s.character_name && <div className="mt-2 text-xs text-slate-500 px-1">as <span className="text-amber-400">{s.character_name}</span></div>}
-              </div>
-            ))}
+            {actor.series.map((s) => {
+              const episodes = (actor.main_cast_episodes || []).filter((episode) => episode.series_id === s.id);
+              return (
+                <div key={s.id}>
+                  <SeriesCard series={s} />
+                  <div className="mt-2 px-1 text-xs text-slate-500">
+                    {s.character_name && <div>as <span className="text-amber-400">{s.character_name}</span></div>}
+                    <div>{episodes.length} episode{episodes.length === 1 ? "" : "s"}</div>
+                  </div>
+                  {episodes.length > 0 && (
+                    <details className="mt-2 border-t border-white/10 px-1 pt-2" data-testid={`actor-series-episodes-${s.id}`}>
+                      <summary className="cursor-pointer text-xs text-amber-400 hover:text-amber-300">Show episode credits</summary>
+                      <div className="mt-2 space-y-1.5">
+                        {episodes.map((episode) => (
+                          <Link key={`${episode.season_number}-${episode.episode_number}`} to={`/series/${episode.series_id}/season/${episode.season_number}/episode/${episode.episode_number}`} className="block text-xs text-slate-300 hover:text-amber-400">
+                            S{episode.season_number} E{episode.episode_number} · {episode.episode_name || `Episode ${episode.episode_number}`}
+                          </Link>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
@@ -220,7 +238,7 @@ export default function ActorDetail() {
         ) : (
           <div className="mt-6 space-y-2">
             {actor.guest_episodes.map((ge, i) => (
-              <Link key={i} to={`/series/${ge.series_id}`} className="flex items-center gap-4 rounded-xl bg-[#14181f] border border-white/10 p-4 hover:border-amber-500/40 hover:bg-amber-500/5 transition">
+              <Link key={i} to={`/series/${ge.series_id}/season/${ge.season_number}/episode/${ge.episode_number}`} className="flex items-center gap-4 rounded-xl bg-[#14181f] border border-white/10 p-4 hover:border-amber-500/40 hover:bg-amber-500/5 transition">
                 <div className="w-12 h-16 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
                   {ge.series_poster_url && <img src={fileUrl(ge.series_poster_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />}
                 </div>

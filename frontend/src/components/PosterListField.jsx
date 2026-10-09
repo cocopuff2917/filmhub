@@ -71,6 +71,7 @@ export default function PosterListField({ urls = [], primary = "", aspect = "2/3
             >
               <ImageWithFallback
                 src={fileUrl(url)}
+                fallbackSrc={fileUrl(url, "jpeg")}
                 alt=""
                 className="w-full object-cover"
                 style={{ aspectRatio: aspect }}

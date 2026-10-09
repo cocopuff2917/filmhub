@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 const Home = lazy(() => import("@/pages/Home"));
 const MovieDetail = lazy(() => import("@/pages/MovieDetail"));
 const SeriesDetail = lazy(() => import("@/pages/SeriesDetail"));
+const EpisodeDetail = lazy(() => import("@/pages/EpisodeDetail"));
 const NetworkDetail = lazy(() => import("@/pages/NetworkDetail"));
 const KeywordDetail = lazy(() => import("@/pages/KeywordDetail"));
 const Credits = lazy(() => import("@/pages/Credits"));
@@ -28,6 +29,8 @@ const SeriesEdit = lazy(() => import("@/pages/SeriesEdit"));
 const Inbox = lazy(() => import("@/pages/Inbox"));
 const CollectionDetail = lazy(() => import("@/pages/CollectionDetail"));
 const ContributorGuidelines = lazy(() => import("@/pages/ContributorGuidelines"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const CreateCatalogEntry = lazy(() => import("@/pages/CreateCatalogEntry"));
 
 // Suspended users are restricted to /inbox, direct thread views, notifications, and auth.
 const SUSPENDED_ALLOW = [
@@ -60,10 +63,13 @@ function AppRoutes() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/browse" element={<Browse />} />
+            <Route path="/create/movie" element={<CreateCatalogEntry kind="movie" />} />
+            <Route path="/create/series" element={<CreateCatalogEntry kind="series" />} />
             <Route path="/movie/:id" element={<MovieDetail />} />
             <Route path="/movie/:id/credits" element={<Credits kind="movie" />} />
             <Route path="/movie/:id/edit" element={<MovieEdit />} />
             <Route path="/series/:id" element={<SeriesDetail />} />
+            <Route path="/series/:id/season/:seasonNumber/episode/:episodeNumber" element={<EpisodeDetail />} />
             <Route path="/network/:network" element={<NetworkDetail />} />
             <Route path="/keyword/:keyword" element={<KeywordDetail />} />
             <Route path="/series/:id/credits" element={<Credits kind="series" />} />
@@ -71,6 +77,8 @@ function AppRoutes() {
             <Route path="/actor/:id" element={<ActorDetail />} />
             <Route path="/collection/:id" element={<CollectionDetail />} />
             <Route path="/contributor-guidelines" element={<ContributorGuidelines />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/api-keys" element={<Navigate to="/settings?section=api-keys" replace />} />
             <Route path="/user/:id" element={<UserProfile />} />
             <Route path="/threads" element={<ThreadsList />} />
             <Route path="/threads/:id" element={<ThreadDetail />} />

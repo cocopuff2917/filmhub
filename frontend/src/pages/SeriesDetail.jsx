@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Calendar, Tv, Film, Bookmark, BookmarkCheck, PlayCircle, Heart, Share2, Edit, Trash2, Flag, Lock,
-  Award, ChevronRight, ChevronDown, TrendingUp, Star, MessageSquare, History as HistoryIcon,
+  Calendar, Tv, Film, Bookmark, BookmarkCheck, Bell, BellRing, PlayCircle, Heart, Share2, Edit, Trash2, Flag, Lock,
+  Award, ChevronRight, ChevronDown, TrendingUp, Star, MessageSquare, History as HistoryIcon, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
@@ -22,12 +22,15 @@ import InlineMediaEditor from "@/components/InlineMediaEditor";
 import TrailerPlayer from "@/components/TrailerPlayer";
 import CollectionCard from "@/components/CollectionCard";
 import ImageWithFallback from "@/components/ImageWithFallback";
+import WatchProgressControl from "@/components/WatchProgressControl";
+import WatchAvailability from "@/components/WatchAvailability";
 
 const fmtDate = (s) => {
   if (!s) return "";
   try { return new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" }); }
   catch { return s; }
 };
+
 const year = (s) => (s || "").slice(0, 4);
 
 function ScoreCircle({ score, size = 68 }) {
@@ -47,7 +50,7 @@ function ScoreCircle({ score, size = 68 }) {
   );
 }
 
-function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
+function SeasonBlock({ seriesId, season, fallbackPoster, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const episodes = season.episodes || [];
   return (
@@ -74,8 +77,8 @@ function SeasonBlock({ season, fallbackPoster, defaultOpen }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 flex-wrap">
-                  <span className="text-slate-500 text-sm font-mono">S{season.season_number}·E{ep.episode_number}</span>
-                  <span className="font-semibold text-white">{ep.title || ep.name || "(untitled)"}</span>
+                  <Link to={`/series/${seriesId}/season/${season.season_number}/episode/${ep.episode_number}`} className="text-slate-500 text-sm font-mono hover:text-amber-400">S{season.season_number}·E{ep.episode_number}</Link>
+                  <Link to={`/series/${seriesId}/season/${season.season_number}/episode/${ep.episode_number}`} className="font-semibold text-white hover:text-amber-400">{ep.title || ep.name || "(untitled)"}</Link>
                   {ep.air_date && <span className="text-xs text-slate-500">· {ep.air_date}</span>}
                 </div>
                 {ep.overview && <p className="mt-1 text-sm text-slate-400 line-clamp-3">{ep.overview}</p>}
@@ -138,10 +141,13 @@ export default function SeriesDetail() {
   const [reviews, setReviews] = useState([]);
   const [rating, setRating] = useState(8);
   const [reviewText, setReviewText] = useState("");
+  const [reviewContainsSpoilers, setReviewContainsSpoilers] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
+  const [inWatchlist, setInWatchlist] = useState(false);
+  const [following, setFollowing] = useState(false);
 
   const load = async () => {
     const seriesRequest = api.get(`/series/${id}`)
@@ -157,18 +163,71 @@ export default function SeriesDetail() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
+  useEffect(() => {
+    if (!user) {
+      setInWatchlist(false);
+      setFollowing(false);
+      return undefined;
+    }
+    let active = true;
+    Promise.all([api.get("/watchlist"), api.get(`/series/${id}/follow`)])
+      .then(([watchlist, follow]) => {
+        if (!active) return;
+        setInWatchlist(watchlist.data.some((item) => item.id === id && item.type === "series"));
+        setFollowing(!!follow.data.following);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [user, id]);
+
   const canModerate = user && ["moderator", "admin"].includes(user.effective_role || user.role);
 
   const submitReview = async (e) => {
     e.preventDefault();
     if (!user) { toast.error("Sign in to rate"); return; }
     try {
-      await api.post(`/series/${id}/reviews`, { rating: Number(rating), text: reviewText });
+      await api.post(`/series/${id}/reviews`, { rating: Number(rating), text: reviewText, contains_spoilers: reviewContainsSpoilers });
       toast.success("Review submitted");
       setReviewText("");
+      setReviewContainsSpoilers(false);
       load();
     } catch (err) {
       toast.error(err.response?.data?.detail || "Failed to submit review");
+    }
+  };
+
+  const deleteReview = async (review) => {
+    if (!window.confirm("Delete this review?")) return;
+    try {
+      await api.delete(`/reviews/${review.id}`);
+      setReviews((current) => current.filter((item) => item.id !== review.id));
+      toast.success("Review deleted");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to delete review");
+    }
+  };
+
+  const toggleWatchlist = async () => {
+    if (!user) { toast.error("Sign in to save series"); return; }
+    try {
+      if (inWatchlist) await api.delete(`/watchlist/series/${id}`);
+      else await api.post(`/watchlist/series/${id}`);
+      setInWatchlist(!inWatchlist);
+      toast.success(inWatchlist ? "Removed from watchlist" : "Added to watchlist");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update watchlist");
+    }
+  };
+
+  const toggleFollow = async () => {
+    if (!user) { toast.error("Sign in to get episode reminders"); return; }
+    try {
+      if (following) await api.delete(`/series/${id}/follow`);
+      else await api.post(`/series/${id}/follow`);
+      setFollowing(!following);
+      toast.success(following ? "Episode reminders turned off" : "Episode reminders turned on");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update reminders");
     }
   };
 
@@ -191,7 +250,9 @@ export default function SeriesDetail() {
   const poster = series.poster_url ? fileUrl(series.poster_url) : null;
   const score100 = series.avg_rating != null ? series.avg_rating * 10 : 0;
   const sortedSeasons = [...(series.seasons || [])].sort((a, b) => (a.season_number || 0) - (b.season_number || 0));
-  const currentSeason = sortedSeasons[sortedSeasons.length - 1];
+  const markedLastSeason = sortedSeasons.find((season) => season.is_last_season);
+  const featuredSeason = markedLastSeason || sortedSeasons[sortedSeasons.length - 1];
+  const featuredSeasonLabel = markedLastSeason ? "Last Season" : "Current Season";
   const creators = series.creators || [];
   const hasAwards = (series.awards_wins || 0) > 0 || (series.awards_nominations || 0) > 0;
   const trendPoints = (stats.trend || []).map((t) => t.count);
@@ -281,8 +342,11 @@ export default function SeriesDetail() {
 
                 <div className="hidden sm:block h-12 w-px bg-white/10" />
 
-                <button className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-[#14181f]/80 text-white transition hover:border-amber-500/40 hover:bg-white/10" title="Watchlist" data-testid="watchlist-btn">
-                  <Bookmark className="h-5 w-5" />
+                <button onClick={toggleWatchlist} className={`inline-flex h-12 w-12 items-center justify-center rounded-full border transition ${inWatchlist ? "border-amber-500 bg-amber-500 text-black" : "border-white/15 bg-[#14181f]/80 text-white hover:border-amber-500/40 hover:bg-white/10"}`} title={inWatchlist ? "Remove from watchlist" : "Add to watchlist"} aria-label={inWatchlist ? "Remove from watchlist" : "Add to watchlist"} data-testid="watchlist-btn">
+                  {inWatchlist ? <BookmarkCheck className="h-5 w-5" /> : <Bookmark className="h-5 w-5" />}
+                </button>
+                <button onClick={toggleFollow} className={`inline-flex h-12 w-12 items-center justify-center rounded-full border transition ${following ? "border-amber-500 bg-amber-500 text-black" : "border-white/15 bg-[#14181f]/80 text-white hover:border-amber-500/40 hover:bg-white/10"}`} title={following ? "Turn off episode reminders" : "Remind me about new episodes"} aria-label={following ? "Turn off episode reminders" : "Remind me about new episodes"} data-testid="series-follow-btn">
+                  {following ? <BellRing className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
                 </button>
                 <button className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-[#14181f]/80 text-white transition hover:border-amber-500/40 hover:bg-white/10" title="Favorite">
                   <Heart className="h-5 w-5" />
@@ -339,6 +403,8 @@ export default function SeriesDetail() {
         </div>
       </section>
 
+      <WatchProgressControl kind="series" entityId={id} />
+
       {/* AWARDS */}
       {hasAwards && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" data-testid="awards-strip">
@@ -378,6 +444,7 @@ export default function SeriesDetail() {
                     <div className="p-2.5">
                       <div className="font-semibold text-sm line-clamp-1 group-hover:text-amber-400 transition-colors">{c.actor.name}</div>
                       <div className="text-xs text-slate-400 line-clamp-2 mt-0.5">{c.character_name || "—"}</div>
+                      <div className="text-[10px] text-slate-500 mt-1">{c.episode_appearance_count || 0} episode{c.episode_appearance_count === 1 ? "" : "s"}</div>
                     </div>
                   </Link>
                 ))}
@@ -385,21 +452,21 @@ export default function SeriesDetail() {
             )}
           </section>
 
-          {/* Current Season */}
-          {currentSeason && (
+          {/* Featured season */}
+          {featuredSeason && (
             <section className="mt-12" data-testid="current-season-section">
               <div className="flex items-baseline justify-between">
-                <h2 className="font-heading text-2xl font-bold">Current Season</h2>
+                <h2 className="font-heading text-2xl font-bold">{featuredSeasonLabel}</h2>
                 <Link to="#seasons" onClick={(e) => { e.preventDefault(); document.querySelector('[data-testid="all-seasons"]')?.scrollIntoView({ behavior: "smooth" }); }} className="text-sm text-amber-400 hover:text-amber-300">View All Seasons</Link>
               </div>
               <div className="mt-3 rounded-xl bg-[#14181f] border border-white/10 p-4 flex gap-4">
                 <div className="w-24 flex-shrink-0 aspect-[2/3] rounded-lg overflow-hidden bg-[#1e2430]">
-                  {currentSeason.poster_url ? <img src={fileUrl(currentSeason.poster_url)} alt="" className="w-full h-full object-cover" /> : (poster ? <img src={poster} alt="" className="w-full h-full object-cover" /> : null)}
+                  {featuredSeason.poster_url ? <img src={fileUrl(featuredSeason.poster_url)} alt="" className="w-full h-full object-cover" /> : (poster ? <img src={poster} alt="" className="w-full h-full object-cover" /> : null)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-heading text-xl font-bold">{currentSeason.name || `Season ${currentSeason.season_number}`}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{year(currentSeason.air_date)} · {(currentSeason.episodes || []).length} episodes</div>
-                  {currentSeason.overview && <p className="mt-2 text-sm text-slate-300 line-clamp-3">{currentSeason.overview}</p>}
+                  <div className="font-heading text-xl font-bold">{featuredSeason.name || `Season ${featuredSeason.season_number}`}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{year(featuredSeason.air_date)} · {(featuredSeason.episodes || []).length} episodes</div>
+                  {featuredSeason.overview && <p className="mt-2 text-sm text-slate-300 line-clamp-3">{featuredSeason.overview}</p>}
                 </div>
               </div>
             </section>
@@ -411,7 +478,7 @@ export default function SeriesDetail() {
               <h2 className="font-heading text-2xl font-bold">Seasons &amp; Episodes</h2>
               <div className="mt-4 space-y-3">
                 {sortedSeasons.map((s, sIdx) => (
-                  <SeasonBlock key={s.season_number} season={s} fallbackPoster={poster} defaultOpen={sIdx === sortedSeasons.length - 1} />
+                  <SeasonBlock key={s.season_number} seriesId={id} season={s} fallbackPoster={poster} defaultOpen={sIdx === sortedSeasons.length - 1} />
                 ))}
               </div>
             </section>
@@ -447,6 +514,7 @@ export default function SeriesDetail() {
                     <label className="text-xs font-semibold text-slate-300 uppercase tracking-widest">Your rating: <span className="text-amber-400 text-lg">{rating}/10</span></label>
                     <input type="range" min="1" max="10" step="0.5" value={rating} onChange={(e) => setRating(e.target.value)} className="w-full mt-3 accent-amber-500" data-testid="rating-slider" />
                     <Textarea value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder="Share your thoughts about this series..." className="mt-4 bg-[#0d0f12] border-white/10 text-white" rows={3} data-testid="review-text-input" />
+                    <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={reviewContainsSpoilers} onChange={(e) => setReviewContainsSpoilers(e.target.checked)} className="accent-amber-500" data-testid="review-spoiler-checkbox" /> Contains spoilers</label>
                     <Button type="submit" className="mt-4 bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="submit-review-btn">Submit Review</Button>
                   </form>
                 ) : (
@@ -464,9 +532,16 @@ export default function SeriesDetail() {
                           <div className="w-8 h-8 rounded-full bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400">{r.user_name?.[0] || "?"}</div>
                           <Link to={`/user/${r.user_id}`} className="font-semibold text-white hover:text-amber-400">{r.user_name || "Anonymous"}</Link>
                         </div>
-                        <div className="flex items-center gap-1 text-amber-400 font-bold"><Star className="w-4 h-4 fill-amber-400" /> {r.rating}</div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1 text-amber-400 font-bold"><Star className="w-4 h-4 fill-amber-400" /> {r.rating}</div>
+                          {user && (canModerate || user.id === r.user_id) && (
+                            <Button type="button" variant="ghost" size="icon" onClick={() => deleteReview(r)} aria-label="Delete review" title="Delete review" data-testid={`delete-review-${r.id}`}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      {r.text && <p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p>}
+                      {r.text && (r.contains_spoilers ? <details className="mt-2"><summary className="cursor-pointer text-sm text-amber-300">Spoiler review · reveal</summary><p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p></details> : <p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p>)}
                     </div>
                   ))}
                 </div>
@@ -557,6 +632,8 @@ export default function SeriesDetail() {
               </div>
             </div>
           </section>
+
+          <WatchAvailability kind="series" id={id} manualOptions={series.purchase_options || []} />
 
           <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
             <div className="text-xs uppercase tracking-widest text-slate-500">Keywords</div>

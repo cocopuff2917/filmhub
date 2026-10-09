@@ -11,14 +11,17 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import { useAuth } from "@/context/AuthContext";
+import CatalogAssistant from "@/components/CatalogAssistant";
+import CatalogDuplicateWarning from "@/components/CatalogDuplicateWarning";
 
 const STATUSES = ["Released", "In Production", "Post Production", "Rumored", "Canceled"];
-const CREW_ROLES = ["Director", "Writer", "Producer", "Cinematographer", "Composer", "Editor"];
+const CREW_ROLES = ["Directorate", "Writer", "Producer", "Cinematographer", "Composer", "Editor"];
 
 export default function MovieForm({ movie, onSaved, onCancel }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const canEditImdb = ["admin", "moderator"].includes(user?.effective_role || user?.role);
+  const isModerator = ["admin", "moderator"].includes(user?.effective_role || user?.role);
+  const canEditImdb = isModerator || (user?.permissions || []).includes("content.edit_imdb_id");
   const [actors, setActors] = useState([]);
   const empty = {
     title: "", imdb_id: "", release_date: "", genres: "", synopsis: "", tagline: "",
@@ -117,10 +120,18 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
       <div>
         <Label className="text-slate-300">Title</Label>
         <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-title-input" />
+        {!movie?.id && <CatalogDuplicateWarning kind="movie" title={form.title} date={form.release_date} />}
       </div>
+      {!movie?.id && <CatalogAssistant kind="movie" title={form.title} date={form.release_date} synopsis={form.synopsis} genres={form.genres} onApply={(suggestions) => setForm((current) => ({
+        ...current,
+        synopsis: suggestions.synopsis || current.synopsis,
+        tagline: suggestions.tagline || current.tagline,
+        genres: suggestions.genres?.length ? suggestions.genres.join(", ") : current.genres,
+        keywords: suggestions.keywords?.length ? suggestions.keywords.join(", ") : current.keywords,
+      }))} />}
       {!movie?.id && canEditImdb && <div>
         <Label className="text-slate-300">IMDb ID</Label>
-        <Input required pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-imdb-input" />
+        <Input required={isModerator} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-imdb-input" />
       </div>}
       <div>
         <Label className="text-slate-300">Tagline</Label>

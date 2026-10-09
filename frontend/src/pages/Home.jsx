@@ -5,8 +5,9 @@ import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Sparkles, Tv, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, Sparkles, Tv, X } from "lucide-react";
 import Leaderboard from "@/components/Leaderboard";
+import { useAuth } from "@/context/AuthContext";
 
 const SOURCE_ENDPOINTS = {
   trending_movies: { url: "/movies/trending", kind: "movie" },
@@ -19,11 +20,16 @@ const SOURCE_ENDPOINTS = {
 export default function Home() {
   const [config, setConfig] = useState(null);
   const [sectionData, setSectionData] = useState({});
+  const [upcomingEpisodes, setUpcomingEpisodes] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
   const [query, setQuery] = useState("");
+  const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
+  const [heroPaused, setHeroPaused] = useState(false);
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(
     typeof window !== "undefined" && sessionStorage.getItem("home_announcement_dismissed") === "1"
   );
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
     (async () => {
@@ -42,6 +48,46 @@ export default function Home() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      setRecommendations([]);
+      return undefined;
+    }
+    let active = true;
+    api.get("/recommendations")
+      .then((response) => { if (active) setRecommendations(response.data || []); })
+      .catch(() => { if (active) setRecommendations([]); });
+    return () => { active = false; };
+  }, [user]);
+
+  useEffect(() => {
+    let active = true;
+    let refreshTimer;
+    const refreshUpcomingEpisodes = async () => {
+      try {
+        const response = await api.get("/series/upcoming-episodes");
+        if (!active) return;
+        const items = response.data || [];
+        setUpcomingEpisodes(items);
+        const now = Date.now();
+        const nextRollover = items
+          .map((series) => Date.parse(`${series.next_episode?.air_date}T00:00:00Z`) + 24 * 60 * 60 * 1000 + 1000)
+          .filter((timestamp) => Number.isFinite(timestamp) && timestamp > now)
+          .sort((left, right) => left - right)[0];
+        if (nextRollover) {
+          refreshTimer = window.setTimeout(refreshUpcomingEpisodes, Math.min(nextRollover - now, 2147483647));
+        }
+      } catch {
+        if (active) setUpcomingEpisodes([]);
+      }
+    };
+    refreshUpcomingEpisodes();
+    return () => {
+      active = false;
+      window.clearTimeout(refreshTimer);
+    };
+  }, []);
+
   const submitSearch = (e) => {
     e.preventDefault();
     const q = query.trim();
@@ -53,13 +99,34 @@ export default function Home() {
     try { sessionStorage.setItem("home_announcement_dismissed", "1"); } catch {}
   };
 
+  const hero = config?.hero || {};
+  const announcement = config?.announcement || {};
+  const featuredItems = hero.featured_items?.length
+    ? hero.featured_items
+    : hero.featured ? [hero.featured] : [];
+  const featured = featuredItems[activeFeaturedIndex] || featuredItems[0];
+  const featuredHref = featured ? getFeaturedHref(featured) : null;
+
+  useEffect(() => {
+    setActiveFeaturedIndex(0);
+  }, [featuredItems.length]);
+
+  useEffect(() => {
+    if (featuredItems.length < 2 || heroPaused) return undefined;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveFeaturedIndex((index) => (index + 1) % featuredItems.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [featuredItems.length, heroPaused]);
+
+  const moveFeatured = (delta) => {
+    setActiveFeaturedIndex((index) => (index + delta + featuredItems.length) % featuredItems.length);
+  };
+
   if (!config) {
     return <div className="min-h-[60vh] grid place-items-center text-slate-500">Loading…</div>;
   }
-
-  const hero = config.hero || {};
-  const announcement = config.announcement || {};
-  const featured = hero.featured;
 
   return (
     <div>
@@ -91,29 +158,51 @@ export default function Home() {
       )}
 
       {/* Hero */}
-      <section className="relative hero-radial overflow-hidden" data-testid="home-hero">
-        {featured?.backdrop_url && (
-          <>
-            <img
-              src={fileUrl(featured.backdrop_url)}
-              alt=""
-              className="absolute inset-0 w-full h-full object-cover opacity-30"
-              data-testid="hero-featured-backdrop"
-              loading="eager"
-              decoding="async"
-              fetchPriority="high"
-            />
-            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-transparent" />
-          </>
-        )}
-        <div className="noise-overlay" />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 lg:pt-28 lg:pb-24">
+      <section
+        className="relative hero-radial overflow-hidden"
+        data-testid="home-hero"
+        onMouseEnter={() => setHeroPaused(true)}
+        onMouseLeave={() => setHeroPaused(false)}
+        onFocusCapture={() => setHeroPaused(true)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setHeroPaused(false);
+        }}
+      >
+        {featuredItems.map((item, index) => {
+          const image = item.backdrop_url || item.poster_url;
+          if (!image) return null;
+          return (
+            <Link
+              key={`${item.type}-${item.id}`}
+              to={getFeaturedHref(item)}
+              tabIndex={index === activeFeaturedIndex ? 0 : -1}
+              aria-label={`View ${item.title}`}
+              className={`absolute inset-0 z-0 transition-opacity duration-1000 ${index === activeFeaturedIndex ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+              data-testid={`hero-featured-backdrop-link-${index}`}
+            >
+              <img
+                src={fileUrl(image)}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover object-center"
+                data-testid={index === activeFeaturedIndex ? "hero-featured-backdrop" : undefined}
+                loading={index === 0 ? "eager" : "lazy"}
+                decoding="async"
+                fetchPriority={index === 0 ? "high" : "auto"}
+              />
+            </Link>
+          );
+        })}
+        {featured && <div className="absolute inset-0 z-[1] bg-gradient-to-r from-black/90 via-black/70 to-black/20 pointer-events-none" />}
+        <div className="noise-overlay pointer-events-none" />
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 lg:pt-28 lg:pb-24">
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold uppercase tracking-widest">
               <Sparkles className="w-3.5 h-3.5" /> {hero.tagline || "CineVerse, curated for your next obsession"}
             </div>
             <h1 className="mt-6 font-display text-5xl sm:text-6xl lg:text-7xl leading-none tracking-tight text-white" data-testid="hero-title">
-              {featured ? featured.title : (hero.title || "A new home for movie & TV lovers")}
+              {featured
+                ? <Link to={featuredHref} className="transition-colors hover:text-amber-100">{featured.title}</Link>
+                : (hero.title || "A new home for movie & TV lovers")}
             </h1>
             <p className="mt-6 text-slate-300 text-base sm:text-lg max-w-xl" data-testid="hero-subtitle">
               {featured ? (featured.overview || featured.description || hero.subtitle) : (hero.subtitle || "")}
@@ -121,12 +210,36 @@ export default function Home() {
             {featured && (
               <div className="mt-6">
                 <Link
-                  to={featured.type === "series" ? `/series/${featured.id}` : `/movies/${featured.id}`}
+                  to={featuredHref}
                   className="inline-flex items-center gap-2 rounded-full bg-amber-500 hover:bg-amber-600 text-black px-5 py-2.5 font-semibold text-sm"
                   data-testid="hero-featured-cta"
                 >
-                  Watch now
+                  View {featured.type === "series" ? "TV series" : "movie"}
                 </Link>
+              </div>
+            )}
+            {featuredItems.length > 1 && (
+              <div className="mt-5 flex items-center gap-3" role="group" aria-label="Featured titles">
+                <Button type="button" size="icon" variant="outline" onClick={() => moveFeatured(-1)} aria-label="Previous featured title" title="Previous featured title" className="h-9 w-9 border-white/25 bg-black/30 text-white hover:bg-white/10 hover:text-white" data-testid="hero-featured-prev">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="flex items-center gap-1.5" role="tablist" aria-label="Choose featured title">
+                  {featuredItems.map((item, index) => (
+                    <button
+                      key={`${item.type}-${item.id}-dot`}
+                      type="button"
+                      role="tab"
+                      aria-selected={index === activeFeaturedIndex}
+                      aria-label={`Show ${item.title}`}
+                      onClick={() => setActiveFeaturedIndex(index)}
+                      className={`h-2.5 rounded-full transition-all ${index === activeFeaturedIndex ? "w-7 bg-amber-400" : "w-2.5 bg-white/50 hover:bg-white/80"}`}
+                      data-testid={`hero-featured-dot-${index}`}
+                    />
+                  ))}
+                </div>
+                <Button type="button" size="icon" variant="outline" onClick={() => moveFeatured(1)} aria-label="Next featured title" title="Next featured title" className="h-9 w-9 border-white/25 bg-black/30 text-white hover:bg-white/10 hover:text-white" data-testid="hero-featured-next">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
             )}
             <form onSubmit={submitSearch} className="mt-10 relative max-w-2xl">
@@ -163,6 +276,9 @@ export default function Home() {
         return <SectionBlock key={s.id} title={s.title} items={items} testid={`section-${s.id}`} forceKind={kind} />;
       })}
 
+      <SectionBlock title="Upcoming TV Episodes" items={upcomingEpisodes} testid="section-upcoming-episodes" forceKind="series" />
+      {user && recommendations.length > 0 && <SectionBlock title="Picked for You" items={recommendations} testid="section-recommendations" showRecommendationReason />}
+
       {/* Weekly leaderboard — always after the first section cluster */}
       <Leaderboard />
 
@@ -175,7 +291,11 @@ export default function Home() {
   );
 }
 
-function SectionBlock({ title, items, testid, forceKind }) {
+function getFeaturedHref(item) {
+  return item.type === "series" ? `/series/${item.id}` : `/movie/${item.id}`;
+}
+
+function SectionBlock({ title, items, testid, forceKind, showRecommendationReason = false }) {
   if (!items || items.length === 0) return null;
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid={testid}>
@@ -190,9 +310,12 @@ function SectionBlock({ title, items, testid, forceKind }) {
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
         {items.map((it) => {
           const kind = forceKind || (it.type === "series" || it.type === "movie" ? it.type : "movie");
-          return kind === "series"
-            ? <SeriesCard key={`s-${it.id}`} series={it} />
-            : <MovieCard key={`m-${it.id}`} movie={it} />;
+          return (
+            <div key={`${kind}-${it.id}`}>
+              {kind === "series" ? <SeriesCard series={it} /> : <MovieCard movie={it} />}
+              {showRecommendationReason && <p className="mt-2 text-xs text-slate-400">{it.recommendation_reason}</p>}
+            </div>
+          );
         })}
       </div>
     </section>

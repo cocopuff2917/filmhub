@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Star, Bookmark, BookmarkCheck, PlayCircle, Calendar, Clock, Edit, Trash2,
   Flag, Lock, Award, Heart, Share2, TrendingUp, ChevronRight, Film, MessageSquare, History as HistoryIcon,
-  ShoppingBag, ExternalLink,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import EntityEditDialog from "@/components/EntityEditDialog";
@@ -23,6 +23,9 @@ import InlineMediaEditor from "@/components/InlineMediaEditor";
 import TrailerPlayer from "@/components/TrailerPlayer";
 import CollectionCard from "@/components/CollectionCard";
 import ImageWithFallback from "@/components/ImageWithFallback";
+import WatchProgressControl from "@/components/WatchProgressControl";
+import PageMetadata from "@/components/PageMetadata";
+import WatchAvailability from "@/components/WatchAvailability";
 
 // ---------- helpers ----------
 const fmtMoney = (n) => {
@@ -85,6 +88,7 @@ export default function MovieDetail() {
   const [stats, setStats] = useState({ trend: [], contributors: [], content_score: 0, total_views: 0 });
   const [rating, setRating] = useState(8);
   const [reviewText, setReviewText] = useState("");
+  const [reviewContainsSpoilers, setReviewContainsSpoilers] = useState(false);
   const [inWatchlist, setInWatchlist] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -102,7 +106,7 @@ export default function MovieDetail() {
       if (user) {
         try {
           const wl = await api.get("/watchlist");
-          setInWatchlist(wl.data.some((mv) => mv.id === id));
+          setInWatchlist(wl.data.some((item) => item.id === id && (!item.type || item.type === "movie")));
         } catch {}
       }
     } catch {
@@ -124,8 +128,17 @@ export default function MovieDetail() {
   const submitReview = async (e) => {
     e.preventDefault();
     if (!user) { toast.error("Sign in to rate"); return; }
-    try { await api.post(`/movies/${id}/reviews`, { rating: Number(rating), text: reviewText }); toast.success("Review submitted"); setReviewText(""); load(); }
+    try { await api.post(`/movies/${id}/reviews`, { rating: Number(rating), text: reviewText, contains_spoilers: reviewContainsSpoilers }); toast.success("Review submitted"); setReviewText(""); setReviewContainsSpoilers(false); load(); }
     catch { toast.error("Failed to submit review"); }
+  };
+
+  const deleteReview = async (review) => {
+    if (!window.confirm("Delete this review?")) return;
+    try {
+      await api.delete(`/reviews/${review.id}`);
+      setReviews((current) => current.filter((item) => item.id !== review.id));
+      toast.success("Review deleted");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to delete review"); }
   };
 
   const del = async () => {
@@ -160,13 +173,20 @@ export default function MovieDetail() {
     ...(movie.backdrop_url ? [movie.backdrop_url] : []),
   ])).filter(Boolean);
   const gallery = (movie.gallery || []).filter(Boolean);
-  const purchaseOptions = (movie.purchase_options || []).filter((option) => option.provider?.trim() && /^https?:\/\//i.test(option.url || ""));
 
   return (
     <div className="text-white bg-[#0d0f12]">
+      <PageMetadata
+        title={`${movie.title}${year(movie.release_date) ? ` (${year(movie.release_date)})` : ""}`}
+        description={movie.synopsis || `Explore the cast, crew, reviews, and details for ${movie.title} on Filmhub.`}
+        image={backdrop || poster}
+        schemaType="Movie"
+        datePublished={movie.release_date || undefined}
+        genres={movie.genres || []}
+      />
       <section className="relative overflow-hidden border-b border-white/10 bg-[#0d0f12]" data-testid="movie-hero">
         <div className="absolute inset-0">
-          {backdrop && <img src={backdrop} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
+          {backdrop && <ImageWithFallback src={backdrop} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" fetchPriority="high" />}
           <div className="absolute inset-0 bg-[#0d0f12]/75" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.22),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.12),transparent_20%)]" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f12] via-[#0d0f12]/90 to-[#0d0f12]/65" />
@@ -176,7 +196,17 @@ export default function MovieDetail() {
           <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] lg:grid-cols-[260px_1fr] gap-8 items-start">
             <div className="overflow-hidden rounded-2xl border border-amber-500/20 bg-[#14181f]/80 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-sm ring-1 ring-white/5">
               <div className="aspect-[2/3]">
-                {poster ? <img src={poster} alt={movie.title} className="h-full w-full object-cover" loading="eager" decoding="async" fetchPriority="high" /> : <div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
+                {poster ? (
+                  <ImageWithFallback
+                    src={poster}
+                    alt={movie.title}
+                    className="h-full w-full object-cover"
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                    fallback={<div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
+                  />
+                ) : <div className="flex h-full items-center justify-center text-2xl font-display text-slate-600">NO POSTER</div>}
               </div>
             </div>
 
@@ -308,6 +338,8 @@ export default function MovieDetail() {
         </div>
       </section>
 
+      <WatchProgressControl kind="movie" entityId={id} />
+
       {hasAwards && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6" data-testid="awards-strip">
           <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-emerald-500/20 bg-gradient-to-r from-emerald-900/35 via-emerald-800/20 to-cyan-900/25 px-6 py-4">
@@ -390,6 +422,7 @@ export default function MovieDetail() {
                     <label className="text-xs font-semibold text-slate-300 uppercase tracking-widest">Your rating: <span className="text-amber-400 text-lg">{rating}/10</span></label>
                     <input type="range" min="1" max="10" step="0.5" value={rating} onChange={(e) => setRating(e.target.value)} className="w-full mt-3 accent-amber-500" data-testid="rating-slider" />
                     <Textarea value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder="Share your thoughts..." className="mt-4 bg-[#0d0f12] border-white/10 text-white" rows={3} data-testid="review-text-input" />
+                    <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={reviewContainsSpoilers} onChange={(e) => setReviewContainsSpoilers(e.target.checked)} className="accent-amber-500" data-testid="review-spoiler-checkbox" /> Contains spoilers</label>
                     <Button type="submit" className="mt-4 bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="submit-review-btn">Submit Review</Button>
                   </form>
                 ) : (
@@ -407,9 +440,16 @@ export default function MovieDetail() {
                           <div className="w-8 h-8 rounded-full bg-[#1e2430] border border-white/10 flex items-center justify-center text-xs text-slate-400">{r.user_name?.[0] || "?"}</div>
                           <Link to={`/user/${r.user_id}`} className="font-semibold text-white hover:text-amber-400">{r.user_name || "Anonymous"}</Link>
                         </div>
-                        <div className="flex items-center gap-1 text-amber-400 font-bold"><Star className="w-4 h-4 fill-amber-400" /> {r.rating}</div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1 text-amber-400 font-bold"><Star className="w-4 h-4 fill-amber-400" /> {r.rating}</div>
+                          {user && (canModerate || user.id === r.user_id) && (
+                            <Button type="button" variant="ghost" size="icon" onClick={() => deleteReview(r)} aria-label="Delete review" title="Delete review" data-testid={`delete-review-${r.id}`}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      {r.text && <p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p>}
+                      {r.text && (r.contains_spoilers ? <details className="mt-2"><summary className="cursor-pointer text-sm text-amber-300">Spoiler review · reveal</summary><p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p></details> : <p className="mt-2 text-slate-300 text-sm leading-relaxed">{r.text}</p>)}
                     </div>
                   ))}
                 </div>
@@ -516,29 +556,7 @@ export default function MovieDetail() {
             </div>
           </section>
 
-          {purchaseOptions.length > 0 && (
-            <section className="rounded-xl border border-white/10 bg-[#14181f] p-4" data-testid="movie-purchase-options">
-              <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                <ShoppingBag className="h-4 w-4 text-amber-400" /> Available to buy
-              </h2>
-              <ul className="mt-3 space-y-2">
-                {purchaseOptions.map((option, index) => (
-                  <li key={`${option.provider}-${option.url}-${index}`}>
-                    <a
-                      href={option.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between gap-3 rounded-md border border-white/5 bg-white/[0.03] px-3 py-2.5 text-sm text-white hover:border-amber-500/40 hover:bg-amber-500/5"
-                      data-testid={`movie-purchase-${index}`}
-                    >
-                      <span>{option.provider}</span>
-                      <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <WatchAvailability kind="movie" id={id} manualOptions={movie.purchase_options || []} />
 
           <div className="rounded-xl bg-[#14181f] border border-white/10 p-4">
             <div className="text-xs uppercase tracking-widest text-slate-500">Keywords</div>

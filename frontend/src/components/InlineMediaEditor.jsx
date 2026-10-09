@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, fileUrl, uploadImage } from "@/lib/api";
 import ImageUrlInput from "@/components/ImageUrlInput";
 import ImageWithFallback from "@/components/ImageWithFallback";
@@ -8,7 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ImageUpload from "@/components/ImageUpload";
-import { Camera, Film, Plus, Trash2, Star, StarOff, Upload, Youtube, Loader2 } from "lucide-react";
+import { Camera, Film, Plus, Trash2, Star, StarOff, Upload, Youtube, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { parseYouTubeId } from "@/components/VideosSection";
 
@@ -22,9 +22,22 @@ const isMod = (u) => !!u && (u.role === "admin" || u.role === "moderator" || u.e
 export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) {
   const { user } = useAuth();
   const canMod = isMod(user);
+  const isAdmin = !!user && (user.role === "admin" || user.effective_role === "admin");
+  const permissions = user?.permissions || [];
+  const hasPermission = (permission) => canMod || permissions.includes(permission);
+  const canDeletePosters = hasPermission("content.media.poster.delete");
+  const canReorderPosters = hasPermission("content.media.poster.reorder");
+  const canSetPrimaryPoster = hasPermission("content.media.poster.primary");
+  const canDeleteBackdrops = hasPermission("content.media.backdrop.delete");
+  const canDeleteGallery = hasPermission("content.media.gallery.delete");
+  const canBypassCatalogFreeze = isAdmin || (user?.permissions || []).includes("content.bypass_edit_freeze");
   const [open, setOpen] = useState(false);
   const isActor = kind === "actor";
   const allowImageUrls = kind === "movie" || kind === "series";
+  const isCatalogEntity = isActor || allowImageUrls;
+  const [contentEditsFrozen, setContentEditsFrozen] = useState(false);
+  const [checkingFreeze, setCheckingFreeze] = useState(false);
+  const editingPaused = isCatalogEntity && contentEditsFrozen && !canBypassCatalogFreeze;
   const [tab, setTab] = useState(isActor ? "photo" : "poster");
 
   const [photoUrl, setPhotoUrl] = useState(entity.photo_url || "");
@@ -39,6 +52,15 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   const locked = new Set(entity.locked_fields || []);
   const base = kind === "series" ? "/series" : kind === "actor" ? "/actors" : "/movies";
 
+  useEffect(() => {
+    if (!isCatalogEntity) return undefined;
+    let active = true;
+    api.get("/moderation/content-edit-freeze")
+      .then((response) => { if (active) setContentEditsFrozen(!!response.data.frozen); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [isCatalogEntity]);
+
   const resetFromProps = () => {
     setPhotoUrl(entity.photo_url || "");
     setPosterUrls(entity.poster_urls || (entity.poster_url ? [entity.poster_url] : []));
@@ -49,7 +71,27 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
     setNewVideo("");
   };
 
-  const openDialog = () => { resetFromProps(); setOpen(true); };
+  const openDialog = async () => {
+    if (isCatalogEntity && !canBypassCatalogFreeze) {
+      setCheckingFreeze(true);
+      try {
+        const response = await api.get("/moderation/content-edit-freeze");
+        const frozen = !!response.data.frozen;
+        setContentEditsFrozen(frozen);
+        if (frozen) {
+          toast.error("Catalog editing and creation are temporarily paused");
+          return;
+        }
+      } catch {
+        toast.error("Could not verify catalog edit status");
+        return;
+      } finally {
+        setCheckingFreeze(false);
+      }
+    }
+    resetFromProps();
+    setOpen(true);
+  };
 
   const savePatch = async (patch, successMsg) => {
     setSaving(true);
@@ -116,7 +158,11 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   return (
     <>
       {trigger ? (
-        <span onClick={openDialog}>{trigger}</span>
+        <span
+          onClick={editingPaused || checkingFreeze ? undefined : openDialog}
+          aria-disabled={editingPaused || checkingFreeze}
+          title={editingPaused ? "Catalog editing and creation are paused" : undefined}
+        >{trigger}</span>
       ) : (
         <Button
           type="button"
@@ -124,9 +170,11 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
           variant="outline"
           className="border-white/20 text-white hover:bg-white/10 hover:text-white"
           onClick={openDialog}
+          disabled={editingPaused || checkingFreeze}
+          title={editingPaused ? "Catalog editing and creation are paused" : undefined}
           data-testid="inline-media-edit-btn"
         >
-          <Camera className="w-4 h-4 mr-2" /> Edit media
+          <Camera className="w-4 h-4 mr-2" /> {editingPaused ? "Edit media paused" : "Edit media"}
         </Button>
       )}
 
@@ -137,9 +185,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
             <DialogDescription className="text-slate-400 text-xs">
               {isActor
                 ? "Update the actor headshot and gallery without leaving the page."
-                : canMod
-                ? "Add, remove, and set which poster/backdrop is primary — all without leaving the page."
-                : "Anyone can upload additional posters, backdrops, and videos. Deleting or changing which one is primary is reserved for moderators."}
+                : "Manage posters, backgrounds, gallery images, and videos. Available controls depend on your assigned permissions."}
             </DialogDescription>
           </DialogHeader>
 
@@ -176,9 +222,12 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
               <ImageListEditor
                 items={posterUrls}
                 aspect="2/3"
+                primaryUrl={entity.poster_url}
                 saving={saving}
                 locked={posterLocked}
-                canMod={canMod}
+                canDelete={canDeletePosters}
+                canReorder={canReorderPosters}
+                canSetPrimary={canSetPrimaryPoster}
                 allowUrl={allowImageUrls}
                 testId="poster"
                 onAppend={async (url) => {
@@ -188,13 +237,19 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                 }}
                 onRemove={async (idx) => {
                   const next = posterUrls.filter((_, i) => i !== idx);
-                  await savePatch({ poster_urls: next, poster_url: next[0] || "" }, "Poster removed");
+                  await savePatch({ poster_urls: next }, "Poster removed");
                   setPosterUrls(next);
                 }}
                 onSetPrimary={async (idx) => {
                   const picked = posterUrls[idx];
-                  const next = [picked, ...posterUrls.filter((_, i) => i !== idx)];
-                  await savePatch({ poster_urls: next, poster_url: picked }, "Primary poster updated");
+                  await savePatch({ poster_url: picked }, "Primary poster updated");
+                }}
+                onMove={async (idx, offset) => {
+                  const target = idx + offset;
+                  if (target < 0 || target >= posterUrls.length) return;
+                  const next = [...posterUrls];
+                  [next[idx], next[target]] = [next[target], next[idx]];
+                  await savePatch({ poster_urls: next }, "Poster order updated");
                   setPosterUrls(next);
                 }}
               />
@@ -205,9 +260,12 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
               <ImageListEditor
                 items={backdropUrls}
                 aspect="16/9"
+                primaryUrl={entity.backdrop_url}
                 saving={saving}
                 locked={backdropLocked}
-                canMod={canMod}
+                canDelete={canDeleteBackdrops}
+                canReorder={false}
+                canSetPrimary={canMod}
                 allowUrl={allowImageUrls}
                 testId="backdrop"
                 onAppend={async (url) => {
@@ -217,14 +275,12 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                 }}
                 onRemove={async (idx) => {
                   const next = backdropUrls.filter((_, i) => i !== idx);
-                  await savePatch({ backdrop_urls: next, backdrop_url: next[0] || "" }, "Backdrop removed");
+                  await savePatch({ backdrop_urls: next }, "Backdrop removed");
                   setBackdropUrls(next);
                 }}
                 onSetPrimary={async (idx) => {
                   const picked = backdropUrls[idx];
-                  const next = [picked, ...backdropUrls.filter((_, i) => i !== idx)];
-                  await savePatch({ backdrop_urls: next, backdrop_url: picked }, "Primary backdrop updated");
-                  setBackdropUrls(next);
+                  await savePatch({ backdrop_url: picked }, "Primary backdrop updated");
                 }}
               />
             </TabsContent>}
@@ -235,7 +291,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                 items={gallery}
                 saving={saving}
                 locked={galleryLocked}
-                canMod={canMod}
+                canDelete={canDeleteGallery}
                 allowUrl={allowImageUrls || isActor}
                 onAppend={async (url) => {
                   const next = [...gallery, url];
@@ -336,7 +392,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
 // ---------------------------------------------------------
 // Shared image list editor (used for posters AND backdrops)
 // ---------------------------------------------------------
-function ImageListEditor({ items, aspect, saving, locked, canMod, allowUrl = true, testId, onAppend, onRemove, onSetPrimary }) {
+function ImageListEditor({ items, aspect, primaryUrl, saving, locked, canDelete, canReorder, canSetPrimary, allowUrl = true, testId, onAppend, onRemove, onSetPrimary, onMove }) {
   const [uploading, setUploading] = useState(false);
 
   const handleFile = async (e) => {
@@ -358,9 +414,9 @@ function ImageListEditor({ items, aspect, saving, locked, canMod, allowUrl = tru
     <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-4">
       {locked && <LockedNotice label={testId === "poster" ? "Posters" : "Backdrops"} />}
 
-      {!canMod && items.length > 0 && (
+      {!canDelete && !canReorder && !canSetPrimary && items.length > 0 && (
         <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs text-sky-300">
-          You can upload additional images. Only moderators can remove or change which image is primary.
+          You can upload additional images. Media controls depend on your assigned permissions.
         </div>
       )}
 
@@ -372,38 +428,41 @@ function ImageListEditor({ items, aspect, saving, locked, canMod, allowUrl = tru
             <div key={`${url}-${idx}`} className="group relative rounded-lg overflow-hidden border border-white/10 bg-black" data-testid={`${testId}-tile-${idx}`}>
               <ImageWithFallback
                 src={fileUrl(url)}
+                fallbackSrc={fileUrl(url, "jpeg")}
                 alt=""
                 className="w-full object-cover"
                 style={{ aspectRatio: aspect }}
                 fallback={<div className="flex w-full items-center justify-center text-xs text-slate-500" style={{ aspectRatio: aspect }}>Preview unavailable</div>}
               />
-              {idx === 0 && (
+              {(url === primaryUrl || (!primaryUrl && idx === 0)) && (
                 <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider" data-testid={`${testId}-primary-${idx}`}>
                   <Star className="w-3 h-3" /> Primary
                 </div>
               )}
-              {canMod && !locked && (
+              {(canDelete || canReorder || canSetPrimary) && !locked && (
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                  {idx !== 0 && (
+                  {canSetPrimary && url !== primaryUrl && (
                     <button
                       type="button"
                       disabled={saving}
-                      onClick={() => onSetPrimary(idx)}
+                      onClick={() => onSetPrimary?.(idx)}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-black text-xs font-semibold disabled:opacity-50"
                       data-testid={`${testId}-make-primary-${idx}`}
                     >
                       <Star className="w-3 h-3" /> Make primary
                     </button>
                   )}
-                  <button
+                  {canReorder && idx > 0 && <button type="button" disabled={saving} onClick={() => onMove?.(idx, -1)} title="Move earlier" aria-label="Move poster earlier" className="rounded-md bg-white/15 p-1.5 text-white disabled:opacity-50" data-testid={`${testId}-move-up-${idx}`}><ChevronLeft className="h-4 w-4" /></button>}
+                  {canReorder && idx < items.length - 1 && <button type="button" disabled={saving} onClick={() => onMove?.(idx, 1)} title="Move later" aria-label="Move poster later" className="rounded-md bg-white/15 p-1.5 text-white disabled:opacity-50" data-testid={`${testId}-move-down-${idx}`}><ChevronRight className="h-4 w-4" /></button>}
+                  {canDelete && <button
                     type="button"
                     disabled={saving}
-                    onClick={() => onRemove(idx)}
+                    onClick={() => onRemove?.(idx)}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold disabled:opacity-50"
                     data-testid={`${testId}-remove-${idx}`}
                   >
                     <Trash2 className="w-3 h-3" /> Delete
-                  </button>
+                  </button>}
                 </div>
               )}
             </div>
@@ -444,7 +503,7 @@ function LockedNotice({ label }) {
 }
 
 // Gallery editor (no primary concept, 16:9 tiles)
-function GalleryListEditor({ items, saving, locked, canMod, allowUrl = true, onAppend, onRemove }) {
+function GalleryListEditor({ items, saving, locked, canDelete, allowUrl = true, onAppend, onRemove }) {
   const [uploading, setUploading] = useState(false);
 
   const handleFile = async (e) => {
@@ -465,9 +524,9 @@ function GalleryListEditor({ items, saving, locked, canMod, allowUrl = true, onA
   return (
     <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-4">
       {locked && <LockedNotice label="Gallery" />}
-      {!canMod && items.length > 0 && (
+      {!canDelete && items.length > 0 && (
         <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs text-sky-300">
-          You can upload additional gallery images. Only moderators can remove them.
+          You can upload additional gallery images. Gallery removal depends on your assigned permissions.
         </div>
       )}
       {items.length === 0 ? (
@@ -478,12 +537,13 @@ function GalleryListEditor({ items, saving, locked, canMod, allowUrl = true, onA
             <div key={`${url}-${idx}`} className="group relative rounded-lg overflow-hidden border border-white/10 bg-black" data-testid={`gallery-tile-${idx}`}>
               <ImageWithFallback
                 src={fileUrl(url)}
+                fallbackSrc={fileUrl(url, "jpeg")}
                 alt=""
                 className="w-full object-cover"
                 style={{ aspectRatio: "16/9" }}
                 fallback={<div className="flex w-full items-center justify-center text-xs text-slate-500" style={{ aspectRatio: "16/9" }}>Preview unavailable</div>}
               />
-              {canMod && !locked && (
+              {canDelete && !locked && (
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <button
                     type="button"

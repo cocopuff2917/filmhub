@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 const DEFAULT_JOBS = ["Director", "Writer", "Producer", "Cinematographer", "Composer", "Editor", "Makeup Artist"];
 
-export default function CrewJobsTab() {
+export default function CrewJobsTab({ createOnly = false }) {
   const [jobs, setJobs] = useState([]);
   const [newJob, setNewJob] = useState("");
   const [saving, setSaving] = useState(false);
@@ -69,7 +69,7 @@ export default function CrewJobsTab() {
         {jobs.map((job) => (
           <li key={job} className="flex items-center gap-3 py-2.5" data-testid={`crew-job-${job.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
             <span className="flex-1 text-sm text-slate-200">{job}</span>
-            <Button
+            {!createOnly && <Button
               type="button"
               size="icon"
               variant="ghost"
@@ -81,12 +81,12 @@ export default function CrewJobsTab() {
               data-testid={`crew-job-remove-${job.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
             >
               <Trash2 className="h-4 w-4" />
-            </Button>
+            </Button>}
           </li>
         ))}
       </ul>
       <Button type="button" onClick={save} disabled={saving || jobs.length === 0} className="bg-emerald-500 font-semibold text-black hover:bg-emerald-600" data-testid="crew-jobs-save-btn">
-        {saving ? "Saving…" : "Save changes"}
+        {saving ? "Saving…" : createOnly ? "Add crew jobs" : "Save changes"}
       </Button>
     </section>
   );

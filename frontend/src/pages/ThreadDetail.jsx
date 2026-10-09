@@ -4,9 +4,10 @@ import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Lock, Unlock, Trash2, Send, MessageSquare, ThumbsUp, Quote as QuoteIcon, Languages, Flag, EyeOff, Pencil } from "lucide-react";
+import { Lock, Unlock, Trash2, Send, MessageSquare, ThumbsUp, Quote as QuoteIcon, Languages, Flag, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import ForumSidebar from "@/components/ForumSidebar";
+import BlockUserButton from "@/components/BlockUserButton";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -36,6 +37,7 @@ export default function ThreadDetail() {
   const [thread, setThread] = useState(null);
   const [reply, setReply] = useState("");
   const [posting, setPosting] = useState(false);
+  const [hiddenUserIds, setHiddenUserIds] = useState(() => new Set());
   const navigate = useNavigate();
 
   const load = async () => {
@@ -93,16 +95,26 @@ export default function ThreadDetail() {
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
+  const onUserBlocked = (blockedUserId) => {
+    if (!thread?.is_direct && thread?.user_id === blockedUserId) {
+      navigate("/threads");
+      return;
+    }
+    setHiddenUserIds((current) => new Set([...current, blockedUserId]));
+  };
+
   const participants = useMemo(() => {
     if (!thread) return [];
     const map = new Map();
-    map.set(thread.user_id, { id: thread.user_id, name: thread.user_name, avatar: thread.user_avatar });
+    if (!hiddenUserIds.has(thread.user_id)) {
+      map.set(thread.user_id, { id: thread.user_id, name: thread.user_name, avatar: thread.user_avatar });
+    }
     (thread.messages || []).forEach((m) => {
-      if (m.system) return;
+      if (m.system || hiddenUserIds.has(m.user_id)) return;
       if (!map.has(m.user_id)) map.set(m.user_id, { id: m.user_id, name: m.user_name, avatar: m.user_avatar });
     });
     return Array.from(map.values()).slice(0, 6);
-  }, [thread]);
+  }, [thread, hiddenUserIds]);
 
   if (!thread) return (
     <div className="flex bg-[#0a0d14] min-h-[calc(100vh-64px)]">
@@ -117,7 +129,7 @@ export default function ThreadDetail() {
     : thread.entity_type === "series" ? `/series/${thread.entity_id}`
     : thread.entity_type === "actor" ? `/actor/${thread.entity_id}`
     : null;
-  const replies = (thread.messages || []).filter((m) => !m.system);
+  const replies = (thread.messages || []).filter((m) => !m.system && !hiddenUserIds.has(m.user_id));
   const systemLog = (thread.messages || []).filter((m) => m.system);
 
   const Post = ({ author, avatarUrl, role, when, children, showActions = true, testId, editable = false, onSave }) => {
@@ -178,7 +190,7 @@ export default function ThreadDetail() {
           </div>
           <div className="flex items-center gap-4">
             <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Flag className="w-3.5 h-3.5" /> Report</button>
-            <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><EyeOff className="w-3.5 h-3.5" /> Ignore</button>
+            {!thread.is_direct && <BlockUserButton userId={author?.id} userName={author?.name} onBlocked={onUserBlocked} />}
           </div>
         </div>
       )}
@@ -292,7 +304,7 @@ export default function ThreadDetail() {
             </div>
             <div className="flex items-center gap-4">
               <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><Flag className="w-3.5 h-3.5" /> Report</button>
-              <button type="button" className="inline-flex items-center gap-1 hover:text-white transition"><EyeOff className="w-3.5 h-3.5" /> Ignore</button>
+              {!thread.is_direct && <BlockUserButton userId={thread.user_id} userName={thread.user_name} onBlocked={onUserBlocked} />}
             </div>
           </div>
         </section>

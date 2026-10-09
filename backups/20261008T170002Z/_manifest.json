@@ -1,0 +1,28 @@
+{
+  "created_at": "2026-10-08T17:00:02.975546+00:00",
+  "database": "test_database",
+  "counts": {
+    "actors": 1819,
+    "collections": 4,
+    "comments": 1,
+    "cron_runs": 448,
+    "custom_roles": 3,
+    "edits": 3842,
+    "files": 104,
+    "ip_bans": 0,
+    "movie_views": 91,
+    "movies": 39,
+    "network_categories": 1,
+    "notifications": 30,
+    "password_resets": 0,
+    "reviews": 9,
+    "series": 22,
+    "series_views": 41,
+    "site_config": 5,
+    "thread_messages": 21,
+    "threads": 12,
+    "users": 31,
+    "watchlist": 5
+  },
+  "total_docs": 6528
+}

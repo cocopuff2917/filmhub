@@ -162,6 +162,121 @@ def test_tmdb_imports_can_be_paused_and_only_admin_can_enable(admin_session):
         assert demoted.status_code == 200, demoted.text
 
 
+def test_content_edit_freeze_blocks_users_and_moderators(admin_session):
+    api = f"{BASE_URL}/api"
+    setting_path = f"{api}/moderation/content-edit-freeze"
+    previous = admin_session.get(setting_path, timeout=15)
+    assert previous.status_code == 200, previous.text
+    previous_frozen = previous.json()["frozen"]
+
+    email = f"content_freeze_{uuid.uuid4().hex[:12]}@test.com"
+    password = "Test@1234"
+    registered = requests.post(
+        f"{api}/auth/register",
+        json={"email": email, "password": password, "name": f"Freeze_{uuid.uuid4().hex[:8]}"},
+        timeout=15,
+    )
+    assert registered.status_code == 200, registered.text
+    user_id = registered.json()["id"]
+    member = requests.Session()
+    logged_in = member.post(f"{api}/auth/login", json={"email": email, "password": password}, timeout=15)
+    assert logged_in.status_code == 200, logged_in.text
+
+    try:
+        paused = admin_session.put(setting_path, json={"frozen": True}, timeout=15)
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["frozen"] is True
+
+        update_requests = (
+            ("/movies/not-an-object-id", {"title": "Blocked"}),
+            ("/series/not-an-object-id", {"title": "Blocked"}),
+            ("/movies/not-an-object-id", {"poster_urls": ["https://example.com/paused.jpg"]}),
+            ("/series/not-an-object-id", {"video_urls": ["https://youtube.com/watch?v=paused"]}),
+            ("/actors/not-an-object-id", {"photo_url": "https://example.com/paused.jpg"}),
+        )
+        create_requests = (
+            ("/movies", {"title": "Blocked movie", "release_date": "2099-01-01"}),
+            ("/series", {"title": "Blocked series"}),
+            ("/actors", {"name": "Blocked actor"}),
+        )
+        assert member.get(setting_path, timeout=15).json()["frozen"] is True
+        for path, payload in update_requests:
+            assert member.patch(f"{api}{path}", json=payload, timeout=15).status_code == 403
+        for path, payload in create_requests:
+            assert member.post(f"{api}{path}", json=payload, timeout=15).status_code == 403
+        assert member.put(setting_path, json={"frozen": False}, timeout=15).status_code == 403
+
+        promoted = admin_session.patch(f"{api}/moderation/users/{user_id}/role", json={"role": "moderator"}, timeout=15)
+        assert promoted.status_code == 200, promoted.text
+        for path, payload in update_requests:
+            assert member.patch(f"{api}{path}", json=payload, timeout=15).status_code == 403
+        for path, payload in create_requests:
+            assert member.post(f"{api}{path}", json=payload, timeout=15).status_code == 403
+        assert member.put(setting_path, json={"frozen": False}, timeout=15).status_code == 403
+    finally:
+        restored = admin_session.put(setting_path, json={"frozen": previous_frozen}, timeout=15)
+        assert restored.status_code == 200, restored.text
+        demoted = admin_session.patch(f"{api}/moderation/users/{user_id}/role", json={"role": "user"}, timeout=15)
+        assert demoted.status_code == 200, demoted.text
+
+
+def test_moderator_can_delete_reviews_but_regular_user_cannot(admin_session):
+    api = f"{BASE_URL}/api"
+    password = "Test@1234"
+    moderator_email = f"review_mod_{uuid.uuid4().hex[:12]}@test.com"
+    member_email = f"review_member_{uuid.uuid4().hex[:12]}@test.com"
+    moderator_registration = requests.post(
+        f"{api}/auth/register",
+        json={"email": moderator_email, "password": password, "name": "Review moderator"},
+        timeout=15,
+    )
+    member_registration = requests.post(
+        f"{api}/auth/register",
+        json={"email": member_email, "password": password, "name": "Review member"},
+        timeout=15,
+    )
+    assert moderator_registration.status_code == 200, moderator_registration.text
+    assert member_registration.status_code == 200, member_registration.text
+    moderator_id = moderator_registration.json()["id"]
+    admin_session.patch(
+        f"{api}/moderation/users/{moderator_id}/role", json={"role": "moderator"}, timeout=15
+    )
+
+    moderator = requests.Session()
+    member = requests.Session()
+    assert moderator.post(
+        f"{api}/auth/login", json={"email": moderator_email, "password": password}, timeout=15
+    ).status_code == 200
+    assert member.post(
+        f"{api}/auth/login", json={"email": member_email, "password": password}, timeout=15
+    ).status_code == 200
+
+    movie_id = f"review-delete-test-{uuid.uuid4().hex}"
+    review_path = f"{api}/movies/{movie_id}/reviews"
+    review_id = None
+    try:
+        assert admin_session.post(
+            review_path,
+            json={"rating": 8, "text": "Review moderation test", "contains_spoilers": False},
+            timeout=15,
+        ).status_code == 200
+        reviews = admin_session.get(review_path, timeout=15)
+        assert reviews.status_code == 200, reviews.text
+        review_id = reviews.json()[0]["id"]
+
+        denied = member.delete(f"{api}/reviews/{review_id}", timeout=15)
+        assert denied.status_code == 403, denied.text
+        deleted = moderator.delete(f"{api}/reviews/{review_id}", timeout=15)
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json() == {"ok": True}
+    finally:
+        if review_id:
+            admin_session.delete(f"{api}/reviews/{review_id}", timeout=15)
+        admin_session.patch(
+            f"{api}/moderation/users/{moderator_id}/role", json={"role": "user"}, timeout=15
+        )
+
+
 def test_tmdb_cast_backfill_requires_admin():
     response = requests.post(
         f"{BASE_URL}/api/moderation/tmdb/backfill-cast",

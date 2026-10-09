@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, fileUrl } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
-  GripVertical, Trash2, Plus, Search, ChevronUp, ChevronDown,
+  GripVertical, Trash2, Plus, Search, ChevronUp, ChevronDown, X,
   Save, Eye, Layout, Megaphone, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,7 +34,15 @@ export default function HomepageTab() {
   // Strip server-only enriched fields before editing
   function stripResolved(c) {
     const copy = JSON.parse(JSON.stringify(c));
-    delete (copy.hero || {}).featured;
+    const hero = copy.hero || {};
+    delete hero.featured;
+    if (!Array.isArray(hero.featured_items) || hero.featured_items.length === 0) {
+      hero.featured_items = hero.featured_type && hero.featured_id
+        ? [{ type: hero.featured_type, id: hero.featured_id }]
+        : [];
+    }
+    hero.featured_items = hero.featured_items.map(({ type, id }) => ({ type, id }));
+    copy.hero = hero;
     (copy.sections || []).forEach((s) => { delete s.resolved_items; });
     return copy;
   }
@@ -129,9 +137,19 @@ export default function HomepageTab() {
             <Textarea value={cfg.hero.subtitle || ""} onChange={(e) => setHero("subtitle", e.target.value)} className="mt-1.5 bg-[#14181f] border-white/10 text-white" rows={2} data-testid="hero-subtitle-input" />
           </div>
           <FeaturedPicker
-            type={cfg.hero.featured_type}
-            id={cfg.hero.featured_id}
-            onChange={(t, i) => setCfg({ ...cfg, hero: { ...cfg.hero, featured_type: t, featured_id: i } })}
+            items={cfg.hero.featured_items || []}
+            onChange={(items) => {
+              const first = items[0] || {};
+              setCfg({
+                ...cfg,
+                hero: {
+                  ...cfg.hero,
+                  featured_items: items,
+                  featured_type: first.type || null,
+                  featured_id: first.id || null,
+                },
+              });
+            }}
           />
         </div>
       </div>
@@ -169,22 +187,27 @@ export default function HomepageTab() {
 }
 
 // ---------------------------------------------------------
-function FeaturedPicker({ type, id, onChange }) {
+function FeaturedPicker({ items = [], onChange }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
-  const [current, setCurrent] = useState(null);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [loadingSelected, setLoadingSelected] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Load current featured item display
   useEffect(() => {
     (async () => {
-      if (!type || !id) { setCurrent(null); return; }
-      try {
-        const r = await api.get(type === "series" ? `/series/${id}` : `/movies/${id}`);
-        setCurrent(r.data);
-      } catch { setCurrent(null); }
+      if (!items.length) { setSelectedItems([]); return; }
+      setLoadingSelected(true);
+      const resolved = await Promise.all(items.map(async (item) => {
+        try {
+          const r = await api.get(item.type === "series" ? `/series/${item.id}` : `/movies/${item.id}`);
+          return { ...r.data, type: item.type };
+        } catch { return null; }
+      }));
+      setSelectedItems(resolved.filter(Boolean));
+      setLoadingSelected(false);
     })();
-  }, [type, id]);
+  }, [items]);
 
   const search = async () => {
     if (!q.trim()) { setResults([]); return; }
@@ -204,29 +227,52 @@ function FeaturedPicker({ type, id, onChange }) {
   };
 
   const pick = (item) => {
-    onChange(item._type, item.id);
+    if (items.some((selected) => selected.type === item._type && selected.id === item.id)) {
+      toast("That title is already featured.");
+      return;
+    }
+    onChange([...items, { type: item._type, id: item.id }]);
     setResults([]);
     setQ("");
   };
 
-  const clear = () => onChange(null, null);
+  const remove = (index) => onChange(items.filter((_, itemIndex) => itemIndex !== index));
+  const move = (index, delta) => {
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= items.length) return;
+    const next = [...items];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    onChange(next);
+  };
 
   return (
     <div className="md:col-span-2 mt-1">
-      <Label className="text-slate-300 text-xs uppercase tracking-widest">Featured hero item (optional)</Label>
-      {current ? (
-        <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-white/10 bg-[#14181f] p-3" data-testid="hero-featured-current">
-          {current.poster_url
-            ? <img src={fileUrl(current.poster_url)} alt="" className="w-10 h-14 object-cover rounded" />
-            : <div className="w-10 h-14 bg-white/5 rounded" />}
-          <div className="flex-1 min-w-0">
-            <div className="text-white font-medium truncate">{current.title}</div>
-            <div className="text-[11px] text-slate-500">{type === "series" ? "TV Series" : "Movie"}</div>
-          </div>
-          <Button size="sm" variant="outline" className="h-7 border-rose-500/40 text-rose-300 hover:bg-rose-500/10" onClick={clear} data-testid="hero-featured-clear">Clear</Button>
-        </div>
-      ) : (
-        <div className="mt-1.5">
+      <Label className="text-slate-300 text-xs uppercase tracking-widest">Featured hero items (slideshow)</Label>
+      <div className="mt-1.5 space-y-3">
+        {items.length > 0 && (
+          <ul className="rounded-lg border border-white/10 bg-[#14181f] divide-y divide-white/5" data-testid="hero-featured-list">
+            {items.map((item, index) => {
+              const selected = selectedItems.find((entry) => entry.id === item.id && entry.type === item.type);
+              return (
+                <li key={`${item.type}-${item.id}`} className="flex items-center gap-3 p-2.5" data-testid={`hero-featured-item-${index}`}>
+                  {selected?.poster_url
+                    ? <img src={fileUrl(selected.poster_url)} alt="" className="w-9 h-12 object-cover rounded" />
+                    : <div className="w-9 h-12 bg-white/5 rounded" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-medium truncate">{selected?.title || "Loading title…"}</div>
+                    <div className="text-[11px] text-slate-500">{item.type === "series" ? "TV Series" : "Movie"}</div>
+                  </div>
+                  <Button type="button" size="icon" variant="ghost" title="Move up" aria-label={`Move featured item ${index + 1} up`} disabled={index === 0} onClick={() => move(index, -1)} className="h-8 w-8 text-slate-400 hover:text-white" data-testid={`hero-featured-up-${index}`}><ChevronUp className="w-4 h-4" /></Button>
+                  <Button type="button" size="icon" variant="ghost" title="Move down" aria-label={`Move featured item ${index + 1} down`} disabled={index === items.length - 1} onClick={() => move(index, 1)} className="h-8 w-8 text-slate-400 hover:text-white" data-testid={`hero-featured-down-${index}`}><ChevronDown className="w-4 h-4" /></Button>
+                  <Button type="button" size="icon" variant="ghost" title="Remove featured item" aria-label={`Remove ${selected?.title || "featured item"}`} onClick={() => remove(index)} className="h-8 w-8 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" data-testid={`hero-featured-remove-${index}`}><X className="w-4 h-4" /></Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {loadingSelected && <div className="text-xs text-slate-500">Loading selected titles…</div>}
+        {items.length === 0 && <div className="text-xs text-slate-500">No featured titles selected.</div>}
+        <div>
           <div className="flex gap-2">
             <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="Search a movie or TV series…" className="bg-[#14181f] border-white/10 text-white h-9" data-testid="hero-featured-search" />
             <Button size="sm" variant="outline" className="h-9 border-white/15 text-slate-200 hover:bg-white/10 hover:text-white" onClick={search}><Search className="w-3.5 h-3.5" /></Button>
@@ -248,7 +294,7 @@ function FeaturedPicker({ type, id, onChange }) {
             </ul>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

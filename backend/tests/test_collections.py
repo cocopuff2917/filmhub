@@ -146,6 +146,9 @@ class TestMembership:
         t0 = next(t for t in titles if t["id"] == movie_id)
         for k in ("kind", "id", "title", "year", "poster_url"):
             assert k in t0
+        assert "main_cast" in t0 and isinstance(t0["main_cast"], list)
+        for member in t0["main_cast"]:
+            assert member.get("actor", {}).get("name")
         # remove
         r2 = admin.post(f"{API}/collections/{cid}/remove",
                         json={"title_type": "movie", "title_id": movie_id}, timeout=15)

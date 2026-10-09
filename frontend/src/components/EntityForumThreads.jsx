@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MessageSquare, Plus } from "lucide-react";
 import { toast } from "sonner";
+import BlockUserButton from "@/components/BlockUserButton";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -108,6 +109,7 @@ export default function EntityForumThreads({ entityType, entityId, entityTitle }
                     <span className="text-slate-400">{thread.user_name || "Anonymous"}</span>
                     <span className="mx-1.5">·</span>{timeAgo(thread.last_activity_at || thread.created_at)}
                   </p>
+                  <BlockUserButton userId={thread.user_id} userName={thread.user_name} onBlocked={(blockedId) => setThreads((current) => current.filter((item) => item.user_id !== blockedId))} />
                   {thread.body && <p className="mt-2 line-clamp-2 break-words text-sm text-slate-400">{thread.body}</p>}
                   <div className="mt-2 flex items-center gap-3 text-xs">
                     <span className={thread.status === "closed" ? "font-semibold uppercase text-slate-500" : "font-semibold uppercase text-emerald-400"}>
