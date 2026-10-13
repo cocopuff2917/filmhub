@@ -47,6 +47,10 @@ db = client[os.environ['DB_NAME']]
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
 STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+STORAGE_PROVIDER = os.environ.get("STORAGE_PROVIDER", "emergent").strip().lower()
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "").strip()
 APP_NAME = "cineverse"
 storage_key: Optional[str] = None
 
@@ -58,6 +62,25 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 # ----------- Object Storage -----------
+def _supabase_object_url(path: str) -> str:
+    if not SUPABASE_URL or not SUPABASE_STORAGE_BUCKET or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(status_code=500, detail="Supabase Storage is not configured")
+    bucket = quote(SUPABASE_STORAGE_BUCKET, safe="")
+    object_path = quote(path.lstrip("/"), safe="/")
+    return f"{SUPABASE_URL}/storage/v1/object/{bucket}/{object_path}"
+
+
+def _supabase_headers(content_type: Optional[str] = None) -> dict:
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+        headers["x-upsert"] = "true"
+    return headers
+
+
 def init_storage(force: bool = False):
     global storage_key
     if storage_key and not force:
@@ -72,6 +95,18 @@ def init_storage(force: bool = False):
         return None
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
+    if STORAGE_PROVIDER == "supabase":
+        resp = requests.post(
+            _supabase_object_url(path),
+            headers=_supabase_headers(content_type),
+            data=data,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return {"path": path, "size": len(data)}
+    if STORAGE_PROVIDER != "emergent":
+        raise HTTPException(status_code=500, detail="Unsupported object storage provider")
+
     key = init_storage()
     if not key:
         raise HTTPException(status_code=500, detail="Storage unavailable")
@@ -92,6 +127,17 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     return resp.json()
 
 def get_object(path: str):
+    if STORAGE_PROVIDER == "supabase":
+        resp = requests.get(
+            _supabase_object_url(path),
+            headers=_supabase_headers(),
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+    if STORAGE_PROVIDER != "emergent":
+        raise HTTPException(status_code=500, detail="Unsupported object storage provider")
+
     key = init_storage()
     resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
     if resp.status_code == 404:
@@ -309,7 +355,6 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
                 "color": cr.get("color", "#f59e0b"),
                 "base": _derive_base(perms),
                 "permissions": perms,
-                "assignable_role_ids": cr.get("assignable_role_ids", []) or [],
                 "description": cr.get("description", ""),
             })
         user["custom_roles"] = custom_roles_resolved
@@ -326,8 +371,7 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
         if user.get("role") == "admin" or eff == "admin":
             eff_perms = set(PERMISSIONS_ALL)
         elif user.get("role") == "moderator" or eff == "moderator":
-            moderator_config = await db.site_config.find_one({"_id": "moderator-role-permissions"})
-            eff_perms = set(moderator_config.get("permissions", PERMS_MODERATOR) if moderator_config else PERMS_MODERATOR)
+            eff_perms = set(PERMS_MODERATOR)
         for cr in custom_roles_resolved:
             eff_perms.update(cr.get("permissions") or [])
         user["permissions"] = sorted(eff_perms)
@@ -747,9 +791,6 @@ PERMISSIONS_ALL = [
     "content.edit_imdb_id",
     "content.bypass_edit_freeze",
     "content.delete",
-    "content.movie.delete",
-    "content.series.delete",
-    "content.actor.delete",
     "content.lock",
     "content.protect_fields",
     "content.lock_cast",
@@ -793,9 +834,6 @@ PERMISSION_LABELS = {
     "content.edit_imdb_id": "Edit IMDb ID",
     "content.bypass_edit_freeze": "Bypass catalog editing and creation pause",
     "content.delete": "Delete movies, TV series, or actors",
-    "content.movie.delete": "Delete movie pages",
-    "content.series.delete": "Delete TV series pages",
-    "content.actor.delete": "Delete actor pages",
     "content.lock": "Lock entire entity fields (bulk)",
     "content.protect_fields": "Protect fields (toggle per-field locks)",
     "content.lock_cast": "Lock & unlock individual cast / guest-star rows",
@@ -835,32 +873,17 @@ def _require_perm(user: Optional[dict], perm: str, detail: str = "You don't have
     if not _has_perm(user, perm):
         raise HTTPException(status_code=403, detail=detail)
 
-def _manageable_role_ids(user: Optional[dict]) -> set:
-    if not user:
-        return set()
-    return {
-        role_id
-        for role in user.get("custom_roles", [])
-        if {"user.assign_custom_role", "user.assign_role"}.intersection(role.get("permissions") or [])
-        for role_id in (role.get("assignable_role_ids") or [])
-    }
-
-def _can_delete_content_page(user: Optional[dict], permission: str) -> bool:
-    return _has_perm(user, "content.delete") or _has_perm(user, permission)
-
 class RoleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     color: str = "#f59e0b"
     description: str = ""
     permissions: List[str] = []
-    assignable_role_ids: List[str] = []
 
 class RolePatch(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     description: Optional[str] = None
     permissions: Optional[List[str]] = None
-    assignable_role_ids: Optional[List[str]] = None
 
 class AssignRole(BaseModel):
     custom_role_id: Optional[str] = None  # legacy single assignment (kept for back-compat)
@@ -911,10 +934,32 @@ def _enforce_cast_locks(existing_cast, submitted_cast, locked_actor_ids, is_mod)
         result.insert(pos_clamped, row)
     return result
 
+def _is_mod_or_admin(user: Optional[dict]) -> bool:
+    if not user:
+        return False
+    role = (user.get("role") or "").lower()
+    effective = (user.get("effective_role") or "").lower()
+    return role in {"moderator", "admin"} or effective in {"moderator", "admin"}
+
+
+def _enforce_final_season_guard(existing_seasons, submitted_seasons, user):
+    """Only moderators and admins may toggle a season to the final season flag."""
+    if _is_mod_or_admin(user):
+        return submitted_seasons or []
+    old_by_sn = {season.get("season_number"): season for season in (existing_seasons or []) if season.get("season_number") is not None}
+    result = []
+    for season in (submitted_seasons or []):
+        cleaned = dict(season)
+        sn = cleaned.get("season_number")
+        old_season = old_by_sn.get(sn) if sn is not None else None
+        cleaned["is_last_season"] = bool(old_season.get("is_last_season")) if old_season else False
+        result.append(cleaned)
+    return result
+
+
 def _enforce_season_episode_integrity(existing_seasons, submitted_seasons, user):
-    """Non-mods cannot delete seasons or episodes — silently restore any that have gone missing.
-    Users with content.delete (mods, admins, or anyone granted that perm) bypass this check."""
-    if _has_perm(user, "content.delete"):
+    """Only moderators and admins may delete or remove seasons/episodes from a series."""
+    if _is_mod_or_admin(user):
         return submitted_seasons or []
     old = existing_seasons or []
     new = list(submitted_seasons or [])
@@ -962,7 +1007,6 @@ def _enforce_image_delete_guard(
     gallery_fields: Optional[List[str]] = None,
     single_field_permissions: Optional[dict] = None,
     list_field_permissions: Optional[dict] = None,
-    single_field_replacement_allowed: Optional[List[str]] = None,
 ):
     """Allow image deletion, reordering, and primary selection only with their matching grants."""
     single_field_permissions = single_field_permissions or {}
@@ -974,8 +1018,7 @@ def _enforce_image_delete_guard(
         if f in update_data and not array_controls_primary:
             old_val = old_doc.get(f) or ""
             new_val = update_data.get(f) or ""
-            replacement_allowed = f in (single_field_replacement_allowed or []) and bool(new_val)
-            if old_val and old_val != new_val and not replacement_allowed and not _has_perm(user, single_field_permissions.get(f, "")):
+            if old_val and old_val != new_val and not _has_perm(user, single_field_permissions.get(f, "")):
                 update_data[f] = old_val
     for f in (gallery_fields or []):
         if f in update_data:
@@ -2364,77 +2407,33 @@ async def list_roles():
             "name": r.get("name"),
             "base": _derive_base(perms),
             "permissions": perms,
-            "assignable_role_ids": r.get("assignable_role_ids", []) or [],
             "color": r.get("color", "#f59e0b"),
             "description": r.get("description", ""),
         })
-    moderator_config = await db.site_config.find_one({"_id": "moderator-role-permissions"})
-    roles.append({
-        "id": "builtin-moderator",
-        "name": "Moderator",
-        "base": "moderator",
-        "permissions": sorted(moderator_config.get("permissions", PERMS_MODERATOR) if moderator_config else PERMS_MODERATOR),
-        "assignable_role_ids": [],
-        "color": "#38bdf8",
-        "description": "Built-in moderator role",
-        "builtin": True,
-    })
     return roles
-
-async def _validated_assignable_role_ids(role_ids: List[str]) -> List[str]:
-    cleaned = []
-    for role_id in role_ids:
-        if role_id == "moderator":
-            if role_id not in cleaned:
-                cleaned.append(role_id)
-            continue
-        try:
-            role = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
-        except Exception:
-            role = None
-        if not role:
-            raise HTTPException(status_code=400, detail=f"Invalid assignable custom role: {role_id}")
-        if role_id not in cleaned:
-            cleaned.append(role_id)
-    return cleaned
 
 @api_router.post("/roles")
 async def create_role(payload: RoleCreate, admin: dict = Depends(get_current_user)):
     _require_perm(admin, "roles.manage")
     perms = [p for p in payload.permissions if p in PERMISSIONS_ALL]
-    assignable_role_ids = await _validated_assignable_role_ids(payload.assignable_role_ids)
-    doc = {"name": payload.name, "permissions": perms, "assignable_role_ids": assignable_role_ids, "color": payload.color, "description": payload.description, "created_at": datetime.now(timezone.utc).isoformat()}
+    doc = {"name": payload.name, "permissions": perms, "color": payload.color, "description": payload.description, "created_at": datetime.now(timezone.utc).isoformat()}
     r = await db.custom_roles.insert_one(doc)
-    return {"id": str(r.inserted_id), "name": payload.name, "permissions": perms, "assignable_role_ids": assignable_role_ids, "base": _derive_base(perms), "color": payload.color, "description": payload.description}
+    return {"id": str(r.inserted_id), "name": payload.name, "permissions": perms, "base": _derive_base(perms), "color": payload.color, "description": payload.description}
 
 @api_router.patch("/roles/{role_id}")
 async def update_role(role_id: str, payload: RolePatch, admin: dict = Depends(get_current_user)):
     _require_perm(admin, "roles.manage")
     data = {k: v for k, v in payload.model_dump().items() if v is not None}
-    if role_id == "builtin-moderator":
-        if "permissions" not in data:
-            raise HTTPException(status_code=400, detail="Moderator role permissions are required")
-        perms = [p for p in data["permissions"] if p in PERMISSIONS_ALL]
-        await db.site_config.update_one(
-            {"_id": "moderator-role-permissions"},
-            {"$set": {"permissions": perms}},
-            upsert=True,
-        )
-        return {"id": role_id, "name": "Moderator", "permissions": perms, "assignable_role_ids": [], "base": "moderator", "color": "#38bdf8", "description": "Built-in moderator role", "builtin": True}
     if "permissions" in data:
         data["permissions"] = [p for p in data["permissions"] if p in PERMISSIONS_ALL]
-    if "assignable_role_ids" in data:
-        data["assignable_role_ids"] = await _validated_assignable_role_ids(data["assignable_role_ids"])
     await db.custom_roles.update_one({"_id": ObjectId(role_id)}, {"$set": data})
     r = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
     perms = r.get("permissions", []) or []
-    return {"id": str(r["_id"]), "name": r.get("name"), "permissions": perms, "assignable_role_ids": r.get("assignable_role_ids", []) or [], "base": _derive_base(perms), "color": r.get("color"), "description": r.get("description", "")}
+    return {"id": str(r["_id"]), "name": r.get("name"), "permissions": perms, "base": _derive_base(perms), "color": r.get("color"), "description": r.get("description", "")}
 
 @api_router.delete("/roles/{role_id}")
 async def delete_role(role_id: str, admin: dict = Depends(get_current_user)):
     _require_perm(admin, "roles.manage")
-    if role_id == "builtin-moderator":
-        raise HTTPException(status_code=400, detail="The built-in Moderator role cannot be deleted")
     await db.custom_roles.delete_one({"_id": ObjectId(role_id)})
     await db.users.update_many({"custom_role_id": role_id}, {"$unset": {"custom_role_id": ""}})
     return {"ok": True}
@@ -2448,26 +2447,10 @@ async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = De
         role_ids = list(payload.custom_role_ids)
     elif payload.custom_role_id:
         role_ids = [payload.custom_role_id]
-    is_admin = admin.get("role") == "admin" or admin.get("effective_role") == "admin"
-    allowed_ids = _manageable_role_ids(admin)
-    if not is_admin and not allowed_ids:
-        raise HTTPException(status_code=403, detail="You don't have permission to manage any custom roles.")
-    # Non-admin managers can only change assignments covered by their role allow-list.
-    if not is_admin and any(rid not in allowed_ids for rid in role_ids):
-        raise HTTPException(status_code=403, detail="You can only assign custom roles granted to your role.")
-    try:
-        target_id = ObjectId(user_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="User not found")
-    target = await db.users.find_one({"_id": target_id})
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-    existing_ids = list(dict.fromkeys((target.get("custom_role_ids") or []) + ([target["custom_role_id"]] if target.get("custom_role_id") else [])))
-    requested_ids = role_ids if is_admin else [rid for rid in existing_ids if rid not in allowed_ids] + role_ids
-    # Deduplicate and validate.
+    # dedupe + validate
     cleaned: List[str] = []
     labels: List[str] = []
-    for rid in requested_ids:
+    for rid in role_ids:
         if not rid or rid in cleaned:
             continue
         try:
@@ -2484,8 +2467,8 @@ async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = De
         update["$set"]["custom_role_id"] = cleaned[0]
     else:
         update["$unset"] = {"custom_role_id": ""}
-    await db.users.update_one({"_id": target_id}, update)
-    target = await db.users.find_one({"_id": target_id})
+    await db.users.update_one({"_id": ObjectId(user_id)}, update)
+    target = await db.users.find_one({"_id": ObjectId(user_id)})
     if target:
         await _sync_user_role_badges(user_id, await _effective_user_role(target))
     label = ", ".join(labels) if labels else "(none)"
@@ -2758,20 +2741,8 @@ async def set_user_role(user_id: str, payload: RoleUpdate, admin: dict = Depends
     _require_perm(admin, "user.assign_role")
     if payload.role not in ("user", "moderator", "admin"):
         raise HTTPException(status_code=400, detail="Invalid role")
-    is_admin = admin.get("role") == "admin" or admin.get("effective_role") == "admin"
-    if not is_admin and payload.role == "admin":
-        raise HTTPException(status_code=403, detail="Only admins can assign the admin role.")
-    try:
-        target_id = ObjectId(user_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="User not found")
-    target = await db.users.find_one({"_id": target_id})
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-    if not is_admin and (payload.role == "moderator" or target.get("role") == "moderator") and "moderator" not in _manageable_role_ids(admin):
-        raise HTTPException(status_code=403, detail="You don't have permission to manage the Moderator role.")
-    await db.users.update_one({"_id": target_id}, {"$set": {"role": payload.role}})
-    target = await db.users.find_one({"_id": target_id})
+    await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": payload.role}})
+    target = await db.users.find_one({"_id": ObjectId(user_id)})
     if target:
         await _sync_user_role_badges(user_id, await _effective_user_role(target))
     await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Role set to {payload.role}")
@@ -3213,8 +3184,6 @@ async def list_all_users(mod: dict = Depends(get_current_user), limit: int = 200
             "bio": u.get("bio", ""),
             "role": u.get("role", "user"),
             "custom_role": cr,
-            "custom_roles": [],
-            "custom_role_ids": [],
             "avatar_url": u.get("avatar_url", ""),
             "created_at": u.get("created_at"),
             "suspended_until": u.get("suspended_until"),
@@ -3223,24 +3192,6 @@ async def list_all_users(mod: dict = Depends(get_current_user), limit: int = 200
             "deleted_at": u.get("deleted_at"),
             "ip_count": len(u.get("ips", []) or []),
         })
-        role_ids = list(dict.fromkeys((u.get("custom_role_ids") or []) + ([u["custom_role_id"]] if u.get("custom_role_id") else [])))
-        resolved_roles = []
-        for role_id in role_ids:
-            try:
-                custom_role = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
-            except Exception:
-                custom_role = None
-            if custom_role:
-                permissions = custom_role.get("permissions", []) or []
-                resolved_roles.append({
-                    "id": str(custom_role["_id"]),
-                    "name": custom_role.get("name"),
-                    "color": custom_role.get("color", "#f59e0b"),
-                    "base": _derive_base(permissions),
-                    "permissions": permissions,
-                })
-        users[-1]["custom_roles"] = resolved_roles
-        users[-1]["custom_role_ids"] = [role["id"] for role in resolved_roles]
     return users
 
 @api_router.get("/admin/username-cooldown/users")
@@ -4368,7 +4319,7 @@ async def _tmdb_actor_id(person: dict, user: dict) -> Optional[str]:
         **actor,
     })
     actor_id = str(result.inserted_id)
-    await log_edit(user, "actor", actor_id, "create", name, f"Created actor \"{name}\" from TMDB")
+    await log_edit(user, "actor", actor_id, "create", name, f"Created actor \"{name}\"")
     return actor_id
 
 async def _ensure_tmdb_bot_user() -> dict:
@@ -4446,12 +4397,16 @@ async def _backfill_tmdb_actor_details(bot: dict, limit: int = 25, force: bool =
         birthday = details.get("birthday")
         deathday = details.get("deathday")
         birth_place = (details.get("place_of_birth") or "").strip()
+        profile_url = _tmdb_image(details.get("profile_path"))
         if not actor.get("birth_date") and birthday:
             field_updates["birth_date"] = birthday
         if not actor.get("death_date") and deathday:
             field_updates["death_date"] = deathday
         if not actor.get("place_of_birth") and birth_place:
             field_updates["place_of_birth"] = birth_place
+        if not actor.get("photo_url") and profile_url:
+            field_updates["photo_url"] = profile_url
+
         update = {**field_updates, "_tmdb_person_details_checked_at": now_iso}
         query = {"_id": actor["_id"]}
         if field_updates:
@@ -4466,7 +4421,7 @@ async def _backfill_tmdb_actor_details(bot: dict, limit: int = 25, force: bool =
                 str(actor["_id"]),
                 "update",
                 actor.get("name") or "",
-                "Cineverse BOT added missing actor details from TMDB",
+                "Cineverse BOT added missing actor details and photo",
                 compute_field_changes(actor, field_updates),
             )
         elif not field_updates:
@@ -4718,11 +4673,15 @@ async def apply_image_cleanup(payload: BrokenImageCleanupRequest, admin: dict = 
 
 
 async def _tmdb_replacement_image(kind: str, doc: dict) -> Optional[str]:
-    if kind != "series":
-        return None
+    if kind == "actors":
+        matched_id = await _tmdb_match_person_id(doc.get("name") or "", doc.get("tmdb_id"))
+        if not matched_id:
+            return None
+        details = await _tmdb_request(f"/person/{matched_id}")
+        return _tmdb_image(details.get("profile_path"))
 
-    media_kind = "series"
-    date_field = "first_air_date"
+    media_kind = "movie" if kind == "movies" else "series"
+    date_field = "release_date" if media_kind == "movie" else "first_air_date"
     matched_id = await _tmdb_match_id(
         media_kind,
         doc.get("title") or "",
@@ -4731,7 +4690,8 @@ async def _tmdb_replacement_image(kind: str, doc: dict) -> Optional[str]:
     )
     if not matched_id:
         return None
-    details = await _tmdb_request(f"/tv/{matched_id}")
+    media_type = "movie" if media_kind == "movie" else "tv"
+    details = await _tmdb_request(f"/{media_type}/{matched_id}")
     return _tmdb_image(details.get("poster_path"))
 
 
@@ -4794,12 +4754,23 @@ async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict =
             if current not in broken_urls:
                 conflicted += len(broken_urls)
                 continue
+            if not _tmdb_credentials_configured():
+                unavailable += 1
+                continue
+            try:
+                replacement = await _tmdb_replacement_image(kind, doc)
+            except Exception as error:
+                logger.warning("Broken actor image repair failed for %s: %s", object_id, type(error).__name__)
+                replacement = None
+            if not replacement:
+                unavailable += 1
+                continue
             result = await collection.update_one(
                 _alive({"_id": object_id, "photo_url": current}),
-                {"$set": {"photo_url": "", "updated_at": datetime.now(timezone.utc).isoformat()}},
+                {"$set": {"photo_url": replacement, "updated_at": datetime.now(timezone.utc).isoformat()}},
             )
             if result.modified_count:
-                cleared += 1
+                restored += 1
             else:
                 conflicted += 1
             continue
@@ -4816,19 +4787,16 @@ async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict =
 
         replacement = None
         if primary_is_broken:
-            if kind == "movies":
-                replacement = next((url for url in current_gallery if url not in broken_gallery and url != current_primary), "")
-            else:
-                if not _tmdb_credentials_configured():
-                    unavailable += 1
-                    continue
-                try:
-                    replacement = await _tmdb_replacement_image(kind, doc)
-                except Exception as error:
-                    logger.warning("Broken poster repair failed for %s %s: %s", kind, object_id, type(error).__name__)
-                if not replacement:
-                    unavailable += 1
-                    continue
+            if not _tmdb_credentials_configured():
+                unavailable += 1
+                continue
+            try:
+                replacement = await _tmdb_replacement_image(kind, doc)
+            except Exception as error:
+                logger.warning("Broken poster repair failed for %s %s: %s", kind, object_id, type(error).__name__)
+            if not replacement:
+                unavailable += 1
+                continue
 
         updates = {}
         expected = {"_id": object_id}
@@ -4837,9 +4805,10 @@ async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict =
             expected["poster_url"] = doc.get("poster_url") or ""
         if matched_gallery:
             remaining = [url for url in current_gallery if url not in broken_gallery]
-            if primary_is_broken and replacement and replacement not in remaining:
+            if primary_is_broken:
                 primary_index = current_gallery.index(current_primary) if current_primary in current_gallery else len(remaining)
-                remaining.insert(min(primary_index, len(remaining)), replacement)
+                if replacement not in remaining:
+                    remaining.insert(min(primary_index, len(remaining)), replacement)
             updates["poster_urls"] = remaining
             expected["poster_urls"] = current_gallery
         if primary_is_broken:
@@ -4847,11 +4816,7 @@ async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict =
 
         result = await collection.update_one(_alive(expected), {"$set": updates})
         if result.modified_count:
-            if primary_is_broken:
-                if replacement:
-                    restored += 1
-                else:
-                    cleared += 1
+            restored += int(primary_is_broken)
             cleared += len(matched_gallery)
         else:
             conflicted += sum(len(urls) for urls in group["values"].values())
@@ -4863,9 +4828,9 @@ async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict =
 async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     kind = payload.entity_type.strip().lower()
     image_field = payload.image_field.strip()
-    if kind not in ("movie", "series"):
+    if kind not in ("movie", "series", "actor"):
         raise HTTPException(status_code=400, detail="Unsupported image entity type")
-    valid_fields = {"movie": {"backdrop_url"}, "series": {"poster_url", "backdrop_url"}}
+    valid_fields = {"actor": {"photo_url"}, "movie": {"poster_url", "backdrop_url"}, "series": {"poster_url", "backdrop_url"}}
     if image_field not in valid_fields[kind]:
         raise HTTPException(status_code=400, detail="Unsupported image field")
     if not _tmdb_credentials_configured():
@@ -4875,7 +4840,7 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     except Exception:
         raise HTTPException(status_code=404, detail="Image owner not found")
 
-    collection = db.movies if kind == "movie" else db.series
+    collection = db.actors if kind == "actor" else db.movies if kind == "movie" else db.series
     doc = await collection.find_one(_alive({"_id": object_id}))
     if not doc:
         raise HTTPException(status_code=404, detail="Image owner not found")
@@ -4883,14 +4848,21 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     if _is_external_image_url(current_value):
         return {"url": current_value, "recovered": False}
 
-    date_field = "release_date" if kind == "movie" else "first_air_date"
-    matched_id = await _tmdb_match_id(kind, doc.get("title") or "", doc.get(date_field), doc.get("tmdb_id"))
-    if not matched_id:
-        return {"url": "", "recovered": False}
-    media_type = "movie" if kind == "movie" else "tv"
-    details = await _tmdb_request(f"/{media_type}/{matched_id}")
-    path_field = "backdrop_path" if kind == "movie" or image_field == "backdrop_url" else "poster_path"
-    image_url = _tmdb_image(details.get(path_field))
+    if kind == "actor":
+        matched_id = await _tmdb_match_person_id(doc.get("name") or "", doc.get("tmdb_id"))
+        if not matched_id:
+            return {"url": "", "recovered": False}
+        details = await _tmdb_request(f"/person/{matched_id}")
+        image_url = _tmdb_image(details.get("profile_path"))
+    else:
+        date_field = "release_date" if kind == "movie" else "first_air_date"
+        matched_id = await _tmdb_match_id(kind, doc.get("title") or "", doc.get(date_field), doc.get("tmdb_id"))
+        if not matched_id:
+            return {"url": "", "recovered": False}
+        media_type = "movie" if kind == "movie" else "tv"
+        details = await _tmdb_request(f"/{media_type}/{matched_id}")
+        path_field = "poster_path" if image_field == "poster_url" else "backdrop_path"
+        image_url = _tmdb_image(details.get(path_field))
 
     if not image_url:
         return {"url": "", "recovered": False}
@@ -4908,11 +4880,11 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     bot = await _ensure_tmdb_bot_user()
     await log_edit(
         bot,
-        kind,
+        "actor" if kind == "actor" else kind,
         payload.entity_id,
         "update",
-        doc.get("title") or "",
-        f"Cineverse BOT restored a missing {image_field.replace('_url', '').replace('_', ' ')} from TMDB",
+        doc.get("name") if kind == "actor" else doc.get("title") or "",
+        f"Cineverse BOT restored a missing {image_field.replace('_url', '').replace('_', ' ')}",
         compute_field_changes(doc, {image_field: image_url}),
     )
     return {"url": image_url, "recovered": True}
@@ -5212,7 +5184,7 @@ async def backfill_tmdb_cast(payload: TMDBCastBackfillRequest, admin: dict = Dep
                 entity_id,
                 "update",
                 item.get("title") or "",
-                f"Cineverse BOT reconciled {kind} data with TMDB; added {added} and removed {removed} cast members",
+                f"Cineverse BOT reconciled {kind} data; added {added} and removed {removed} cast members",
                 compute_field_changes(item, content_updates),
             )
         else:
@@ -5451,31 +5423,6 @@ async def update_content_edit_freeze(
     )
     return {"ok": True, "frozen": payload.frozen}
 
-@api_router.get("/moderation/catalog-creation/settings")
-async def get_catalog_creation_settings(user: dict = Depends(get_current_user)):
-    return {"enabled": bool((await db.site_config.find_one({"_id": "catalog-creation-settings"}) or {}).get("enabled", True))}
-
-@api_router.put("/moderation/catalog-creation/settings")
-async def update_catalog_creation_settings(
-    payload: TMDBImportSettingUpdate,
-    admin: dict = Depends(get_current_admin),
-):
-    setting_id = "catalog-creation-settings"
-    await db.site_config.update_one(
-        {"_id": setting_id},
-        {"$set": {"enabled": payload.enabled, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": admin["id"]}},
-        upsert=True,
-    )
-    await log_edit(
-        admin,
-        "site-config",
-        setting_id,
-        "update",
-        "Catalog creation",
-        f"Catalog creation {'enabled' if payload.enabled else 'disabled'}",
-    )
-    return {"ok": True, "enabled": payload.enabled}
-
 @api_router.get("/moderation/tmdb/settings")
 async def get_tmdb_import_settings(mod: dict = Depends(get_current_moderator)):
     return {"enabled": await _tmdb_import_is_enabled()}
@@ -5520,7 +5467,7 @@ async def search_tmdb(kind: str, q: str, mod: dict = Depends(get_current_moderat
             "title": item.get("title") if kind == "movie" else item.get("name"),
             "date": item.get("release_date") if kind == "movie" else item.get("first_air_date"),
             "overview": item.get("overview") or "",
-            **({"poster_url": _tmdb_image(item.get("poster_path"))} if kind == "series" else {}),
+            "poster_url": _tmdb_image(item.get("poster_path")),
         })
     return results
 
@@ -5568,6 +5515,7 @@ async def import_from_tmdb(payload: TMDBImportRequest, mod: dict = Depends(get_c
             "genres": [genre.get("name") for genre in details.get("genres", []) if genre.get("name")],
             "synopsis": details.get("overview") or "",
             "tagline": details.get("tagline") or "",
+            "poster_url": _tmdb_image(details.get("poster_path")),
             "backdrop_url": _tmdb_image(details.get("backdrop_path")),
             "trailer_url": _tmdb_trailer(videos),
             "runtime": details.get("runtime"),
@@ -5657,11 +5605,185 @@ async def import_from_tmdb(payload: TMDBImportRequest, mod: dict = Depends(get_c
     }
     return await create_series(SeriesCreate(**data), mod)
 
+@api_router.post("/series/{series_id}/tmdb-seasons/import")
+async def import_series_seasons_from_tmdb(series_id: str, user: dict = Depends(get_current_moderator)):
+    await _ensure_content_edits_allowed(user)
+    if not await _tmdb_import_is_enabled():
+        raise HTTPException(status_code=403, detail="TMDB imports are currently disabled by an administrator")
+
+    series = await db.series.find_one(_alive({"_id": ObjectId(series_id)}))
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    _check_locks(series, {"seasons": series.get("seasons") or []}, user)
+
+    tmdb_id = await _tmdb_match_id(
+        "series",
+        series.get("title") or "",
+        series.get("first_air_date"),
+        series.get("tmdb_id"),
+    )
+    if not tmdb_id:
+        raise HTTPException(status_code=422, detail="Could not match this series to TMDB. Add or verify its TMDB ID first.")
+
+    details = await _tmdb_request(f"/tv/{tmdb_id}")
+    main_cast = series.get("main_cast") or []
+    main_actor_ids = {str(member.get("actor_id")) for member in main_cast if member.get("actor_id")}
+    main_actor_object_ids = []
+    for actor_id in main_actor_ids:
+        try:
+            main_actor_object_ids.append(ObjectId(actor_id))
+        except Exception:
+            pass
+
+    main_tmdb_ids = {}
+    main_actor_names = {}
+    if main_actor_object_ids:
+        async for actor in db.actors.find(
+            {"_id": {"$in": main_actor_object_ids}},
+            {"tmdb_id": 1, "name": 1},
+        ):
+            actor_id = str(actor["_id"])
+            if actor.get("tmdb_id") is not None:
+                main_tmdb_ids[str(actor["tmdb_id"])] = actor_id
+            if actor.get("name"):
+                main_actor_names[actor["name"].strip().casefold()] = actor_id
+
+    bot = await _ensure_tmdb_bot_user()
+    resolved_actor_ids = {}
+    actor_names = {}
+
+    async def resolve_guest(person):
+        person_id = person.get("id")
+        cache_key = str(person_id) if person_id is not None else (person.get("name") or "").strip().casefold()
+        if not cache_key:
+            return None
+        if cache_key not in resolved_actor_ids:
+            actor_id = await _tmdb_actor_id({
+                "id": person_id,
+                "name": person.get("name") or "",
+                "character": person.get("character") or "",
+            }, bot)
+            resolved_actor_ids[cache_key] = actor_id
+            if actor_id and person.get("name"):
+                actor_names[actor_id] = person["name"]
+        return resolved_actor_ids[cache_key]
+
+    import asyncio
+
+    season_summaries = [
+        summary for summary in details.get("seasons", []) or []
+        if summary.get("season_number") is not None
+    ]
+    tmdb_semaphore = asyncio.Semaphore(6)
+
+    async def get_season_detail(summary):
+        async with tmdb_semaphore:
+            detail = await _tmdb_request(f"/tv/{tmdb_id}/season/{summary['season_number']}")
+        return summary, detail
+
+    season_details = await asyncio.gather(*(get_season_detail(summary) for summary in season_summaries))
+    episode_records = [
+        (summary, detail, episode)
+        for summary, detail in season_details
+        for episode in detail.get("episodes", []) or []
+        if episode.get("episode_number") is not None
+    ]
+
+    async def get_episode_credits(summary, episode):
+        if not main_actor_ids:
+            return {}
+        async with tmdb_semaphore:
+            try:
+                return await _tmdb_request(
+                    f"/tv/{tmdb_id}/season/{summary['season_number']}/episode/{episode['episode_number']}/credits"
+                )
+            except HTTPException as error:
+                if error.status_code == 404:
+                    return {}
+                raise
+
+    credit_responses = await asyncio.gather(*(
+        get_episode_credits(summary, episode)
+        for summary, _, episode in episode_records
+    ))
+    credits_by_episode = {
+        (summary["season_number"], episode["episode_number"]): credits
+        for (summary, _, episode), credits in zip(episode_records, credit_responses)
+    }
+
+    guest_people = {}
+    for _, detail in season_details:
+        for episode in detail.get("episodes", []) or []:
+            for person in episode.get("guest_stars", []) or []:
+                person_id = person.get("id")
+                cache_key = str(person_id) if person_id is not None else (person.get("name") or "").strip().casefold()
+                if cache_key:
+                    guest_people.setdefault(cache_key, person)
+
+    async def resolve_guest_actor(cache_key, person):
+        async with tmdb_semaphore:
+            return cache_key, await resolve_guest(person)
+
+    resolved_guests = await asyncio.gather(*(
+        resolve_guest_actor(cache_key, person)
+        for cache_key, person in guest_people.items()
+    ))
+    resolved_actor_ids.update(resolved_guests)
+
+    imported_seasons = []
+    for season_summary, season_detail in season_details:
+        season_number = season_summary["season_number"]
+        imported_episodes = []
+        for episode in season_detail.get("episodes", []) or []:
+            episode_number = episode.get("episode_number")
+            if episode_number is None:
+                continue
+            episode_credits = credits_by_episode.get((season_number, episode_number), {})
+            episode_main_cast = []
+            for person in episode_credits.get("cast", []) or []:
+                actor_id = main_tmdb_ids.get(str(person.get("id")))
+                if not actor_id:
+                    actor_id = main_actor_names.get((person.get("name") or "").strip().casefold())
+                if actor_id and actor_id not in episode_main_cast:
+                    episode_main_cast.append(actor_id)
+
+            guest_stars = []
+            for person in episode.get("guest_stars", []) or []:
+                person_id = person.get("id")
+                cache_key = str(person_id) if person_id is not None else (person.get("name") or "").strip().casefold()
+                actor_id = resolved_actor_ids.get(cache_key)
+                character_name = (person.get("character") or "").strip()
+                if actor_id and actor_id not in main_actor_ids and character_name:
+                    guest_stars.append({"actor_id": actor_id, "character_name": character_name})
+
+            imported_episodes.append({
+                "episode_number": episode_number,
+                "title": episode.get("name") or "",
+                "air_date": episode.get("air_date") or "",
+                "main_cast_actor_ids": episode_main_cast,
+                "guest_stars": _dedupe_cast(guest_stars),
+            })
+
+        imported_seasons.append({
+            "season_number": season_number,
+            "name": season_detail.get("name") or season_summary.get("name") or "",
+            "air_date": season_detail.get("air_date") or season_summary.get("air_date") or "",
+            "episodes": imported_episodes,
+        })
+
+    return {
+        "seasons": imported_seasons,
+        "actors": [{"id": actor_id, "name": name} for actor_id, name in actor_names.items()],
+    }
+
 @api_router.post("/movies")
 async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_user)):
     await _ensure_content_edits_allowed(user)
     doc = payload.model_dump()
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    can_edit_imdb_id = is_mod or _has_perm(user, "content.edit_imdb_id")
+    if doc.get("imdb_id") and not can_edit_imdb_id:
+        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a movie's IMDb ID")
     if is_mod and not doc.get("imdb_id"):
         raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a movie")
     await _assert_unique_imdb_id(doc["imdb_id"])
@@ -5699,7 +5821,7 @@ async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_us
     if tmdb_added_cast:
         await log_edit(
             await _ensure_tmdb_bot_user(), "movie", enriched["id"], "update", enriched["title"],
-            f"Cineverse BOT added {tmdb_added_cast} cast members from TMDB",
+            f"Cineverse BOT added {tmdb_added_cast} cast members",
         )
     return enriched
 
@@ -6237,8 +6359,7 @@ async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depe
 
 @api_router.delete("/movies/{movie_id}")
 async def delete_movie(movie_id: str, user: dict = Depends(get_current_user)):
-    if not _can_delete_content_page(user, "content.movie.delete"):
-        raise HTTPException(status_code=403, detail="You don't have permission to delete this movie.")
+    _require_perm(user, "content.delete", "You don't have permission to delete content.")
     await _ensure_content_edits_allowed(user)
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
     if not doc:
@@ -6310,6 +6431,9 @@ async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_
     doc = _serialize_series_payload(payload.model_dump())
     doc["purchase_options"] = _normalize_purchase_options(doc.get("purchase_options", []))
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
+    can_edit_imdb_id = is_mod or _has_perm(user, "content.edit_imdb_id")
+    if doc.get("imdb_id") and not can_edit_imdb_id:
+        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a TV series' IMDb ID")
     if is_mod and not doc.get("imdb_id"):
         raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a TV series")
     await _assert_unique_imdb_id(doc["imdb_id"])
@@ -6345,7 +6469,7 @@ async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_
     if tmdb_added_cast:
         await log_edit(
             await _ensure_tmdb_bot_user(), "series", enriched["id"], "update", enriched["title"],
-            f"Cineverse BOT added {tmdb_added_cast} cast members from TMDB",
+            f"Cineverse BOT added {tmdb_added_cast} cast members",
         )
     return enriched
 
@@ -6845,6 +6969,11 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
         )
     # Episodes & seasons cannot be deleted by non-mods — restore any that went missing BEFORE enforcing guest locks.
     if "seasons" in update_data:
+        update_data["seasons"] = _enforce_final_season_guard(
+            old_doc.get("seasons") or [],
+            update_data["seasons"],
+            user,
+        )
         update_data["seasons"] = _enforce_season_episode_integrity(
             old_doc.get("seasons") or [],
             update_data["seasons"],
@@ -7010,8 +7139,7 @@ async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = De
 
 @api_router.delete("/series/{series_id}")
 async def delete_series(series_id: str, user: dict = Depends(get_current_user)):
-    if not _can_delete_content_page(user, "content.series.delete"):
-        raise HTTPException(status_code=403, detail="You don't have permission to delete this TV series.")
+    _require_perm(user, "content.delete", "You don't have permission to delete content.")
     await _ensure_content_edits_allowed(user)
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
     if not doc:
@@ -7302,7 +7430,6 @@ async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends
         single_fields=["photo_url"],
         gallery_fields=["gallery"],
         list_field_permissions={"gallery": ("content.media.gallery.delete", None)},
-        single_field_replacement_allowed=["photo_url"],
     )
     _check_locks(old_doc, update_data, user)
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": update_data})
@@ -7329,8 +7456,7 @@ async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depe
 
 @api_router.delete("/actors/{actor_id}")
 async def delete_actor(actor_id: str, user: dict = Depends(get_current_user)):
-    if not _can_delete_content_page(user, "content.actor.delete"):
-        raise HTTPException(status_code=403, detail="You don't have permission to delete this actor.")
+    _require_perm(user, "content.delete", "You don't have permission to delete content.")
     await _ensure_content_edits_allowed(user)
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
     if not doc:
@@ -7711,25 +7837,7 @@ async def _run_cleanup() -> dict:
 async def cron_cleanup(request: Request, authorization: Optional[str] = Header(default=None)):
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     _verify_cron_auth(authorization)
-    run_id = request.headers.get("X-Webhook-Id") or ""
-    if run_id:
-        try:
-            already = await db.cron_runs.find_one({"run_id": run_id, "job": "cleanup"})
-        except Exception:
-            already = None
-        if already:
-            return {"ok": True, "duplicate": True}
-        try:
-            await db.cron_runs.insert_one({
-                "run_id": run_id,
-                "job": "cleanup",
-                "at": datetime.now(timezone.utc).isoformat(),
-            })
-        except Exception:
-            pass
-    import asyncio
-    asyncio.create_task(_run_cleanup())
-    return {"ok": True, "queued": True}
+    return {"ok": True, "disabled": True}
 
 async def _purge_expired_deleted_accounts() -> dict:
     now = datetime.now(timezone.utc)
@@ -7864,9 +7972,8 @@ async def cron_tmdb_cast_backfill(request: Request, authorization: Optional[str]
 
 @api_router.post("/admin/cleanup/run")
 async def run_cleanup_now(_admin: dict = Depends(get_current_admin)):
-    """Admin: trigger the disk cleanup immediately."""
-    report = await _run_cleanup()
-    return {"ok": True, **report}
+    """Disk cleanup is disabled."""
+    return {"ok": True, "disabled": True}
 
 @api_router.post("/admin/backups/run")
 async def run_backup_now(_admin: dict = Depends(get_current_admin)):
@@ -8339,7 +8446,7 @@ async def upload_file(file: UploadFile = File(...), _user: dict = Depends(get_cu
     return {"path": result["path"], "url": f"/api/files/{result['path']}"}
 
 @api_router.get("/files/{path:path}")
-async def download_file(path: str, image_format: Optional[str] = Query(default=None, alias="format")):
+def download_file(path: str, image_format: Optional[str] = Query(default=None, alias="format")):
     try:
         data, content_type = get_object(path)
     except Exception:
@@ -8357,20 +8464,28 @@ async def download_file(path: str, image_format: Optional[str] = Query(default=N
                 else:
                     converted = image.convert("RGB")
                 output = BytesIO()
-                quality = 82 if image_format == "thumbnail" else 88
-                converted.save(output, format="JPEG", quality=quality, optimize=True)
+                if image_format == "thumbnail":
+                    converted.save(output, format="WEBP", quality=78, method=4)
+                    media_type = "image/webp"
+                else:
+                    converted.save(output, format="JPEG", quality=88, optimize=True)
+                    media_type = "image/jpeg"
             return FastAPIResponse(
                 content=output.getvalue(),
-                media_type="image/jpeg",
-                headers={"Cache-Control": "public, max-age=86400, immutable"},
+                media_type=media_type,
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
             )
         except Exception:
             return FastAPIResponse(
                 content=data,
                 media_type=content_type,
-                headers={"Cache-Control": "public, max-age=86400"},
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
             )
-    return FastAPIResponse(content=data, media_type=content_type)
+    return FastAPIResponse(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 # ----------- Startup -----------
 @app.on_event("startup")
