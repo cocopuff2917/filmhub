@@ -6,7 +6,7 @@ import SeriesForm from "@/components/forms/SeriesForm";
 export default function EntityEditDialog({ open, onOpenChange, entityType, entity, onSaved }) {
   const handleSaved = (r) => {
     onOpenChange(false);
-    onSaved && onSaved(r);
+    if (r?.id) onSaved && onSaved(r);
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

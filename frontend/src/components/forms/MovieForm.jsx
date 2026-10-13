@@ -72,7 +72,7 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
     e.preventDefault();
     const payload = {
       ...form,
-      ...(canEditImdb && !movie?.id ? { imdb_id: form.imdb_id || null } : {}),
+        ...(!movie?.id ? { imdb_id: form.imdb_id || null } : {}),
       genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
       keywords: form.keywords.split(",").map((g) => g.trim()).filter(Boolean),
       video_urls: form.video_urls.split("\n").map((u) => u.trim()).filter(Boolean),
@@ -84,7 +84,7 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
       cast: form.cast.filter((c) => c.actor_id && c.character_name),
       crew: form.crew.filter((c) => c.name && c.role),
     };
-    if (movie?.id || !canEditImdb) delete payload.imdb_id;
+    if (movie?.id && !canEditImdb) delete payload.imdb_id;
     try {
       let result;
       if (movie?.id) {
@@ -129,9 +129,9 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
         genres: suggestions.genres?.length ? suggestions.genres.join(", ") : current.genres,
         keywords: suggestions.keywords?.length ? suggestions.keywords.join(", ") : current.keywords,
       }))} />}
-      {!movie?.id && canEditImdb && <div>
+      {!movie?.id && <div>
         <Label className="text-slate-300">IMDb ID</Label>
-        <Input required={isModerator} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-imdb-input" />
+        <Input required={!movie?.id} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="movie-imdb-input" />
       </div>}
       <div>
         <Label className="text-slate-300">Tagline</Label>

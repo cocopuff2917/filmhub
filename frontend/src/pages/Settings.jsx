@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Ban, KeyRound, LockKeyhole, Settings2, Undo2, UserRoundX } from "lucide-react";
+import { Ban, LockKeyhole, Settings2, Undo2, UserRoundX } from "lucide-react";
 import { toast } from "sonner";
 import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -8,9 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import APIKeys from "@/pages/APIKeys";
 
-const sections = ["security", "blocked", "api-keys"];
+const sections = ["security", "blocked"];
 
 export default function Settings() {
   const { user, initializing, refresh } = useAuth();
@@ -120,7 +119,7 @@ export default function Settings() {
             <Settings2 className="h-6 w-6 text-amber-400" aria-hidden="true" />
             <h1 className="font-heading text-2xl font-bold">Account settings</h1>
           </div>
-          <p className="mt-2 text-sm text-slate-400">Security, blocked accounts, and developer access.</p>
+          <p className="mt-2 text-sm text-slate-400">Security and blocked accounts.</p>
         </header>
 
         <Tabs value={section} onValueChange={changeSection} className="mt-6">
@@ -130,9 +129,6 @@ export default function Settings() {
             </TabsTrigger>
             <TabsTrigger value="blocked" className="rounded-none border-b-2 border-transparent px-4 py-3 text-slate-400 data-[state=active]:border-amber-400 data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none">
               <Ban className="mr-2 h-4 w-4" /> Blocked users
-            </TabsTrigger>
-            <TabsTrigger value="api-keys" className="rounded-none border-b-2 border-transparent px-4 py-3 text-slate-400 data-[state=active]:border-amber-400 data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none">
-              <KeyRound className="mr-2 h-4 w-4" /> API keys
             </TabsTrigger>
           </TabsList>
 
@@ -208,9 +204,6 @@ export default function Settings() {
             )}
           </TabsContent>
 
-          <TabsContent value="api-keys" className="mt-0">
-            <APIKeys embedded />
-          </TabsContent>
         </Tabs>
       </div>
     </main>

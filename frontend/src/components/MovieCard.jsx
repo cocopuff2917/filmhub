@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Star } from "lucide-react";
-import { fileUrl, recoverTmdbImage } from "@/lib/api";
+import { fileUrl } from "@/lib/api";
 import ImageWithFallback from "@/components/ImageWithFallback";
 
 export default function MovieCard({ movie, testid }) {
@@ -16,7 +16,6 @@ export default function MovieCard({ movie, testid }) {
       <div className="relative aspect-[2/3] overflow-hidden bg-[#1e2430]">
         <ImageWithFallback
           src={poster}
-          resolveFallback={() => recoverTmdbImage("movie", movie.id, "poster_url")}
           alt={movie.title}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           loading="lazy"

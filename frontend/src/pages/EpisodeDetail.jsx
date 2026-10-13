@@ -57,6 +57,7 @@ function EpisodeCredits({ title, members = [], emptyMessage, testId, action, can
 export default function EpisodeDetail() {
   const { id, seasonNumber, episodeNumber } = useParams();
   const { user } = useAuth();
+  const isModerator = ["admin", "moderator"].includes(user?.effective_role || user?.role);
   const [series, setSeries] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingMainCast, setEditingMainCast] = useState(false);
@@ -139,9 +140,10 @@ export default function EpisodeDetail() {
   const previousEpisode = episodes[episodeIndex - 1];
   const nextEpisode = episodes[episodeIndex + 1];
   const episodeMainCastLocked = (series.locked_main_cast_episodes || []).includes(`${seasonNumber}:${episodeNumber}`);
+  const canEditCatalog = !!user;
   const canEditLocked = ["admin", "moderator"].includes(user?.effective_role || user?.role) || (user?.permissions || []).includes("content.edit_locked");
-  const canEditGuestStars = !!user && (!(series.locked_fields || []).includes("seasons") || canEditLocked);
-  const canEditEpisodeDetails = !!user && (!(series.locked_fields || []).includes("seasons") || canEditLocked);
+  const canEditGuestStars = canEditCatalog && (!(series.locked_fields || []).includes("seasons") || canEditLocked);
+  const canEditEpisodeDetails = canEditCatalog && (!(series.locked_fields || []).includes("seasons") || canEditLocked);
   const guestStars = episode.guest_stars || [];
   const guestStarLocked = (member) => (series.locked_guest_stars || []).includes(`${seasonNumber}:${episodeNumber}:${member.actor_id}`);
   const saveGuestStar = (row) => {
@@ -205,6 +207,7 @@ export default function EpisodeDetail() {
           <div className="mt-8 max-w-3xl">
             <div className="text-xs font-semibold uppercase tracking-widest text-amber-400">Season {season.season_number} · Episode {episode.episode_number}</div>
             <h1 className="mt-2 font-heading text-3xl font-bold sm:text-4xl" data-testid="episode-title">{episode.name || `Episode ${episode.episode_number}`}</h1>
+            {user && !canEditCatalog && <Link to={`/series/${id}`} className="mt-3 inline-flex text-sm text-amber-300 hover:text-amber-200">Suggest an episode change from the series page</Link>}
           </div>
         </div>
       </section>
@@ -259,7 +262,7 @@ export default function EpisodeDetail() {
             testId="episode-main-cast"
             action={<>
               {episodeMainCastLocked && <span className="inline-flex items-center gap-1 text-xs text-amber-400"><LockKeyhole className="h-3.5 w-3.5" />Locked</span>}
-              {user && !editingMainCast && (!episodeMainCastLocked || canEditLocked) && <Button type="button" size="sm" variant="outline" onClick={() => setEditingMainCast(true)} className="border-white/15 text-slate-200"><Edit className="h-3.5 w-3.5" />Edit</Button>}
+              {canEditCatalog && !editingMainCast && (!episodeMainCastLocked || canEditLocked) && <Button type="button" size="sm" variant="outline" onClick={() => setEditingMainCast(true)} className="border-white/15 text-slate-200"><Edit className="h-3.5 w-3.5" />Edit</Button>}
             </>}
           />
           {editingMainCast && (

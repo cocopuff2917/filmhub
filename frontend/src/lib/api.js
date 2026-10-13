@@ -24,7 +24,8 @@ export function fileUrl(path, format) {
   if (!path) return "";
   if (path.startsWith("http")) return path;
   const url = path.startsWith("/api/files/") ? `${BACKEND_URL}${path}` : `${API}/files/${path}`;
-  return format ? `${url}?format=${encodeURIComponent(format)}` : url;
+  const imageFormat = format || "thumbnail";
+  return `${url}?format=${encodeURIComponent(imageFormat)}`;
 }
 
 export async function recoverTmdbImage(entityType, entityId, imageField) {

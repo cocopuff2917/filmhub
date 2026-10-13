@@ -13,7 +13,6 @@ import bcrypt
 import jwt
 import requests
 import secrets
-import hashlib
 import hmac
 import re
 import calendar
@@ -310,6 +309,7 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
                 "color": cr.get("color", "#f59e0b"),
                 "base": _derive_base(perms),
                 "permissions": perms,
+                "assignable_role_ids": cr.get("assignable_role_ids", []) or [],
                 "description": cr.get("description", ""),
             })
         user["custom_roles"] = custom_roles_resolved
@@ -326,7 +326,8 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
         if user.get("role") == "admin" or eff == "admin":
             eff_perms = set(PERMISSIONS_ALL)
         elif user.get("role") == "moderator" or eff == "moderator":
-            eff_perms = set(PERMS_MODERATOR)
+            moderator_config = await db.site_config.find_one({"_id": "moderator-role-permissions"})
+            eff_perms = set(moderator_config.get("permissions", PERMS_MODERATOR) if moderator_config else PERMS_MODERATOR)
         for cr in custom_roles_resolved:
             eff_perms.update(cr.get("permissions") or [])
         user["permissions"] = sorted(eff_perms)
@@ -650,9 +651,6 @@ class ProfileUpdate(BaseModel):
 class AccountDeleteRequest(BaseModel):
     current_password: str = Field(min_length=1)
 
-class APIKeyCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-
 class BlockUserRequest(BaseModel):
     user_id: str
 
@@ -749,6 +747,9 @@ PERMISSIONS_ALL = [
     "content.edit_imdb_id",
     "content.bypass_edit_freeze",
     "content.delete",
+    "content.movie.delete",
+    "content.series.delete",
+    "content.actor.delete",
     "content.lock",
     "content.protect_fields",
     "content.lock_cast",
@@ -792,6 +793,9 @@ PERMISSION_LABELS = {
     "content.edit_imdb_id": "Edit IMDb ID",
     "content.bypass_edit_freeze": "Bypass catalog editing and creation pause",
     "content.delete": "Delete movies, TV series, or actors",
+    "content.movie.delete": "Delete movie pages",
+    "content.series.delete": "Delete TV series pages",
+    "content.actor.delete": "Delete actor pages",
     "content.lock": "Lock entire entity fields (bulk)",
     "content.protect_fields": "Protect fields (toggle per-field locks)",
     "content.lock_cast": "Lock & unlock individual cast / guest-star rows",
@@ -831,17 +835,32 @@ def _require_perm(user: Optional[dict], perm: str, detail: str = "You don't have
     if not _has_perm(user, perm):
         raise HTTPException(status_code=403, detail=detail)
 
+def _manageable_role_ids(user: Optional[dict]) -> set:
+    if not user:
+        return set()
+    return {
+        role_id
+        for role in user.get("custom_roles", [])
+        if {"user.assign_custom_role", "user.assign_role"}.intersection(role.get("permissions") or [])
+        for role_id in (role.get("assignable_role_ids") or [])
+    }
+
+def _can_delete_content_page(user: Optional[dict], permission: str) -> bool:
+    return _has_perm(user, "content.delete") or _has_perm(user, permission)
+
 class RoleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     color: str = "#f59e0b"
     description: str = ""
     permissions: List[str] = []
+    assignable_role_ids: List[str] = []
 
 class RolePatch(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     description: Optional[str] = None
     permissions: Optional[List[str]] = None
+    assignable_role_ids: Optional[List[str]] = None
 
 class AssignRole(BaseModel):
     custom_role_id: Optional[str] = None  # legacy single assignment (kept for back-compat)
@@ -943,6 +962,7 @@ def _enforce_image_delete_guard(
     gallery_fields: Optional[List[str]] = None,
     single_field_permissions: Optional[dict] = None,
     list_field_permissions: Optional[dict] = None,
+    single_field_replacement_allowed: Optional[List[str]] = None,
 ):
     """Allow image deletion, reordering, and primary selection only with their matching grants."""
     single_field_permissions = single_field_permissions or {}
@@ -954,7 +974,8 @@ def _enforce_image_delete_guard(
         if f in update_data and not array_controls_primary:
             old_val = old_doc.get(f) or ""
             new_val = update_data.get(f) or ""
-            if old_val and old_val != new_val and not _has_perm(user, single_field_permissions.get(f, "")):
+            replacement_allowed = f in (single_field_replacement_allowed or []) and bool(new_val)
+            if old_val and old_val != new_val and not replacement_allowed and not _has_perm(user, single_field_permissions.get(f, "")):
                 update_data[f] = old_val
     for f in (gallery_fields or []):
         if f in update_data:
@@ -1896,92 +1917,6 @@ async def reset_password(payload: ResetPasswordRequest):
     return {"ok": True, "message": "Password has been reset. You can now sign in."}
 
 # ----------- Users (Public) -----------
-def _api_key_digest(api_key: str) -> str:
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-
-
-@api_router.get("/api-keys")
-async def list_api_keys(user: dict = Depends(get_current_user)):
-    keys = []
-    cursor = db.api_keys.find({"user_id": user["id"], "revoked_at": {"$exists": False}}).sort("created_at", -1)
-    async for key in cursor:
-        keys.append({
-            "id": str(key["_id"]),
-            "name": key["name"],
-            "last_four": key["last_four"],
-            "created_at": key["created_at"],
-            "last_used_at": key.get("last_used_at"),
-        })
-    return keys
-
-
-@api_router.post("/api-keys")
-async def create_api_key(payload: APIKeyCreateRequest, user: dict = Depends(get_current_user)):
-    active_count = await db.api_keys.count_documents({"user_id": user["id"], "revoked_at": {"$exists": False}})
-    if active_count >= 10:
-        raise HTTPException(status_code=400, detail="You can have at most 10 active API keys")
-    await db.api_keys.create_index("key_hash", unique=True)
-    raw_key = f"cv_live_{secrets.token_urlsafe(32)}"
-    now = datetime.now(timezone.utc).isoformat()
-    result = await db.api_keys.insert_one({
-        "user_id": user["id"],
-        "name": payload.name.strip(),
-        "key_hash": _api_key_digest(raw_key),
-        "last_four": raw_key[-4:],
-        "created_at": now,
-    })
-    return {
-        "id": str(result.inserted_id),
-        "name": payload.name.strip(),
-        "api_key": raw_key,
-        "last_four": raw_key[-4:],
-        "created_at": now,
-    }
-
-
-@api_router.delete("/api-keys/{api_key_id}")
-async def revoke_api_key(api_key_id: str, user: dict = Depends(get_current_user)):
-    try:
-        key_object_id = ObjectId(api_key_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="API key not found")
-    result = await db.api_keys.update_one(
-        {"_id": key_object_id, "user_id": user["id"], "revoked_at": {"$exists": False}},
-        {"$set": {"revoked_at": datetime.now(timezone.utc).isoformat()}},
-    )
-    if not result.modified_count:
-        raise HTTPException(status_code=404, detail="API key not found")
-    return {"ok": True}
-
-
-async def require_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")):
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="A valid X-API-Key header is required")
-    key = await db.api_keys.find_one({
-        "key_hash": _api_key_digest(x_api_key),
-        "revoked_at": {"$exists": False},
-    })
-    if not key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    try:
-        user = await db.users.find_one({"_id": ObjectId(key["user_id"])})
-    except Exception:
-        user = None
-    if not user or user.get("deleted_at"):
-        raise HTTPException(status_code=401, detail="API key owner is unavailable")
-    suspended_until = user.get("suspended_until")
-    if suspended_until == "permanent":
-        raise HTTPException(status_code=403, detail="API key owner is suspended")
-    if suspended_until:
-        try:
-            if datetime.fromisoformat(suspended_until) > datetime.now(timezone.utc):
-                raise HTTPException(status_code=403, detail="API key owner is suspended")
-        except ValueError:
-            pass
-    await db.api_keys.update_one({"_id": key["_id"]}, {"$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}})
-    return {"user_id": key["user_id"]}
-
-
 async def _get_blocked_user_ids(user: Optional[dict]) -> list:
     if not user:
         return []
@@ -2429,33 +2364,77 @@ async def list_roles():
             "name": r.get("name"),
             "base": _derive_base(perms),
             "permissions": perms,
+            "assignable_role_ids": r.get("assignable_role_ids", []) or [],
             "color": r.get("color", "#f59e0b"),
             "description": r.get("description", ""),
         })
+    moderator_config = await db.site_config.find_one({"_id": "moderator-role-permissions"})
+    roles.append({
+        "id": "builtin-moderator",
+        "name": "Moderator",
+        "base": "moderator",
+        "permissions": sorted(moderator_config.get("permissions", PERMS_MODERATOR) if moderator_config else PERMS_MODERATOR),
+        "assignable_role_ids": [],
+        "color": "#38bdf8",
+        "description": "Built-in moderator role",
+        "builtin": True,
+    })
     return roles
+
+async def _validated_assignable_role_ids(role_ids: List[str]) -> List[str]:
+    cleaned = []
+    for role_id in role_ids:
+        if role_id == "moderator":
+            if role_id not in cleaned:
+                cleaned.append(role_id)
+            continue
+        try:
+            role = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
+        except Exception:
+            role = None
+        if not role:
+            raise HTTPException(status_code=400, detail=f"Invalid assignable custom role: {role_id}")
+        if role_id not in cleaned:
+            cleaned.append(role_id)
+    return cleaned
 
 @api_router.post("/roles")
 async def create_role(payload: RoleCreate, admin: dict = Depends(get_current_user)):
     _require_perm(admin, "roles.manage")
     perms = [p for p in payload.permissions if p in PERMISSIONS_ALL]
-    doc = {"name": payload.name, "permissions": perms, "color": payload.color, "description": payload.description, "created_at": datetime.now(timezone.utc).isoformat()}
+    assignable_role_ids = await _validated_assignable_role_ids(payload.assignable_role_ids)
+    doc = {"name": payload.name, "permissions": perms, "assignable_role_ids": assignable_role_ids, "color": payload.color, "description": payload.description, "created_at": datetime.now(timezone.utc).isoformat()}
     r = await db.custom_roles.insert_one(doc)
-    return {"id": str(r.inserted_id), "name": payload.name, "permissions": perms, "base": _derive_base(perms), "color": payload.color, "description": payload.description}
+    return {"id": str(r.inserted_id), "name": payload.name, "permissions": perms, "assignable_role_ids": assignable_role_ids, "base": _derive_base(perms), "color": payload.color, "description": payload.description}
 
 @api_router.patch("/roles/{role_id}")
 async def update_role(role_id: str, payload: RolePatch, admin: dict = Depends(get_current_user)):
     _require_perm(admin, "roles.manage")
     data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if role_id == "builtin-moderator":
+        if "permissions" not in data:
+            raise HTTPException(status_code=400, detail="Moderator role permissions are required")
+        perms = [p for p in data["permissions"] if p in PERMISSIONS_ALL]
+        await db.site_config.update_one(
+            {"_id": "moderator-role-permissions"},
+            {"$set": {"permissions": perms}},
+            upsert=True,
+        )
+        return {"id": role_id, "name": "Moderator", "permissions": perms, "assignable_role_ids": [], "base": "moderator", "color": "#38bdf8", "description": "Built-in moderator role", "builtin": True}
     if "permissions" in data:
         data["permissions"] = [p for p in data["permissions"] if p in PERMISSIONS_ALL]
+    if "assignable_role_ids" in data:
+        data["assignable_role_ids"] = await _validated_assignable_role_ids(data["assignable_role_ids"])
     await db.custom_roles.update_one({"_id": ObjectId(role_id)}, {"$set": data})
     r = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
     perms = r.get("permissions", []) or []
-    return {"id": str(r["_id"]), "name": r.get("name"), "permissions": perms, "base": _derive_base(perms), "color": r.get("color"), "description": r.get("description", "")}
+    return {"id": str(r["_id"]), "name": r.get("name"), "permissions": perms, "assignable_role_ids": r.get("assignable_role_ids", []) or [], "base": _derive_base(perms), "color": r.get("color"), "description": r.get("description", "")}
 
 @api_router.delete("/roles/{role_id}")
 async def delete_role(role_id: str, admin: dict = Depends(get_current_user)):
     _require_perm(admin, "roles.manage")
+    if role_id == "builtin-moderator":
+        raise HTTPException(status_code=400, detail="The built-in Moderator role cannot be deleted")
     await db.custom_roles.delete_one({"_id": ObjectId(role_id)})
     await db.users.update_many({"custom_role_id": role_id}, {"$unset": {"custom_role_id": ""}})
     return {"ok": True}
@@ -2469,10 +2448,26 @@ async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = De
         role_ids = list(payload.custom_role_ids)
     elif payload.custom_role_id:
         role_ids = [payload.custom_role_id]
-    # dedupe + validate
+    is_admin = admin.get("role") == "admin" or admin.get("effective_role") == "admin"
+    allowed_ids = _manageable_role_ids(admin)
+    if not is_admin and not allowed_ids:
+        raise HTTPException(status_code=403, detail="You don't have permission to manage any custom roles.")
+    # Non-admin managers can only change assignments covered by their role allow-list.
+    if not is_admin and any(rid not in allowed_ids for rid in role_ids):
+        raise HTTPException(status_code=403, detail="You can only assign custom roles granted to your role.")
+    try:
+        target_id = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    target = await db.users.find_one({"_id": target_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    existing_ids = list(dict.fromkeys((target.get("custom_role_ids") or []) + ([target["custom_role_id"]] if target.get("custom_role_id") else [])))
+    requested_ids = role_ids if is_admin else [rid for rid in existing_ids if rid not in allowed_ids] + role_ids
+    # Deduplicate and validate.
     cleaned: List[str] = []
     labels: List[str] = []
-    for rid in role_ids:
+    for rid in requested_ids:
         if not rid or rid in cleaned:
             continue
         try:
@@ -2489,8 +2484,8 @@ async def assign_custom_role(user_id: str, payload: AssignRole, admin: dict = De
         update["$set"]["custom_role_id"] = cleaned[0]
     else:
         update["$unset"] = {"custom_role_id": ""}
-    await db.users.update_one({"_id": ObjectId(user_id)}, update)
-    target = await db.users.find_one({"_id": ObjectId(user_id)})
+    await db.users.update_one({"_id": target_id}, update)
+    target = await db.users.find_one({"_id": target_id})
     if target:
         await _sync_user_role_badges(user_id, await _effective_user_role(target))
     label = ", ".join(labels) if labels else "(none)"
@@ -2763,8 +2758,20 @@ async def set_user_role(user_id: str, payload: RoleUpdate, admin: dict = Depends
     _require_perm(admin, "user.assign_role")
     if payload.role not in ("user", "moderator", "admin"):
         raise HTTPException(status_code=400, detail="Invalid role")
-    await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": payload.role}})
-    target = await db.users.find_one({"_id": ObjectId(user_id)})
+    is_admin = admin.get("role") == "admin" or admin.get("effective_role") == "admin"
+    if not is_admin and payload.role == "admin":
+        raise HTTPException(status_code=403, detail="Only admins can assign the admin role.")
+    try:
+        target_id = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="User not found")
+    target = await db.users.find_one({"_id": target_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not is_admin and (payload.role == "moderator" or target.get("role") == "moderator") and "moderator" not in _manageable_role_ids(admin):
+        raise HTTPException(status_code=403, detail="You don't have permission to manage the Moderator role.")
+    await db.users.update_one({"_id": target_id}, {"$set": {"role": payload.role}})
+    target = await db.users.find_one({"_id": target_id})
     if target:
         await _sync_user_role_badges(user_id, await _effective_user_role(target))
     await log_edit(admin, "user", user_id, "role", target.get("name", "") if target else "", f"Role set to {payload.role}")
@@ -2845,6 +2852,29 @@ async def admin_update_user_profile(
         changes=compute_field_changes(target, update),
     )
     return {"ok": True, "updated": update}
+
+
+@api_router.post("/admin/users/remove-profile-pictures")
+async def remove_all_user_profile_pictures(admin: dict = Depends(get_current_admin)):
+    result = await db.users.update_many(
+        {"avatar_url": {"$exists": True, "$nin": ["", None]}},
+        {"$set": {"avatar_url": ""}},
+    )
+    counts = {"users": result.modified_count}
+    for collection_name in ("edits", "comments", "threads", "thread_messages"):
+        collection = getattr(db, collection_name)
+        update_result = await collection.update_many(
+            {"user_avatar": {"$exists": True, "$nin": ["", None]}},
+            {"$set": {"user_avatar": ""}},
+        )
+        counts[collection_name] = update_result.modified_count
+
+    notification_result = await db.notifications.update_many(
+        {"from_user_avatar": {"$exists": True, "$nin": ["", None]}},
+        {"$set": {"from_user_avatar": ""}},
+    )
+    counts["notifications"] = notification_result.modified_count
+    return {"ok": True, "updated": counts, "users_updated": counts["users"]}
 
 # ============================================================================
 # IP Ban (moderator/admin tool)
@@ -3183,6 +3213,8 @@ async def list_all_users(mod: dict = Depends(get_current_user), limit: int = 200
             "bio": u.get("bio", ""),
             "role": u.get("role", "user"),
             "custom_role": cr,
+            "custom_roles": [],
+            "custom_role_ids": [],
             "avatar_url": u.get("avatar_url", ""),
             "created_at": u.get("created_at"),
             "suspended_until": u.get("suspended_until"),
@@ -3191,6 +3223,24 @@ async def list_all_users(mod: dict = Depends(get_current_user), limit: int = 200
             "deleted_at": u.get("deleted_at"),
             "ip_count": len(u.get("ips", []) or []),
         })
+        role_ids = list(dict.fromkeys((u.get("custom_role_ids") or []) + ([u["custom_role_id"]] if u.get("custom_role_id") else [])))
+        resolved_roles = []
+        for role_id in role_ids:
+            try:
+                custom_role = await db.custom_roles.find_one({"_id": ObjectId(role_id)})
+            except Exception:
+                custom_role = None
+            if custom_role:
+                permissions = custom_role.get("permissions", []) or []
+                resolved_roles.append({
+                    "id": str(custom_role["_id"]),
+                    "name": custom_role.get("name"),
+                    "color": custom_role.get("color", "#f59e0b"),
+                    "base": _derive_base(permissions),
+                    "permissions": permissions,
+                })
+        users[-1]["custom_roles"] = resolved_roles
+        users[-1]["custom_role_ids"] = [role["id"] for role in resolved_roles]
     return users
 
 @api_router.get("/admin/username-cooldown/users")
@@ -4036,6 +4086,26 @@ async def triage_report(thread_id: str, mod: dict = Depends(get_current_user)):
             )
             response.raise_for_status()
             triage = json.loads(response.json()["choices"][0]["message"]["content"])
+    except httpx.HTTPStatusError as error:
+        provider_error = {}
+        try:
+            provider_error = error.response.json().get("error", {})
+        except (ValueError, AttributeError):
+            pass
+        error_code = provider_error.get("code") if isinstance(provider_error, dict) else None
+        status_code = error.response.status_code
+        logger.warning("Report triage provider returned HTTP %s (code=%s)", status_code, error_code or "unknown")
+        if error_code in {"insufficient_quota", "billing_hard_limit_reached"}:
+            raise HTTPException(
+                status_code=503,
+                detail="AI report triage has no available provider credits. Contact the site administrator to restore billing.",
+            )
+        if status_code in (401, 403):
+            raise HTTPException(
+                status_code=503,
+                detail="AI report triage provider credentials were rejected. Contact the site administrator.",
+            )
+        raise HTTPException(status_code=503, detail="AI report triage is temporarily unavailable")
     except Exception as error:
         logger.warning("Report triage request failed: %s", type(error).__name__)
         raise HTTPException(status_code=503, detail="AI report triage is temporarily unavailable")
@@ -4271,12 +4341,6 @@ async def _tmdb_actor_id(person: dict, user: dict) -> Optional[str]:
     tmdb_person_id = person.get("id")
     existing = await db.actors.find_one(_alive({"tmdb_id": tmdb_person_id})) if tmdb_person_id else None
     if existing:
-        profile_url = _tmdb_image(person.get("profile_path"))
-        if profile_url and not existing.get("photo_url"):
-            await db.actors.update_one(
-                {"_id": existing["_id"], "photo_url": {"$in": [None, ""]}},
-                {"$set": {"photo_url": profile_url}},
-            )
         return str(existing["_id"])
     named_matches = await db.actors.find(
         _alive({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
@@ -4285,16 +4349,13 @@ async def _tmdb_actor_id(person: dict, user: dict) -> Optional[str]:
         return str(named_matches[0]["_id"])
     if tmdb_person_id and len(named_matches) == 1 and not named_matches[0].get("tmdb_id"):
         update = {"tmdb_id": tmdb_person_id}
-        profile_url = _tmdb_image(person.get("profile_path"))
-        if profile_url and not named_matches[0].get("photo_url"):
-            update["photo_url"] = profile_url
         await db.actors.update_one({"_id": named_matches[0]["_id"]}, {"$set": update})
         return str(named_matches[0]["_id"])
     actor = {
         "name": name,
         "tmdb_id": tmdb_person_id,
         "bio": person.get("biography") or "",
-        "photo_url": _tmdb_image(person.get("profile_path")),
+        "photo_url": "",
         "birth_date": person.get("birthday"),
         "death_date": person.get("deathday"),
         "place_of_birth": person.get("place_of_birth") or "",
@@ -4385,16 +4446,12 @@ async def _backfill_tmdb_actor_details(bot: dict, limit: int = 25, force: bool =
         birthday = details.get("birthday")
         deathday = details.get("deathday")
         birth_place = (details.get("place_of_birth") or "").strip()
-        profile_url = _tmdb_image(details.get("profile_path"))
         if not actor.get("birth_date") and birthday:
             field_updates["birth_date"] = birthday
         if not actor.get("death_date") and deathday:
             field_updates["death_date"] = deathday
         if not actor.get("place_of_birth") and birth_place:
             field_updates["place_of_birth"] = birth_place
-        if not actor.get("photo_url") and profile_url:
-            field_updates["photo_url"] = profile_url
-
         update = {**field_updates, "_tmdb_person_details_checked_at": now_iso}
         query = {"_id": actor["_id"]}
         if field_updates:
@@ -4409,7 +4466,7 @@ async def _backfill_tmdb_actor_details(bot: dict, limit: int = 25, force: bool =
                 str(actor["_id"]),
                 "update",
                 actor.get("name") or "",
-                "Cineverse BOT added missing actor details and photo from TMDB",
+                "Cineverse BOT added missing actor details from TMDB",
                 compute_field_changes(actor, field_updates),
             )
         elif not field_updates:
@@ -4547,13 +4604,268 @@ def _is_external_image_url(value: Optional[str]) -> bool:
     return isinstance(value, str) and value.lower().startswith(("http://", "https://", "//", "data:"))
 
 
+IMAGE_CLEANUP_FIELDS = {
+    "users": ("avatar_url",),
+    "actors": ("photo_url",),
+    "movies": ("poster_url", "poster_urls"),
+    "series": ("poster_url", "poster_urls"),
+}
+
+
+class BrokenImageCandidate(BaseModel):
+    id: str = Field(max_length=64)
+    kind: str
+    field: str
+    url: str = Field(max_length=2048)
+
+
+class BrokenImageCleanupRequest(BaseModel):
+    items: List[BrokenImageCandidate] = Field(default_factory=list, max_length=500)
+
+
+class BrokenImageRepairRequest(BaseModel):
+    items: List[BrokenImageCandidate] = Field(default_factory=list, max_length=300)
+
+
+@api_router.get("/admin/images/cleanup/references")
+async def get_image_cleanup_references(admin: dict = Depends(get_current_admin)):
+    references = []
+    for kind, fields in IMAGE_CLEANUP_FIELDS.items():
+        collection = getattr(db, kind)
+        query = {"deleted_at": {"$exists": False}} if kind == "users" else _alive({})
+        projection = {field: 1 for field in fields}
+        projection.update({"name": 1, "title": 1})
+        async for doc in collection.find(query, projection):
+            for field in fields:
+                value = doc.get(field)
+                values = value if field.endswith("_urls") and isinstance(value, list) else [value]
+                for image_url in values:
+                    if isinstance(image_url, str) and image_url.strip():
+                        references.append({
+                            "id": str(doc["_id"]),
+                            "kind": kind,
+                            "label": doc.get("name") or doc.get("title") or "Untitled",
+                            "field": field,
+                            "url": image_url.strip(),
+                        })
+    return {"references": references}
+
+
+@api_router.post("/admin/images/cleanup/apply")
+async def apply_image_cleanup(payload: BrokenImageCleanupRequest, admin: dict = Depends(get_current_admin)):
+    grouped = {}
+    for item in payload.items:
+        if item.kind not in IMAGE_CLEANUP_FIELDS or item.field not in IMAGE_CLEANUP_FIELDS[item.kind]:
+            raise HTTPException(status_code=400, detail="Unsupported image reference")
+        try:
+            object_id = ObjectId(item.id)
+        except Exception:
+            continue
+        key = (item.kind, str(object_id))
+        group = grouped.setdefault(key, {"object_id": object_id, "values": {}})
+        group["values"].setdefault(item.field, set()).add(item.url)
+
+    removed = conflicted = 0
+    for (kind, _), group in grouped.items():
+        collection = getattr(db, kind)
+        query = {"_id": group["object_id"]}
+        if kind == "users":
+            query["deleted_at"] = {"$exists": False}
+        else:
+            query = _alive(query)
+        fields = set(field for field in IMAGE_CLEANUP_FIELDS[kind])
+        doc = await collection.find_one(query, {field: 1 for field in fields})
+        if not doc:
+            conflicted += sum(len(urls) for urls in group["values"].values())
+            continue
+
+        updates = {}
+        expected = {"_id": group["object_id"]}
+        changed_count = 0
+        for field, broken_urls in group["values"].items():
+            current = doc.get(field)
+            if field.endswith("_urls") and isinstance(current, list):
+                remaining = [url for url in current if url not in broken_urls]
+                matched = len(current) - len(remaining)
+                if not matched:
+                    conflicted += len(broken_urls)
+                    continue
+                updates[field] = remaining
+                expected[field] = current
+                primary_field = field.removesuffix("s")
+                if doc.get(primary_field) in broken_urls:
+                    updates[primary_field] = next((url for url in remaining if isinstance(url, str)), "")
+                    expected[primary_field] = doc.get(primary_field)
+                changed_count += matched
+            elif isinstance(current, str) and current in broken_urls:
+                updates[field] = ""
+                expected[field] = current
+                changed_count += 1
+            else:
+                conflicted += len(broken_urls)
+
+        if updates.get("poster_url") == "":
+            remaining_posters = updates.get("poster_urls", doc.get("poster_urls") or [])
+            updates["poster_url"] = next((url for url in remaining_posters if isinstance(url, str)), "")
+
+        if updates:
+            result = await collection.update_one(expected, {"$set": updates})
+            if result.modified_count:
+                removed += changed_count
+            else:
+                conflicted += changed_count
+    return {"removed": removed, "conflicted": conflicted}
+
+
+async def _tmdb_replacement_image(kind: str, doc: dict) -> Optional[str]:
+    if kind != "series":
+        return None
+
+    media_kind = "series"
+    date_field = "first_air_date"
+    matched_id = await _tmdb_match_id(
+        media_kind,
+        doc.get("title") or "",
+        doc.get(date_field),
+        doc.get("tmdb_id"),
+    )
+    if not matched_id:
+        return None
+    details = await _tmdb_request(f"/tv/{matched_id}")
+    return _tmdb_image(details.get("poster_path"))
+
+
+async def _clear_user_avatar_references(user_id: str):
+    for collection_name in ("edits", "comments", "threads", "thread_messages"):
+        await getattr(db, collection_name).update_many(
+            {"user_id": user_id},
+            {"$set": {"user_avatar": ""}},
+        )
+    await db.notifications.update_many(
+        {"from_user_id": user_id},
+        {"$set": {"from_user_avatar": ""}},
+    )
+
+
+@api_router.post("/admin/images/cleanup/restore")
+async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict = Depends(get_current_admin)):
+    allowed_fields = {
+        "users": {"avatar_url"},
+        "actors": {"photo_url"},
+        "movies": {"poster_url", "poster_urls"},
+        "series": {"poster_url", "poster_urls"},
+    }
+    grouped = {}
+    for item in payload.items:
+        if item.kind not in allowed_fields or item.field not in allowed_fields[item.kind]:
+            raise HTTPException(status_code=400, detail="Unsupported image reference")
+        try:
+            object_id = ObjectId(item.id)
+        except Exception:
+            continue
+        key = (item.kind, str(object_id))
+        group = grouped.setdefault(key, {"object_id": object_id, "values": {}})
+        group["values"].setdefault(item.field, set()).add(item.url)
+
+    restored = cleared = unavailable = conflicted = 0
+    for (kind, _), group in grouped.items():
+        object_id = group["object_id"]
+        if kind == "users":
+            broken_urls = group["values"].get("avatar_url", set())
+            query = {"_id": object_id, "deleted_at": {"$exists": False}, "avatar_url": {"$in": list(broken_urls)}}
+            result = await db.users.update_one(query, {"$set": {"avatar_url": ""}})
+            if result.modified_count:
+                await _clear_user_avatar_references(str(object_id))
+                cleared += 1
+            else:
+                conflicted += len(broken_urls)
+            continue
+
+        collection = getattr(db, kind)
+        query = _alive({"_id": object_id})
+        doc = await collection.find_one(query, {"name": 1, "title": 1, "tmdb_id": 1, "release_date": 1, "first_air_date": 1, "photo_url": 1, "poster_url": 1, "poster_urls": 1})
+        if not doc:
+            conflicted += sum(len(urls) for urls in group["values"].values())
+            continue
+
+        if kind == "actors":
+            broken_urls = group["values"].get("photo_url", set())
+            current = doc.get("photo_url") or ""
+            if current not in broken_urls:
+                conflicted += len(broken_urls)
+                continue
+            result = await collection.update_one(
+                _alive({"_id": object_id, "photo_url": current}),
+                {"$set": {"photo_url": "", "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            if result.modified_count:
+                cleared += 1
+            else:
+                conflicted += 1
+            continue
+
+        broken_primary = group["values"].get("poster_url", set())
+        broken_gallery = group["values"].get("poster_urls", set())
+        current_primary = doc.get("poster_url") or ""
+        current_gallery = list(doc.get("poster_urls") or [])
+        matched_gallery = [url for url in current_gallery if url in broken_gallery]
+        primary_is_broken = current_primary in broken_primary or current_primary in broken_gallery
+        if not primary_is_broken and not matched_gallery:
+            conflicted += sum(len(urls) for urls in group["values"].values())
+            continue
+
+        replacement = None
+        if primary_is_broken:
+            if kind == "movies":
+                replacement = next((url for url in current_gallery if url not in broken_gallery and url != current_primary), "")
+            else:
+                if not _tmdb_credentials_configured():
+                    unavailable += 1
+                    continue
+                try:
+                    replacement = await _tmdb_replacement_image(kind, doc)
+                except Exception as error:
+                    logger.warning("Broken poster repair failed for %s %s: %s", kind, object_id, type(error).__name__)
+                if not replacement:
+                    unavailable += 1
+                    continue
+
+        updates = {}
+        expected = {"_id": object_id}
+        if primary_is_broken:
+            updates["poster_url"] = replacement
+            expected["poster_url"] = doc.get("poster_url") or ""
+        if matched_gallery:
+            remaining = [url for url in current_gallery if url not in broken_gallery]
+            if primary_is_broken and replacement and replacement not in remaining:
+                primary_index = current_gallery.index(current_primary) if current_primary in current_gallery else len(remaining)
+                remaining.insert(min(primary_index, len(remaining)), replacement)
+            updates["poster_urls"] = remaining
+            expected["poster_urls"] = current_gallery
+        if primary_is_broken:
+            updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        result = await collection.update_one(_alive(expected), {"$set": updates})
+        if result.modified_count:
+            if primary_is_broken:
+                if replacement:
+                    restored += 1
+                else:
+                    cleared += 1
+            cleared += len(matched_gallery)
+        else:
+            conflicted += sum(len(urls) for urls in group["values"].values())
+
+    return {"restored": restored, "cleared": cleared, "unavailable": unavailable, "conflicted": conflicted}
+
+
 @api_router.post("/images/tmdb-fallback")
 async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     kind = payload.entity_type.strip().lower()
     image_field = payload.image_field.strip()
-    if kind not in ("movie", "series", "actor"):
+    if kind not in ("movie", "series"):
         raise HTTPException(status_code=400, detail="Unsupported image entity type")
-    valid_fields = {"actor": {"photo_url"}, "movie": {"poster_url", "backdrop_url"}, "series": {"poster_url", "backdrop_url"}}
+    valid_fields = {"movie": {"backdrop_url"}, "series": {"poster_url", "backdrop_url"}}
     if image_field not in valid_fields[kind]:
         raise HTTPException(status_code=400, detail="Unsupported image field")
     if not _tmdb_credentials_configured():
@@ -4563,7 +4875,7 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     except Exception:
         raise HTTPException(status_code=404, detail="Image owner not found")
 
-    collection = db.actors if kind == "actor" else db.movies if kind == "movie" else db.series
+    collection = db.movies if kind == "movie" else db.series
     doc = await collection.find_one(_alive({"_id": object_id}))
     if not doc:
         raise HTTPException(status_code=404, detail="Image owner not found")
@@ -4571,21 +4883,14 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     if _is_external_image_url(current_value):
         return {"url": current_value, "recovered": False}
 
-    if kind == "actor":
-        matched_id = await _tmdb_match_person_id(doc.get("name") or "", doc.get("tmdb_id"))
-        if not matched_id:
-            return {"url": "", "recovered": False}
-        details = await _tmdb_request(f"/person/{matched_id}")
-        image_url = _tmdb_image(details.get("profile_path"))
-    else:
-        date_field = "release_date" if kind == "movie" else "first_air_date"
-        matched_id = await _tmdb_match_id(kind, doc.get("title") or "", doc.get(date_field), doc.get("tmdb_id"))
-        if not matched_id:
-            return {"url": "", "recovered": False}
-        media_type = "movie" if kind == "movie" else "tv"
-        details = await _tmdb_request(f"/{media_type}/{matched_id}")
-        path_field = "poster_path" if image_field == "poster_url" else "backdrop_path"
-        image_url = _tmdb_image(details.get(path_field))
+    date_field = "release_date" if kind == "movie" else "first_air_date"
+    matched_id = await _tmdb_match_id(kind, doc.get("title") or "", doc.get(date_field), doc.get("tmdb_id"))
+    if not matched_id:
+        return {"url": "", "recovered": False}
+    media_type = "movie" if kind == "movie" else "tv"
+    details = await _tmdb_request(f"/{media_type}/{matched_id}")
+    path_field = "backdrop_path" if kind == "movie" or image_field == "backdrop_url" else "poster_path"
+    image_url = _tmdb_image(details.get(path_field))
 
     if not image_url:
         return {"url": "", "recovered": False}
@@ -4603,10 +4908,10 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     bot = await _ensure_tmdb_bot_user()
     await log_edit(
         bot,
-        "actor" if kind == "actor" else kind,
+        kind,
         payload.entity_id,
         "update",
-        doc.get("name") if kind == "actor" else doc.get("title") or "",
+        doc.get("title") or "",
         f"Cineverse BOT restored a missing {image_field.replace('_url', '').replace('_', ' ')} from TMDB",
         compute_field_changes(doc, {image_field: image_url}),
     )
@@ -5146,6 +5451,31 @@ async def update_content_edit_freeze(
     )
     return {"ok": True, "frozen": payload.frozen}
 
+@api_router.get("/moderation/catalog-creation/settings")
+async def get_catalog_creation_settings(user: dict = Depends(get_current_user)):
+    return {"enabled": bool((await db.site_config.find_one({"_id": "catalog-creation-settings"}) or {}).get("enabled", True))}
+
+@api_router.put("/moderation/catalog-creation/settings")
+async def update_catalog_creation_settings(
+    payload: TMDBImportSettingUpdate,
+    admin: dict = Depends(get_current_admin),
+):
+    setting_id = "catalog-creation-settings"
+    await db.site_config.update_one(
+        {"_id": setting_id},
+        {"$set": {"enabled": payload.enabled, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": admin["id"]}},
+        upsert=True,
+    )
+    await log_edit(
+        admin,
+        "site-config",
+        setting_id,
+        "update",
+        "Catalog creation",
+        f"Catalog creation {'enabled' if payload.enabled else 'disabled'}",
+    )
+    return {"ok": True, "enabled": payload.enabled}
+
 @api_router.get("/moderation/tmdb/settings")
 async def get_tmdb_import_settings(mod: dict = Depends(get_current_moderator)):
     return {"enabled": await _tmdb_import_is_enabled()}
@@ -5190,7 +5520,7 @@ async def search_tmdb(kind: str, q: str, mod: dict = Depends(get_current_moderat
             "title": item.get("title") if kind == "movie" else item.get("name"),
             "date": item.get("release_date") if kind == "movie" else item.get("first_air_date"),
             "overview": item.get("overview") or "",
-            "poster_url": _tmdb_image(item.get("poster_path")),
+            **({"poster_url": _tmdb_image(item.get("poster_path"))} if kind == "series" else {}),
         })
     return results
 
@@ -5238,7 +5568,6 @@ async def import_from_tmdb(payload: TMDBImportRequest, mod: dict = Depends(get_c
             "genres": [genre.get("name") for genre in details.get("genres", []) if genre.get("name")],
             "synopsis": details.get("overview") or "",
             "tagline": details.get("tagline") or "",
-            "poster_url": _tmdb_image(details.get("poster_path")),
             "backdrop_url": _tmdb_image(details.get("backdrop_path")),
             "trailer_url": _tmdb_trailer(videos),
             "runtime": details.get("runtime"),
@@ -5333,9 +5662,6 @@ async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_us
     await _ensure_content_edits_allowed(user)
     doc = payload.model_dump()
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
-    can_edit_imdb_id = is_mod or _has_perm(user, "content.edit_imdb_id")
-    if doc.get("imdb_id") and not can_edit_imdb_id:
-        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a movie's IMDb ID")
     if is_mod and not doc.get("imdb_id"):
         raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a movie")
     await _assert_unique_imdb_id(doc["imdb_id"])
@@ -5911,7 +6237,8 @@ async def lock_movie_fields(movie_id: str, payload: LockUpdate, mod: dict = Depe
 
 @api_router.delete("/movies/{movie_id}")
 async def delete_movie(movie_id: str, user: dict = Depends(get_current_user)):
-    _require_perm(user, "content.delete", "You don't have permission to delete content.")
+    if not _can_delete_content_page(user, "content.movie.delete"):
+        raise HTTPException(status_code=403, detail="You don't have permission to delete this movie.")
     await _ensure_content_edits_allowed(user)
     doc = await db.movies.find_one({"_id": ObjectId(movie_id)})
     if not doc:
@@ -5983,9 +6310,6 @@ async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_
     doc = _serialize_series_payload(payload.model_dump())
     doc["purchase_options"] = _normalize_purchase_options(doc.get("purchase_options", []))
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
-    can_edit_imdb_id = is_mod or _has_perm(user, "content.edit_imdb_id")
-    if doc.get("imdb_id") and not can_edit_imdb_id:
-        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a TV series' IMDb ID")
     if is_mod and not doc.get("imdb_id"):
         raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a TV series")
     await _assert_unique_imdb_id(doc["imdb_id"])
@@ -6191,45 +6515,6 @@ async def get_series(series_id: str, viewer: Optional[dict] = Depends(get_option
         pass
     return await enrich_series(doc)
 
-
-@api_router.get("/v1/movies")
-async def api_v1_list_movies(
-    q: Optional[str] = None,
-    genre: Optional[str] = None,
-    year: Optional[int] = None,
-    min_rating: Optional[float] = None,
-    sort: Optional[str] = "recent",
-    limit: int = Query(default=20, ge=1, le=100),
-    api_key: dict = Depends(require_api_key),
-):
-    return await list_movies(q=q, genre=genre, year=year, min_rating=min_rating, sort=sort, limit=limit)
-
-
-@api_router.get("/v1/movies/{movie_id}")
-async def api_v1_get_movie(movie_id: str, api_key: dict = Depends(require_api_key)):
-    return await get_movie(movie_id, viewer=None)
-
-
-@api_router.get("/v1/series")
-async def api_v1_list_series(
-    q: Optional[str] = None,
-    genre: Optional[str] = None,
-    network: Optional[str] = None,
-    year: Optional[int] = None,
-    min_rating: Optional[float] = None,
-    sort: Optional[str] = "recent",
-    limit: int = Query(default=20, ge=1, le=100),
-    api_key: dict = Depends(require_api_key),
-):
-    return await list_series(
-        q=q, genre=genre, network=network, year=year,
-        min_rating=min_rating, sort=sort, limit=limit,
-    )
-
-
-@api_router.get("/v1/series/{series_id}")
-async def api_v1_get_series(series_id: str, api_key: dict = Depends(require_api_key)):
-    return await get_series(series_id, viewer=None)
 
 @api_router.patch("/series/{series_id}/seasons/{season_number}/episodes/{episode_number}/main-cast")
 async def update_episode_main_cast(
@@ -6725,7 +7010,8 @@ async def lock_series_fields(series_id: str, payload: LockUpdate, mod: dict = De
 
 @api_router.delete("/series/{series_id}")
 async def delete_series(series_id: str, user: dict = Depends(get_current_user)):
-    _require_perm(user, "content.delete", "You don't have permission to delete content.")
+    if not _can_delete_content_page(user, "content.series.delete"):
+        raise HTTPException(status_code=403, detail="You don't have permission to delete this TV series.")
     await _ensure_content_edits_allowed(user)
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
     if not doc:
@@ -7016,6 +7302,7 @@ async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends
         single_fields=["photo_url"],
         gallery_fields=["gallery"],
         list_field_permissions={"gallery": ("content.media.gallery.delete", None)},
+        single_field_replacement_allowed=["photo_url"],
     )
     _check_locks(old_doc, update_data, user)
     await db.actors.update_one({"_id": ObjectId(actor_id)}, {"$set": update_data})
@@ -7042,7 +7329,8 @@ async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depe
 
 @api_router.delete("/actors/{actor_id}")
 async def delete_actor(actor_id: str, user: dict = Depends(get_current_user)):
-    _require_perm(user, "content.delete", "You don't have permission to delete content.")
+    if not _can_delete_content_page(user, "content.actor.delete"):
+        raise HTTPException(status_code=403, detail="You don't have permission to delete this actor.")
     await _ensure_content_edits_allowed(user)
     doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
     if not doc:
@@ -8056,10 +8344,12 @@ async def download_file(path: str, image_format: Optional[str] = Query(default=N
         data, content_type = get_object(path)
     except Exception:
         raise HTTPException(status_code=404, detail="File not found")
-    if image_format == "jpeg":
+    if image_format in ("jpeg", "thumbnail"):
         try:
             with Image.open(BytesIO(data)) as source:
                 image = ImageOps.exif_transpose(source)
+                if image_format == "thumbnail":
+                    image.thumbnail((640, 960), Image.Resampling.LANCZOS)
                 if image.mode in ("RGBA", "LA") or "transparency" in image.info:
                     rgba = image.convert("RGBA")
                     converted = Image.new("RGB", rgba.size, "white")
@@ -8067,14 +8357,19 @@ async def download_file(path: str, image_format: Optional[str] = Query(default=N
                 else:
                     converted = image.convert("RGB")
                 output = BytesIO()
-                converted.save(output, format="JPEG", quality=88, optimize=True)
+                quality = 82 if image_format == "thumbnail" else 88
+                converted.save(output, format="JPEG", quality=quality, optimize=True)
             return FastAPIResponse(
                 content=output.getvalue(),
                 media_type="image/jpeg",
-                headers={"Cache-Control": "public, max-age=86400"},
+                headers={"Cache-Control": "public, max-age=86400, immutable"},
             )
         except Exception:
-            raise HTTPException(status_code=415, detail="Image cannot be converted")
+            return FastAPIResponse(
+                content=data,
+                media_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
     return FastAPIResponse(content=data, media_type=content_type)
 
 # ----------- Startup -----------

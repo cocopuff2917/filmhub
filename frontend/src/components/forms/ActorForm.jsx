@@ -6,10 +6,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
+import { useAuth } from "@/context/AuthContext";
 
 export default function ActorForm({ actor, onSaved, onCancel }) {
+  const { user } = useAuth();
   const empty = { name: "", bio: "", photo_url: "", birth_date: "", death_date: "", place_of_birth: "", place_of_death: "", gallery: [] };
   const [form, setForm] = useState(empty);
+  const [catalogCreationEnabled, setCatalogCreationEnabled] = useState(true);
+  const isAdmin = ["admin"].includes(user?.effective_role || user?.role);
+
+  useEffect(() => {
+    if (!user || isAdmin) return;
+    api.get("/moderation/catalog-creation/settings")
+      .then((response) => setCatalogCreationEnabled(!!response.data.enabled))
+      .catch(() => setCatalogCreationEnabled(false));
+  }, [user?.id, isAdmin]);
 
   useEffect(() => {
     if (actor) {
@@ -31,6 +42,10 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!actor?.id && !isAdmin && !catalogCreationEnabled) {
+      toast.error("Creating actors is currently disabled by an administrator.");
+      return;
+    }
     try {
       let result;
       if (actor?.id) {
@@ -85,7 +100,7 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
         <GalleryUpload value={form.gallery} onChange={(v) => setForm({ ...form, gallery: v })} testid="actor-gallery-upload" />
       </div>
       <div className="flex gap-2 pt-4 border-t border-white/10">
-        <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="actor-submit-btn">
+        <Button type="submit" disabled={!actor?.id && !isAdmin && !catalogCreationEnabled} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="actor-submit-btn">
           {actor ? "Update Actor" : "Create Actor"}
         </Button>
         {onCancel && <Button type="button" variant="outline" onClick={onCancel} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>}

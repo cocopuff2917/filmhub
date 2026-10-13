@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { fileUrl, recoverTmdbImage } from "@/lib/api";
+import { fileUrl } from "@/lib/api";
 import ImageWithFallback from "@/components/ImageWithFallback";
 
 export default function ActorCard({ actor, testid }) {
@@ -14,7 +14,6 @@ export default function ActorCard({ actor, testid }) {
         <ImageWithFallback
           src={photo}
           fallbackSrc={fileUrl(actor.photo_url, "jpeg")}
-          resolveFallback={() => recoverTmdbImage("actor", actor.id, "photo_url")}
           alt={actor.name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           loading="lazy"

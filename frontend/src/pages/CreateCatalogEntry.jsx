@@ -21,7 +21,9 @@ export default function CreateCatalogEntry({ kind }) {
     );
   }
 
-  const onSaved = (result) => navigate(isMovie ? `/movie/${result.id}` : `/series/${result.id}`);
+  const onSaved = (result) => {
+    if (result?.id) navigate(isMovie ? `/movie/${result.id}` : `/series/${result.id}`);
+  };
   const Form = isMovie ? MovieForm : SeriesForm;
   const Icon = isMovie ? Clapperboard : Tv;
 

@@ -69,28 +69,6 @@ class TestLoginLockout:
         assert int(still_locked.headers["Retry-After"]) <= 300
 
 
-class TestAPIKeys:
-    def test_key_lifecycle_and_catalog_access(self, user_session):
-        created = user_session.post(f"{API}/api-keys", json={"name": "integration test"})
-        assert created.status_code == 200, created.text
-        key_data = created.json()
-        api_key = key_data["api_key"]
-        assert api_key.startswith("cv_live_")
-
-        listed = user_session.get(f"{API}/api-keys")
-        assert listed.status_code == 200, listed.text
-        assert any(item["id"] == key_data["id"] for item in listed.json())
-        assert api_key not in listed.text
-
-        assert user_session.get(f"{API}/v1/movies", headers={"X-API-Key": api_key}).status_code == 200
-        assert user_session.get(f"{API}/v1/series", headers={"X-API-Key": api_key}).status_code == 200
-        assert user_session.get(f"{API}/v1/movies", headers={"X-API-Key": "invalid"}).status_code == 401
-
-        revoked = user_session.delete(f"{API}/api-keys/{key_data['id']}")
-        assert revoked.status_code == 200, revoked.text
-        assert user_session.get(f"{API}/v1/movies", headers={"X-API-Key": api_key}).status_code == 401
-
-
 class TestBlockedUsers:
     def test_block_hides_comments_and_thread_replies_until_unblocked(self, user_session, admin_session):
         admin_id = admin_session.get(f"{API}/auth/me").json()["id"]
@@ -254,27 +232,33 @@ class TestMovies:
             "moderation.ip_bans.delete", "content.trash.view", "content.restore", "content.purge",
             "collections.create", "collections.delete", "collections.update", "crew_jobs.create",
             "user.account.modify",
+            "content.movie.delete", "content.series.delete", "content.actor.delete",
         } <= keys
 
     @pytest.mark.parametrize("kind", ["movies", "series"])
-    def test_create_imdb_id_is_admin_only(self, kind, user_session, admin_session):
-        imdb_id = f"tt{uuid.uuid4().int % 10**7:07d}"
-        payload = {"title": f"TEST_CreateIMDb_{uuid.uuid4().hex[:8]}", "imdb_id": imdb_id}
+    def test_users_and_admins_can_create_with_imdb_id(self, kind, user_session, admin_session):
+        user_payload = {"title": f"TEST_CreateIMDb_User_{uuid.uuid4().hex[:8]}", "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}"}
+        admin_payload = {"title": f"TEST_CreateIMDb_Admin_{uuid.uuid4().hex[:8]}", "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}"}
         if kind == "movies":
-            payload["release_date"] = "2025-01-01"
-        denied = user_session.post(f"{API}/{kind}", json=payload)
-        assert denied.status_code == 403, denied.text
+            user_payload["release_date"] = "2025-01-01"
+            admin_payload["release_date"] = "2025-01-01"
 
-        missing_id = admin_session.post(f"{API}/{kind}", json={key: value for key, value in payload.items() if key != "imdb_id"})
+        user_created = user_session.post(f"{API}/{kind}", json=user_payload)
+        assert user_created.status_code == 200, user_created.text
+        user_entity_id = user_created.json()["id"]
+
+        missing_id = admin_session.post(f"{API}/{kind}", json={key: value for key, value in admin_payload.items() if key != "imdb_id"})
         assert missing_id.status_code == 422, missing_id.text
 
-        created = admin_session.post(f"{API}/{kind}", json=payload)
+        created = admin_session.post(f"{API}/{kind}", json=admin_payload)
         assert created.status_code == 200, created.text
         entity_id = created.json()["id"]
         try:
-            assert created.json()["imdb_id"] == imdb_id
+            assert user_created.json()["imdb_id"] == user_payload["imdb_id"]
+            assert created.json()["imdb_id"] == admin_payload["imdb_id"]
         finally:
             admin_session.delete(f"{API}/{kind}/{entity_id}")
+            admin_session.delete(f"{API}/{kind}/{user_entity_id}")
 
     def test_custom_delete_permission_is_scoped_and_can_delete_restore(self, user_session, admin_session):
         role = admin_session.post(f"{API}/roles", json={
@@ -325,6 +309,92 @@ class TestMovies:
                 json={"custom_role_ids": []},
             )
             admin_session.delete(f"{API}/roles/{role_id}")
+
+    def test_entity_delete_permissions_are_independent(self, user_session, admin_session):
+        role = admin_session.post(f"{API}/roles", json={
+            "name": f"TEST_MovieDelete_{uuid.uuid4().hex[:8]}",
+            "permissions": ["content.movie.delete"],
+        })
+        assert role.status_code == 200, role.text
+        role_id = role.json()["id"]
+        movie = admin_session.post(f"{API}/movies", json={
+            "title": f"TEST_DeleteMovie_{uuid.uuid4().hex[:8]}",
+            "release_date": "2025-01-01",
+            "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        })
+        series = admin_session.post(f"{API}/series", json={
+            "title": f"TEST_DeleteSeries_{uuid.uuid4().hex[:8]}",
+            "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        })
+        actor = admin_session.post(f"{API}/actors", json={"name": f"TEST_DeleteActor_{uuid.uuid4().hex[:8]}"})
+        assert movie.status_code == series.status_code == actor.status_code == 200
+        ids = {"movies": movie.json()["id"], "series": series.json()["id"], "actors": actor.json()["id"]}
+        freeze_path = f"{API}/moderation/content-edit-freeze"
+        previous_frozen = admin_session.get(freeze_path).json()["frozen"]
+        admin_session.put(freeze_path, json={"frozen": False})
+        try:
+            assigned = admin_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": [role_id]})
+            assert assigned.status_code == 200, assigned.text
+            assert user_session.delete(f"{API}/movies/{ids['movies']}").status_code == 200
+            assert user_session.delete(f"{API}/series/{ids['series']}").status_code == 403
+            assert user_session.delete(f"{API}/actors/{ids['actors']}").status_code == 403
+        finally:
+            admin_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": []})
+            for kind, entity_id in ids.items():
+                admin_session.post(f"{API}/moderation/{kind[:-1]}/{entity_id}/restore")
+                admin_session.delete(f"{API}/{kind}/{entity_id}")
+                admin_session.delete(f"{API}/moderation/{kind[:-1]}/{entity_id}/purge")
+            admin_session.put(freeze_path, json={"frozen": previous_frozen})
+            admin_session.delete(f"{API}/roles/{role_id}")
+
+    def test_custom_role_manager_can_only_change_allowlisted_roles(self, user_session, admin_session):
+        allowed_role = admin_session.post(f"{API}/roles", json={"name": f"TEST_Allowed_{uuid.uuid4().hex[:8]}", "permissions": []})
+        blocked_role = admin_session.post(f"{API}/roles", json={"name": f"TEST_Blocked_{uuid.uuid4().hex[:8]}", "permissions": []})
+        assert allowed_role.status_code == blocked_role.status_code == 200
+        allowed_id = allowed_role.json()["id"]
+        blocked_id = blocked_role.json()["id"]
+        manager = admin_session.post(f"{API}/roles", json={
+            "name": f"TEST_RoleManager_{uuid.uuid4().hex[:8]}",
+            "permissions": ["user.assign_custom_role"],
+            "assignable_role_ids": [allowed_id],
+        })
+        assert manager.status_code == 200, manager.text
+        manager_id = manager.json()["id"]
+        try:
+            assigned = admin_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": [manager_id]})
+            assert assigned.status_code == 200, assigned.text
+            allowed = user_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": [allowed_id]})
+            assert allowed.status_code == 200, allowed.text
+            denied = user_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": [blocked_id]})
+            assert denied.status_code == 403
+            assert allowed_id in user_session.get(f"{API}/auth/me").json()["custom_role_ids"]
+            removed = user_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": []})
+            assert removed.status_code == 200, removed.text
+            assert allowed_id not in user_session.get(f"{API}/auth/me").json()["custom_role_ids"]
+            assert manager_id in user_session.get(f"{API}/auth/me").json()["custom_role_ids"]
+        finally:
+            admin_session.patch(f"{API}/moderation/users/{user_session.user_id}/custom-role", json={"custom_role_ids": []})
+            admin_session.delete(f"{API}/roles/{manager_id}")
+            admin_session.delete(f"{API}/roles/{allowed_id}")
+            admin_session.delete(f"{API}/roles/{blocked_id}")
+
+    def test_moderator_permissions_can_be_edited(self, user_session, admin_session):
+        roles = admin_session.get(f"{API}/roles")
+        assert roles.status_code == 200, roles.text
+        moderator = next(role for role in roles.json() if role["id"] == "builtin-moderator")
+        original_permissions = moderator["permissions"]
+        original_role = user_session.get(f"{API}/auth/me").json()["role"]
+        try:
+            updated = admin_session.patch(f"{API}/roles/builtin-moderator", json={"permissions": ["content.actor.delete"]})
+            assert updated.status_code == 200, updated.text
+            promoted = admin_session.patch(f"{API}/moderation/users/{user_session.user_id}/role", json={"role": "moderator"})
+            assert promoted.status_code == 200, promoted.text
+            user_info = user_session.get(f"{API}/auth/me").json()
+            assert "content.actor.delete" in user_info["permissions"]
+            assert "content.movie.delete" not in user_info["permissions"]
+        finally:
+            admin_session.patch(f"{API}/roles/builtin-moderator", json={"permissions": original_permissions})
+            admin_session.patch(f"{API}/moderation/users/{user_session.user_id}/role", json={"role": original_role})
 
     def test_custom_suspend_permission_is_scoped_and_supports_suspend_and_unsuspend(self, user_session, admin_session):
         role = admin_session.post(f"{API}/roles", json={

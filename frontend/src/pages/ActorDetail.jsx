@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api, fileUrl, recoverTmdbImage } from "@/lib/api";
+import { api, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
@@ -57,7 +57,8 @@ export default function ActorDetail() {
   const load = async () => { try { const r = await api.get(`/actors/${id}`); setActor(r.data); } catch {} };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
-  const canDelete = user && ["moderator", "admin"].includes(user.role);
+  const canModerate = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+  const canDelete = user && (user.role === "admin" || user.effective_role === "admin" || (user.permissions || []).some((permission) => ["content.delete", "content.actor.delete"].includes(permission)));
 
   const del = async () => {
     if (!window.confirm(`Delete ${actor.name}?`)) return;
@@ -81,7 +82,6 @@ export default function ActorDetail() {
               <ImageWithFallback
                 src={photo}
                 fallbackSrc={fileUrl(actor.photo_url, "jpeg")}
-                resolveFallback={() => recoverTmdbImage("actor", actor.id, "photo_url")}
                 alt={actor.name}
                 className="w-full h-full object-cover"
                 loading="eager"
@@ -160,15 +160,15 @@ export default function ActorDetail() {
                     <Flag className="w-4 h-4 mr-2" /> Report a Problem
                   </Button>
                 )}
+                {canModerate && (
+                  <Button variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-actor-btn">
+                    <Lock className="w-4 h-4 mr-2" /> Locks{actor.locked_fields?.length ? ` (${actor.locked_fields.length})` : ""}
+                  </Button>
+                )}
                 {canDelete && (
-                  <>
-                    <Button variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-actor-btn">
-                      <Lock className="w-4 h-4 mr-2" /> Locks{actor.locked_fields?.length ? ` (${actor.locked_fields.length})` : ""}
-                    </Button>
-                    <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-actor-btn">
-                      <Trash2 className="w-4 h-4 mr-2" /> Delete
-                    </Button>
-                  </>
+                  <Button variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-actor-btn">
+                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                  </Button>
                 )}
               </div>
             </div>

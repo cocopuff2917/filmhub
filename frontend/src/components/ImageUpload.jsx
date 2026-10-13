@@ -3,10 +3,9 @@ import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, X } from "lucide-react";
 import { toast } from "sonner";
-import ImageUrlInput from "@/components/ImageUrlInput";
 import ImageWithFallback from "@/components/ImageWithFallback";
 
-export default function ImageUpload({ value, onChange, testid, shape = "square", canDelete = true, allowUrl = false }) {
+export default function ImageUpload({ value, onChange, testid, shape = "square", canDelete = true }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
 
@@ -50,7 +49,6 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
           className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={testid}>
           {busy ? "Uploading..." : value ? "Replace" : "Upload"}
         </Button>
-        {allowUrl && <ImageUrlInput onAdd={(url) => onChange(url)} disabled={busy} testid={testid || "image-upload"} />}
       </div>
       {value && canDelete && (
         <Button type="button" variant="ghost" onClick={() => onChange("")} className="text-slate-400 hover:text-white hover:bg-white/5" data-testid={testid ? `${testid}-remove` : undefined}>
@@ -61,7 +59,7 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
   );
 }
 
-export function GalleryUpload({ value, onChange, testid, canDelete = true, allowUrl = false }) {
+export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
   const list = value || [];
@@ -112,16 +110,6 @@ export function GalleryUpload({ value, onChange, testid, canDelete = true, allow
           {busy ? "..." : <Upload className="w-5 h-5" />}
         </button>
       </div>
-      {allowUrl && (
-        <div className="mt-3 max-w-lg">
-          <ImageUrlInput
-            onAdd={(url) => onChange([...list, url])}
-            disabled={busy}
-            testid={testid || "gallery-upload"}
-            placeholder="https://example.com/gallery-image.jpg"
-          />
-        </div>
-      )}
     </div>
   );
 }

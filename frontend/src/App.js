@@ -78,7 +78,6 @@ function AppRoutes() {
             <Route path="/collection/:id" element={<CollectionDetail />} />
             <Route path="/contributor-guidelines" element={<ContributorGuidelines />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/api-keys" element={<Navigate to="/settings?section=api-keys" replace />} />
             <Route path="/user/:id" element={<UserProfile />} />
             <Route path="/threads" element={<ThreadsList />} />
             <Route path="/threads/:id" element={<ThreadDetail />} />

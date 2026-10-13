@@ -24,8 +24,8 @@ export default function Inbox() {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await api.get("/inbox/threads");
-      setThreads(r.data || []);
+      const threadResponse = await api.get("/inbox/threads");
+      setThreads(threadResponse.data || []);
     } catch { /* ignore */ }
     setLoading(false);
   };

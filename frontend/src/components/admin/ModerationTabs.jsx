@@ -4,6 +4,7 @@ import { api, fileUrl } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -263,6 +264,7 @@ export function ReportsTab() {
   );
 }
 
+
 // =====================================================
 // SUSPENSIONS TAB
 // =====================================================
@@ -343,22 +345,8 @@ export function SuspensionsTab({ canUnsuspend = true }) {
                       <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-700 flex items-center justify-center text-xs text-white flex-shrink-0">
                         {u.avatar_url ? <img src={fileUrl(u.avatar_url)} alt="" className="w-full h-full object-cover" /> : (u.name?.[0]?.toUpperCase() || "?")}
                       </div>
-                      {triageResult && (
-                        <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-xs" data-testid={`report-triage-${t.id}`}>
-                          <div className="flex flex-wrap items-center gap-2 text-amber-200">
-                            <span className="font-semibold uppercase">{triageResult.priority} priority</span>
-                            <Badge className="text-[9px] uppercase bg-white/5 text-slate-300 border-white/10">{triageResult.category}</Badge>
-                          </div>
-                          {triageResult.summary && <p className="mt-1 text-slate-200">{triageResult.summary}</p>}
-                          {triageResult.suggested_action && <p className="mt-1 text-slate-400">Suggestion: {triageResult.suggested_action}</p>}
-                          <p className="mt-1 text-[10px] text-slate-500">AI suggestion only. Review the report before acting.</p>
-                        </div>
-                      )}
                       <div>
                         <div className="text-white font-medium">{u.name}</div>
-                      <Button size="sm" variant="outline" className="h-7 border-amber-500/30 text-amber-200 hover:bg-amber-500/10 hover:text-white" onClick={() => triageReport(t)} disabled={triagingId === t.id} data-testid={`triage-report-${t.id}`}>
-                        <Sparkles className="mr-1 h-3.5 w-3.5" /> {triagingId === t.id ? "Analyzing…" : triageResult ? "Re-triage" : "AI triage"}
-                      </Button>
                         <div className="text-[11px] text-slate-500">{u.email}</div>
                       </div>
                       {!u.is_active && <Badge className="text-[10px] bg-white/5 text-slate-400 border-white/10">expired</Badge>}

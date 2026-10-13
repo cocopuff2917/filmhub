@@ -181,6 +181,7 @@ export default function SeriesDetail() {
   }, [user, id]);
 
   const canModerate = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+  const canDeletePage = user && (user.role === "admin" || user.effective_role === "admin" || (user.permissions || []).some((permission) => ["content.delete", "content.series.delete"].includes(permission)));
 
   const submitReview = async (e) => {
     e.preventDefault();
@@ -393,10 +394,10 @@ export default function SeriesDetail() {
                 )}
                 {user && <Button size="sm" variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-series-btn"><Flag className="w-4 h-4 mr-2" /> Report</Button>}
                 {canModerate && (
-                  <>
-                    <Button size="sm" variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"><Lock className="w-4 h-4 mr-2" /> Locks{series.locked_fields?.length ? ` (${series.locked_fields.length})` : ""}</Button>
-                    <Button size="sm" variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"><Trash2 className="w-4 h-4 mr-2" /> Delete</Button>
-                  </>
+                  <Button size="sm" variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"><Lock className="w-4 h-4 mr-2" /> Locks{series.locked_fields?.length ? ` (${series.locked_fields.length})` : ""}</Button>
+                )}
+                {canDeletePage && (
+                  <Button size="sm" variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"><Trash2 className="w-4 h-4 mr-2" /> Delete</Button>
                 )}
               </div>
             </div>
@@ -437,7 +438,6 @@ export default function SeriesDetail() {
                       <ImageWithFallback
                         src={fileUrl(c.actor.photo_url)}
                         fallbackSrc={fileUrl(c.actor.photo_url, "jpeg")}
-                        resolveFallback={() => recoverTmdbImage("actor", c.actor.id, "photo_url")}
                         alt={c.actor.name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}
@@ -686,7 +686,7 @@ export default function SeriesDetail() {
           </div>
 
           {user && (
-            <Button onClick={() => navigate(`/series/${id}/edit`)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn"><Edit className="w-4 h-4 mr-2" /> Edit Page</Button>
+            <Button onClick={() => ["moderator", "admin"].includes(user.effective_role || user.role) ? navigate(`/series/${id}/edit`) : setEditOpen(true)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn"><Edit className="w-4 h-4 mr-2" /> Edit Page</Button>
           )}
           {user && (
             <button onClick={() => setReportOpen(true)} className="w-full text-left text-sm text-slate-400 hover:text-rose-300 flex items-center gap-1.5"><Flag className="w-3.5 h-3.5" /> Report an Issue</button>

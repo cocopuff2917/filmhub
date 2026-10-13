@@ -116,6 +116,7 @@ export default function MovieDetail() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id, user]);
 
   const canModerate = user && ["moderator", "admin"].includes(user.effective_role || user.role);
+  const canDeletePage = user && (user.role === "admin" || user.effective_role === "admin" || (user.permissions || []).some((permission) => ["content.delete", "content.movie.delete"].includes(permission)));
 
   const toggleWatchlist = async () => {
     if (!user) { toast.error("Sign in to save movies"); return; }
@@ -200,7 +201,6 @@ export default function MovieDetail() {
                 {poster ? (
                   <ImageWithFallback
                     src={poster}
-                    resolveFallback={() => recoverTmdbImage("movie", movie.id, "poster_url")}
                     alt={movie.title}
                     className="h-full w-full object-cover"
                     loading="eager"
@@ -325,14 +325,14 @@ export default function MovieDetail() {
                   </Button>
                 )}
                 {canModerate && (
-                  <>
-                    <Button size="sm" variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-movie-btn">
-                      <Lock className="mr-2 h-4 w-4" /> Locks{movie.locked_fields?.length ? ` (${movie.locked_fields.length})` : ""}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-movie-btn">
-                      <Trash2 className="mr-2 h-4 w-4" /> Delete
-                    </Button>
-                  </>
+                  <Button size="sm" variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="lock-movie-btn">
+                    <Lock className="mr-2 h-4 w-4" /> Locks{movie.locked_fields?.length ? ` (${movie.locked_fields.length})` : ""}
+                  </Button>
+                )}
+                {canDeletePage && (
+                  <Button size="sm" variant="outline" onClick={del} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="delete-movie-btn">
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete
+                  </Button>
                 )}
               </div>
             </div>
@@ -379,7 +379,6 @@ export default function MovieDetail() {
                       <ImageWithFallback
                         src={fileUrl(c.actor.photo_url)}
                         fallbackSrc={fileUrl(c.actor.photo_url, "jpeg")}
-                        resolveFallback={() => recoverTmdbImage("actor", c.actor.id, "photo_url")}
                         alt={c.actor.name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                         fallback={<div className="w-full h-full flex items-center justify-center text-slate-600 font-display text-xl">{c.actor.name?.[0] || "?"}</div>}
@@ -618,7 +617,7 @@ export default function MovieDetail() {
           </div>
 
           {user && (
-            <Button onClick={() => navigate(`/movie/${id}/edit`)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn">
+            <Button onClick={() => canModerate ? navigate(`/movie/${id}/edit`) : setEditOpen(true)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn">
               <Edit className="w-4 h-4 mr-2" /> Edit Page
             </Button>
           )}

@@ -70,7 +70,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
     e.preventDefault();
     const payload = {
       ...form,
-      ...(canEditImdb && !series?.id ? { imdb_id: form.imdb_id || null } : {}),
+        ...(!series?.id ? { imdb_id: form.imdb_id || null } : {}),
       genres: form.genres.split(",").map((g) => g.trim()).filter(Boolean),
       main_cast: form.main_cast.filter((c) => c.actor_id && c.character_name).map(({ actor_id, character_name }) => ({ actor_id, character_name })),
       seasons: form.seasons.map((se) => ({
@@ -82,7 +82,7 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
         })),
       })),
     };
-    if (series?.id || !canEditImdb) delete payload.imdb_id;
+    if (series?.id && !canEditImdb) delete payload.imdb_id;
     try {
       let result;
       if (series?.id) {
@@ -178,9 +178,9 @@ export default function SeriesForm({ series, onSaved, onCancel }) {
         genres: suggestions.genres?.length ? suggestions.genres.join(", ") : current.genres,
         keywords: suggestions.keywords?.length ? suggestions.keywords.join(", ") : current.keywords,
       }))} />}
-      {!series?.id && canEditImdb && <div>
+      {!series?.id && <div>
         <Label className="text-slate-300">IMDb ID</Label>
-        <Input required={isModerator} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-imdb-input" />
+        <Input required={!series?.id} pattern="tt[0-9]{7,10}" title="Enter an IMDb ID such as tt1234567" value={form.imdb_id} onChange={(e) => setForm({ ...form, imdb_id: e.target.value.trim() })} placeholder="tt1234567" className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="series-imdb-input" />
       </div>}
       <div className="grid grid-cols-3 gap-3">
         <div>

@@ -125,7 +125,7 @@ export default function NetworkDetail() {
             </label>
             <div>
               <div className="mb-2 text-sm font-medium text-slate-300">Network image</div>
-              <ImageUpload value={draftImage} onChange={setDraftImage} testid="network-image-upload" allowUrl />
+              <ImageUpload value={draftImage} onChange={setDraftImage} testid="network-image-upload" />
             </div>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={saving} className="border-white/20 text-white hover:bg-white/10 hover:text-white">Cancel</Button>
