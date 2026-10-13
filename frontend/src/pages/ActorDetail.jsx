@@ -72,6 +72,26 @@ export default function ActorDetail() {
   const isDeceased = !!actor.death_date;
   const age = computeAge(actor.birth_date, actor.death_date);
   const totalCredits = (actor.movies?.length || 0) + (actor.series?.length || 0) + (actor.crew_credits?.length || 0);
+  const groupedGuestSeries = (actor.guest_episodes || []).reduce((acc, episode) => {
+    const key = episode.series_id;
+    if (!acc[key]) {
+      acc[key] = {
+        series_id: episode.series_id,
+        series_title: episode.series_title,
+        series_poster_url: episode.series_poster_url,
+        episodes: [],
+      };
+    }
+    acc[key].episodes.push({
+      season_number: episode.season_number,
+      episode_number: episode.episode_number,
+      episode_name: episode.episode_name,
+      air_date: episode.air_date,
+      character_name: episode.character_name,
+      series_id: episode.series_id,
+    });
+    return acc;
+  }, {});
 
   return (
     <div className="bg-[#0a0d12] text-white">
@@ -237,24 +257,42 @@ export default function ActorDetail() {
         {(!actor.guest_episodes || actor.guest_episodes.length === 0) ? (
           <div className="mt-6 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-12 text-center text-slate-500">No guest star appearances yet.</div>
         ) : (
-          <div className="mt-6 space-y-2">
-            {actor.guest_episodes.map((ge, i) => (
-              <Link key={i} to={`/series/${ge.series_id}/season/${ge.season_number}/episode/${ge.episode_number}`} className="flex items-center gap-4 rounded-xl bg-[#14181f] border border-white/10 p-4 hover:border-amber-500/40 hover:bg-amber-500/5 transition">
-                <div className="w-12 h-16 rounded bg-[#1e2430] overflow-hidden flex-shrink-0">
-                  {ge.series_poster_url && <img src={fileUrl(ge.series_poster_url)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-heading text-white font-semibold truncate">{ge.series_title}</span>
-                    <span className="text-xs text-amber-400 font-mono">S{String(ge.season_number).padStart(2, "0")}E{String(ge.episode_number).padStart(2, "0")}</span>
+          <div className="mt-6 space-y-4">
+            {Object.values(groupedGuestSeries).map((series) => (
+              <div key={series.series_id} className="rounded-xl border border-white/10 bg-[#14181f] p-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-28 rounded-lg overflow-hidden border border-white/10 bg-[#1e2430] flex-shrink-0">
+                    {series.series_poster_url && <img src={fileUrl(series.series_poster_url)} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />}
                   </div>
-                  <div className="text-sm text-slate-300 truncate">{ge.episode_name || `Episode ${ge.episode_number}`}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    as <span className="text-amber-400">{ge.character_name}</span>
-                    {ge.air_date && <span> • {ge.air_date}</span>}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-heading text-xl font-semibold text-white truncate">{series.series_title}</div>
+                    <div className="mt-1 text-xs uppercase tracking-widest text-slate-400">{series.episodes.length} episode{series.episodes.length === 1 ? "" : "s"}</div>
                   </div>
                 </div>
-              </Link>
+
+                <details className="mt-4 rounded-lg border border-white/10 bg-[#0d0f12] p-2" open>
+                  <summary className="cursor-pointer list-none text-sm font-medium text-amber-400 hover:text-amber-300">View guest episodes</summary>
+                  <div className="mt-3 space-y-2">
+                    {series.episodes.map((episode, index) => (
+                      <Link
+                        key={`${series.series_id}-${episode.season_number}-${episode.episode_number}-${index}`}
+                        to={`/series/${series.series_id}/season/${episode.season_number}/episode/${episode.episode_number}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#14181f] px-3 py-2 text-left transition hover:border-amber-500/40 hover:bg-amber-500/5"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-white truncate">
+                            S{String(episode.season_number).padStart(2, "0")}E{String(episode.episode_number).padStart(2, "0")} · {episode.episode_name || `Episode ${episode.episode_number}`}
+                          </div>
+                          {episode.air_date && <div className="mt-0.5 text-xs text-slate-500">{episode.air_date}</div>}
+                        </div>
+                        <div className="shrink-0 text-right text-xs text-amber-400">
+                          as {episode.character_name || "Guest"}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              </div>
             ))}
           </div>
         )}

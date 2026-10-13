@@ -9,6 +9,9 @@ Copy into another Emergent bucket:
 Copy into AWS S3:
     python scripts/migrate_object_storage.py --apply --s3-bucket YOUR_BUCKET --region YOUR_REGION
 
+Copy into Supabase Storage:
+    python scripts/migrate_object_storage.py --apply --supabase-bucket YOUR_BUCKET
+
 Download to a local directory:
     python scripts/migrate_object_storage.py --apply --download-dir exports/site-images
 
@@ -17,6 +20,8 @@ Required environment variables for --apply:
 
 AWS credentials are resolved by boto3's standard credential chain (for example,
 an IAM role or AWS_PROFILE). Set AWS_REGION or pass --region for the destination.
+Supabase migration requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. The
+destination bucket must already exist.
 
 The Mongo connection must point to the production database so its `files`
 collection provides the complete list of object paths used by production data.
@@ -241,17 +246,91 @@ def copy_objects_to_s3(paths, api_url, source_key, s3_client, bucket, prefix="")
     return copied, skipped, failed
 
 
+def copy_objects_to_supabase(paths, api_url, source_key, supabase_url, service_role_key, bucket):
+    copied = skipped = failed = 0
+    base_url = supabase_url.rstrip("/")
+    encoded_bucket = quote(bucket, safe="")
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+    }
+
+    for path, content_type in paths.items():
+        relative_path = PurePosixPath(path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            print(f"unsafe object path skipped: {path}")
+            failed += 1
+            continue
+
+        object_url = f"{base_url}/storage/v1/object/{encoded_bucket}/{quote(path, safe='/')}"
+        existing = requests.get(object_url, headers=headers, timeout=60)
+        if existing.status_code == 200:
+            skipped += 1
+            print(f"already present in Supabase: {path}")
+            continue
+        if existing.status_code != 404:
+            print(f"Supabase existence check failed ({existing.status_code}): {path}")
+            failed += 1
+            continue
+
+        source_response = requests.get(
+            object_url(api_url, path),
+            headers={"X-Storage-Key": source_key},
+            timeout=120,
+        )
+        if source_response.status_code != 200:
+            print(f"source read failed ({source_response.status_code}): {path}")
+            failed += 1
+            continue
+
+        source_bytes = source_response.content
+        upload_headers = {
+            **headers,
+            "Content-Type": source_response.headers.get("Content-Type") or content_type,
+            "x-upsert": "true",
+        }
+        upload_response = requests.post(
+            object_url,
+            headers=upload_headers,
+            data=source_bytes,
+            timeout=120,
+        )
+        if not upload_response.ok:
+            print(f"Supabase upload failed ({upload_response.status_code}): {path}")
+            failed += 1
+            continue
+
+        verify_response = requests.get(object_url, headers=headers, timeout=60)
+        if (
+            verify_response.status_code != 200
+            or hashlib.sha256(verify_response.content).digest() != hashlib.sha256(source_bytes).digest()
+        ):
+            print(f"Supabase checksum verification failed: {path}")
+            failed += 1
+            continue
+
+        copied += 1
+        print(f"copied and verified in Supabase: {path}")
+
+    return copied, skipped, failed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Migrate uploaded files between Emergent Object Storage buckets")
     parser.add_argument("--apply", action="store_true", help="Copy missing objects; without this flag, only report the object count")
     parser.add_argument("--download-dir", help="With --apply, download source objects into this local directory")
     parser.add_argument("--s3-bucket", help="With --apply, copy source objects into this AWS S3 bucket")
     parser.add_argument("--s3-prefix", default="", help="Optional key prefix for objects copied to S3")
+    parser.add_argument(
+        "--supabase-bucket",
+        help="With --apply, copy source objects into this Supabase Storage bucket",
+    )
     parser.add_argument("--region", default=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"), help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION)")
     args = parser.parse_args()
 
-    if args.download_dir and args.s3_bucket:
-        parser.error("--download-dir and --s3-bucket cannot be used together")
+    destinations = [args.download_dir, args.s3_bucket, args.supabase_bucket]
+    if sum(bool(destination) for destination in destinations) > 1:
+        parser.error("--download-dir, --s3-bucket, and --supabase-bucket are mutually exclusive")
 
     mongo_url = os.environ.get("MONGO_URL")
     db_name = os.environ.get("DB_NAME")
@@ -264,7 +343,11 @@ def main():
         paths = object_paths(db)
         print(f"Found {len(paths)} unique object paths in {db_name}.files")
         if not args.apply:
-            destination = f"S3 bucket {args.s3_bucket}" if args.s3_bucket else args.download_dir or "an Emergent bucket"
+            destination = (
+                f"S3 bucket {args.s3_bucket}" if args.s3_bucket else
+                f"Supabase bucket {args.supabase_bucket}" if args.supabase_bucket else
+                args.download_dir or "an Emergent bucket"
+            )
             print(f"Dry-run only. Destination: {destination}. Re-run with --apply to copy or download objects.")
             return 0
 
@@ -288,6 +371,21 @@ def main():
                 args.s3_prefix,
             )
             print(f"S3 migration summary: copied={copied}, already_present={skipped}, failed={failed}")
+            return 1 if failed else 0
+        if args.supabase_bucket:
+            supabase_url = os.environ.get("SUPABASE_URL")
+            service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+            if not supabase_url or not service_role_key:
+                parser.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for Supabase migration")
+            copied, skipped, failed = copy_objects_to_supabase(
+                paths,
+                api_url,
+                source_bucket,
+                supabase_url,
+                service_role_key,
+                args.supabase_bucket,
+            )
+            print(f"Supabase migration summary: copied={copied}, already_present={skipped}, failed={failed}")
             return 1 if failed else 0
 
         target_secret = os.environ.get("TARGET_EMERGENT_LLM_KEY")

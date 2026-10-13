@@ -23,6 +23,7 @@ const Register = lazy(() => import("@/pages/Register"));
 const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Watchlist = lazy(() => import("@/pages/Watchlist"));
+const UserLists = lazy(() => import("@/pages/UserLists"));
 const Admin = lazy(() => import("@/pages/Admin"));
 const MovieEdit = lazy(() => import("@/pages/MovieEdit"));
 const SeriesEdit = lazy(() => import("@/pages/SeriesEdit"));
@@ -87,6 +88,8 @@ function AppRoutes() {
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/lists" element={<UserLists />} />
+            <Route path="/list/:listId" element={<UserLists />} />
             <Route path="/admin" element={<Admin />} />
           </Routes>
         </Suspense>

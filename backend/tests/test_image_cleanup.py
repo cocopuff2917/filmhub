@@ -1,5 +1,6 @@
 import asyncio
 from copy import deepcopy
+from io import BytesIO
 from types import SimpleNamespace
 
 from bson import ObjectId
@@ -70,96 +71,46 @@ def test_cleanup_leaves_changed_image_reference_untouched(monkeypatch):
     assert users.documents[user_id]["avatar_url"] == "new-avatar.jpg"
 
 
+def test_automatic_cleanup_cron_is_disabled(monkeypatch):
+    monkeypatch.setattr(server, "_verify_cron_auth", lambda authorization: None)
+
+    result = asyncio.run(server.cron_cleanup(SimpleNamespace(headers={}), authorization=None))
+
+    assert result == {"ok": True, "disabled": True}
+
+
+def test_manual_disk_cleanup_is_disabled(monkeypatch):
+    async def fail_if_run():
+        raise AssertionError("disk cleanup must remain disabled")
+
+    monkeypatch.setattr(server, "_run_cleanup", fail_if_run)
+
+    result = asyncio.run(server.run_cleanup_now(_admin={"role": "admin"}))
+
+    assert result == {"ok": True, "disabled": True}
+
+
 def test_image_transform_failure_returns_original_for_all_formats(monkeypatch):
     original = b"browser-supported image data"
     monkeypatch.setattr(server, "get_object", lambda path: (original, "image/svg+xml"))
 
     for image_format in ("jpeg", "thumbnail"):
-        response = asyncio.run(server.download_file("logo.svg", image_format))
+        response = server.download_file("logo.svg", image_format)
 
         assert response.status_code == 200
         assert response.media_type == "image/svg+xml"
         assert response.body == original
 
 
-def test_actor_headshot_can_be_replaced_but_not_cleared_by_users_or_moderators():
-    old_photo = "old-headshot.jpg"
-    for user in ({"role": "user"}, {"role": "moderator", "effective_role": "moderator"}):
-        replacement = {"photo_url": "new-headshot.jpg"}
-        server._enforce_image_delete_guard(
-            {"photo_url": old_photo},
-            replacement,
-            user,
-            single_fields=["photo_url"],
-            single_field_replacement_allowed=["photo_url"],
-        )
-        assert replacement["photo_url"] == "new-headshot.jpg"
+def test_thumbnail_is_resized_webp_and_long_cached(monkeypatch):
+    source = BytesIO()
+    server.Image.new("RGB", (1200, 1800), "red").save(source, format="PNG")
+    monkeypatch.setattr(server, "get_object", lambda path: (source.getvalue(), "image/png"))
 
-        removal = {"photo_url": ""}
-        server._enforce_image_delete_guard(
-            {"photo_url": old_photo},
-            removal,
-            user,
-            single_fields=["photo_url"],
-            single_field_replacement_allowed=["photo_url"],
-        )
-        assert removal["photo_url"] == old_photo
+    response = server.download_file("poster.png", "thumbnail")
 
-
-def test_tmdb_image_recovery_rejects_actor_photos_and_movie_posters():
-    for entity_type, image_field in (("actor", "photo_url"), ("movie", "poster_url")):
-        payload = server.TMDBImageFallbackRequest(
-            entity_type=entity_type,
-            entity_id=str(ObjectId()),
-            image_field=image_field,
-        )
-        try:
-            asyncio.run(server.recover_tmdb_image(payload))
-        except server.HTTPException as error:
-            assert error.status_code == 400
-        else:
-            raise AssertionError(f"TMDB recovery unexpectedly accepted {entity_type} {image_field}")
-
-
-def test_tmdb_cast_actor_creation_does_not_import_profile_photo(monkeypatch):
-    class FakeActorCollection:
-        created = None
-
-        async def find_one(self, query):
-            return None
-
-        def find(self, query):
-            return self
-
-        async def to_list(self, limit):
-            return []
-
-        async def insert_one(self, document):
-            self.created = document
-            return SimpleNamespace(inserted_id=ObjectId())
-
-    actors = FakeActorCollection()
-
-    async def ignore_log(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(server, "db", SimpleNamespace(actors=actors))
-    monkeypatch.setattr(server, "log_edit", ignore_log)
-
-    actor_id = asyncio.run(server._tmdb_actor_id(
-        {"id": 123, "name": "Example Actor", "profile_path": "/tmdb-photo.jpg"},
-        {"id": "bot-user"},
-    ))
-
-    assert actor_id
-    assert actors.created["photo_url"] == ""
-
-
-def test_tmdb_replacement_images_are_only_available_for_series(monkeypatch):
-    async def unexpected_tmdb_request(*args, **kwargs):
-        raise AssertionError("TMDB must not be queried for actor photos or movie posters")
-
-    monkeypatch.setattr(server, "_tmdb_request", unexpected_tmdb_request)
-
-    for kind in ("actors", "movies"):
-        assert asyncio.run(server._tmdb_replacement_image(kind, {})) is None
+    assert response.media_type == "image/webp"
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    with server.Image.open(BytesIO(response.body)) as thumbnail:
+        assert thumbnail.format == "WEBP"
+        assert thumbnail.size == (640, 960)

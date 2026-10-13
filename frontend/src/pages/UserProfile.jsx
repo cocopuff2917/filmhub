@@ -172,6 +172,7 @@ export default function UserProfile() {
   const navigate = useNavigate();
   const { user: current, logout } = useAuth();
   const [profile, setProfile] = useState(null);
+  const [userLists, setUserLists] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
@@ -186,6 +187,13 @@ export default function UserProfile() {
     catch { setProfile({ notFound: true }); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+  useEffect(() => {
+    let active = true;
+    api.get(`/users/${id}/lists`)
+      .then((response) => { if (active) setUserLists(response.data || []); })
+      .catch(() => { if (active) setUserLists([]); });
+    return () => { active = false; };
+  }, [id]);
   useEffect(() => {
     if (!profile) return;
     const initialEdits = profile.edits || [];
@@ -371,6 +379,7 @@ export default function UserProfile() {
             <TabsList className="bg-transparent p-0 h-auto rounded-none w-full justify-center gap-8">
               <TabsTrigger value="overview" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-overview">Overview</TabsTrigger>
               <TabsTrigger value="reviews" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-reviews">Reviews</TabsTrigger>
+              <TabsTrigger value="lists" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-lists">Lists</TabsTrigger>
               <TabsTrigger value="edits" className="text-slate-400 data-[state=active]:text-amber-200 data-[state=active]:bg-transparent rounded-none border-b-2 border-transparent data-[state=active]:border-amber-500 px-1 py-3 text-sm font-medium" data-testid="tab-edits">Edit History</TabsTrigger>
             </TabsList>
 
@@ -457,6 +466,16 @@ export default function UserProfile() {
                   ))}
                 </div>
               )}
+            </TabsContent>
+
+            <TabsContent value="lists" className="py-8">
+              {isSelf && <div className="mb-5 flex items-center justify-between gap-4"><p className="text-sm text-slate-400">Your public lists are visible to everyone.</p><Button asChild size="sm" className="bg-amber-500 text-black hover:bg-amber-400"><Link to="/lists">Manage lists</Link></Button></div>}
+              {userLists.length ? <div className="divide-y divide-white/10 border-y border-white/10">
+                {userLists.map((item) => <Link key={item.id} to={`/list/${item.id}`} className="flex items-center justify-between gap-4 py-5 hover:text-amber-200" data-testid={`profile-list-${item.id}`}>
+                  <span className="min-w-0"><span className="block truncate font-semibold text-white">{item.name}</span><span className="mt-1 block line-clamp-2 text-sm text-slate-400">{item.description || "A CineVerse list"}</span></span>
+                  <span className="flex-shrink-0 text-xs text-slate-500">{item.item_count} titles</span>
+                </Link>)}
+              </div> : <div className="border-y border-dashed border-white/10 py-10 text-center text-sm text-slate-500">No public lists yet.</div>}
             </TabsContent>
 
             {/* ============= EDITS TAB ============= */}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { ImageOff, LoaderCircle, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Download, ImageOff, LoaderCircle, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 const MAX_APPLY_BATCH = 500;
@@ -43,9 +43,50 @@ export default function ImageCleanupTab() {
   const [scanning, setScanning] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ checked: 0, total: 0 });
   const [scanResult, setScanResult] = useState(null);
   const [brokenItems, setBrokenItems] = useState([]);
+
+  const exportImageArchive = () => {
+    setExporting(true);
+    try {
+      const link = document.createElement("a");
+      link.href = api.getUri({ url: "/admin/images/export" });
+      link.download = "cineverse-images.zip";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success("Image archive download started");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not export image archive");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const importImageArchive = async (event) => {
+    const archive = event.target.files?.[0];
+    if (!archive) return;
+    if (!window.confirm("Import images from this archive? Matching image references will be updated to the imported copies.")) {
+      event.target.value = "";
+      return;
+    }
+    setImporting(true);
+    try {
+      const form = new FormData();
+      form.append("archive_file", archive);
+      const response = await api.post("/admin/images/import", form, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success(`Imported ${response.data.imported_assets} image assets and updated ${response.data.updated_references} references`);
+      if (response.data.skipped) toast.info(`${response.data.skipped} image references were skipped because their source no longer matched`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not import image archive");
+    } finally {
+      setImporting(false);
+      event.target.value = "";
+    }
+  };
 
   const scanImages = async () => {
     setScanning(true);
@@ -159,6 +200,24 @@ export default function ImageCleanupTab() {
           Check profile pictures, actor photos, movie posters, and TV series posters. Broken TV-series posters may be restored from TMDB; broken actor photos, movie posters, and profile pictures are cleared.
         </p>
       </header>
+
+      <section className="border-b border-white/10 py-5" data-testid="admin-image-transfer">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Image archive</h3>
+          <p className="mt-1 text-xs text-slate-400">TMDB artwork and uploaded images are embedded. Other remote image URLs remain external references.</p>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Button type="button" onClick={exportImageArchive} disabled={exporting || importing} className="bg-amber-500 text-black hover:bg-amber-400" data-testid="admin-image-export-button">
+            {exporting ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            {exporting ? "Preparing archive…" : "Export all images"}
+          </Button>
+          <label className={`inline-flex h-10 cursor-pointer items-center rounded-md border border-white/15 px-4 text-sm font-medium text-slate-200 hover:bg-white/10 ${importing || exporting ? "pointer-events-none opacity-50" : ""}`} data-testid="admin-image-import-button">
+            {importing ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            {importing ? "Importing…" : "Import image archive"}
+            <input type="file" accept=".zip,application/zip" onChange={importImageArchive} disabled={importing || exporting} className="sr-only" aria-label="Select an image archive to import" />
+          </label>
+        </div>
+      </section>
 
       <div className="mt-5 flex flex-wrap gap-3">
         <Button

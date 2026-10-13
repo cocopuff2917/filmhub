@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Film, LogOut, User, Bookmark, Shield, Plus, Sparkles, Inbox as InboxIcon, Settings } from "lucide-react";
+import { Film, LogOut, User, Bookmark, Shield, Plus, Sparkles, Inbox as InboxIcon, Settings, ListPlus } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -135,6 +135,7 @@ export default function Navbar() {
                       <DropdownMenuItem onClick={() => navigate(`/user/${user.id}`)} data-testid="menu-profile"><User className="w-4 h-4 mr-2" /> My Profile</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-settings"><Settings className="w-4 h-4 mr-2" /> Account settings</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => navigate("/watchlist")} data-testid="menu-watchlist"><Bookmark className="w-4 h-4 mr-2" /> Watchlist</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate("/lists")} data-testid="menu-my-lists"><ListPlus className="w-4 h-4 mr-2" /> My Lists</DropdownMenuItem>
                       {(["moderator", "admin"].includes(user.role) || ["moderator", "admin"].includes(user.effective_role) || hasPanelPermission) && (
                         <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin"><Shield className="w-4 h-4 mr-2" /> {user.role === "admin" || user.effective_role === "admin" ? "Admin" : ["moderator", "admin"].includes(user.effective_role || user.role) ? "Moderator" : "Manage"} Console</DropdownMenuItem>
                       )}

@@ -91,14 +91,18 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
         <Label className="text-slate-300">Bio</Label>
         <Textarea rows={4} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="actor-bio-input" />
       </div>
-      <div>
-        <Label className="text-slate-300 block mb-2">Headshot</Label>
-        <ImageUpload value={form.photo_url} onChange={(v) => setForm({ ...form, photo_url: v })} testid="actor-photo-upload" />
-      </div>
-      <div>
-        <Label className="text-slate-300 block mb-2">Gallery ({(form.gallery || []).length} images)</Label>
-        <GalleryUpload value={form.gallery} onChange={(v) => setForm({ ...form, gallery: v })} testid="actor-gallery-upload" />
-      </div>
+      {!actor?.id && (
+        <>
+          <div>
+            <Label className="text-slate-300 block mb-2">Headshot</Label>
+            <ImageUpload value={form.photo_url} onChange={(v) => setForm({ ...form, photo_url: v })} testid="actor-photo-upload" />
+          </div>
+          <div>
+            <Label className="text-slate-300 block mb-2">Gallery ({(form.gallery || []).length} images)</Label>
+            <GalleryUpload value={form.gallery} onChange={(v) => setForm({ ...form, gallery: v })} testid="actor-gallery-upload" />
+          </div>
+        </>
+      )}
       <div className="flex gap-2 pt-4 border-t border-white/10">
         <Button type="submit" disabled={!actor?.id && !isAdmin && !catalogCreationEnabled} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="actor-submit-btn">
           {actor ? "Update Actor" : "Create Actor"}

@@ -5,9 +5,10 @@ import MovieCard from "@/components/MovieCard";
 import SeriesCard from "@/components/SeriesCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronLeft, ChevronRight, Search, Sparkles, Tv, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, SlidersHorizontal, Sparkles, Tv, X } from "lucide-react";
 import Leaderboard from "@/components/Leaderboard";
 import { useAuth } from "@/context/AuthContext";
+import { toast } from "sonner";
 
 const SOURCE_ENDPOINTS = {
   trending_movies: { url: "/movies/trending", kind: "movie" },
@@ -22,6 +23,11 @@ export default function Home() {
   const [sectionData, setSectionData] = useState({});
   const [upcomingEpisodes, setUpcomingEpisodes] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  const [recommendationGenres, setRecommendationGenres] = useState([]);
+  const [recommendationPreferences, setRecommendationPreferences] = useState({ preferred_genres: [], excluded_genres: [], content_types: ["movie", "series"] });
+  const [preferenceDraft, setPreferenceDraft] = useState({ preferred_genres: [], excluded_genres: [], content_types: ["movie", "series"] });
+  const [tuningRecommendations, setTuningRecommendations] = useState(false);
+  const [savingPreferences, setSavingPreferences] = useState(false);
   const [query, setQuery] = useState("");
   const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
   const [heroPaused, setHeroPaused] = useState(false);
@@ -51,14 +57,55 @@ export default function Home() {
   useEffect(() => {
     if (!user) {
       setRecommendations([]);
+      setRecommendationPreferences({ preferred_genres: [], excluded_genres: [], content_types: ["movie", "series"] });
+      setPreferenceDraft({ preferred_genres: [], excluded_genres: [], content_types: ["movie", "series"] });
       return undefined;
     }
     let active = true;
-    api.get("/recommendations")
-      .then((response) => { if (active) setRecommendations(response.data || []); })
-      .catch(() => { if (active) setRecommendations([]); });
+    Promise.all([
+      api.get("/recommendations").catch(() => ({ data: [] })),
+      api.get("/recommendation-preferences").catch(() => ({ data: { preferred_genres: [], excluded_genres: [], content_types: ["movie", "series"] } })),
+      api.get("/genres").catch(() => ({ data: [] })),
+    ]).then(([recommendationResponse, preferenceResponse, genreResponse]) => {
+      if (!active) return;
+      const preferences = preferenceResponse.data;
+      setRecommendations(recommendationResponse.data || []);
+      setRecommendationPreferences(preferences);
+      setPreferenceDraft(preferences);
+      setRecommendationGenres(genreResponse.data || []);
+    });
     return () => { active = false; };
   }, [user]);
+
+  const toggleRecommendationValue = (field, value) => {
+    setPreferenceDraft((current) => {
+      const selected = current[field] || [];
+      const next = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+      if (field === "preferred_genres") {
+        return { ...current, preferred_genres: next, excluded_genres: current.excluded_genres.filter((item) => item !== value) };
+      }
+      if (field === "excluded_genres") {
+        return { ...current, excluded_genres: next, preferred_genres: current.preferred_genres.filter((item) => item !== value) };
+      }
+      return { ...current, [field]: next };
+    });
+  };
+
+  const saveRecommendationPreferences = async () => {
+    setSavingPreferences(true);
+    try {
+      const response = await api.put("/recommendation-preferences", preferenceDraft);
+      setRecommendationPreferences(response.data);
+      setPreferenceDraft(response.data);
+      const refreshed = await api.get("/recommendations");
+      setRecommendations(refreshed.data || []);
+      setTuningRecommendations(false);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update recommendations");
+    } finally {
+      setSavingPreferences(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -277,7 +324,41 @@ export default function Home() {
       })}
 
       <SectionBlock title="Upcoming TV Episodes" items={upcomingEpisodes} testid="section-upcoming-episodes" forceKind="series" />
-      {user && recommendations.length > 0 && <SectionBlock title="Picked for You" items={recommendations} testid="section-recommendations" showRecommendationReason />}
+      {user && <SectionBlock
+        title="Picked for You"
+        items={recommendations}
+        testid="section-recommendations"
+        showRecommendationReason
+        alwaysRender
+        emptyMessage="Rate or watch a few titles to shape your picks. You can also tune genres below."
+        headerAction={<Button type="button" variant="outline" onClick={() => setTuningRecommendations((open) => !open)} className="border-white/15 bg-transparent text-slate-200 hover:bg-white/10" data-testid="recommendation-tune-toggle"><SlidersHorizontal className="mr-2 h-4 w-4" />{tuningRecommendations ? "Close tuning" : "Tune picks"}</Button>}
+      >
+        {tuningRecommendations && <div className="mb-8 border-y border-white/10 py-5" data-testid="recommendation-preferences-panel">
+          <div className="grid gap-6 md:grid-cols-[220px_1fr]">
+            <fieldset>
+              <legend className="text-sm font-semibold text-white">Show me</legend>
+              <div className="mt-3 space-y-2">
+                {[ ["movie", "Movies"], ["series", "TV series"] ].map(([value, label]) => <label key={value} className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={preferenceDraft.content_types.includes(value)} onChange={() => toggleRecommendationValue("content_types", value)} className="accent-amber-400" />{label}</label>)}
+              </div>
+            </fieldset>
+            <div className="grid gap-6 sm:grid-cols-2">
+              {[ ["preferred_genres", "More like"], ["excluded_genres", "Less like"] ].map(([field, label]) => <fieldset key={field}>
+                <legend className="text-sm font-semibold text-white">{label}</legend>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {recommendationGenres.map((genre) => {
+                    const selected = preferenceDraft[field].includes(genre);
+                    return <button key={`${field}-${genre}`} type="button" aria-pressed={selected} onClick={() => toggleRecommendationValue(field, genre)} className={`rounded border px-2.5 py-1.5 text-xs transition ${selected ? field === "preferred_genres" ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-200" : "border-rose-400/50 bg-rose-400/15 text-rose-200" : "border-white/10 text-slate-400 hover:border-white/25 hover:text-white"}`}>{genre}</button>;
+                  })}
+                </div>
+              </fieldset>)}
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">Your ratings and watch history still help rank these picks.</span>
+            <div className="flex gap-2"><Button type="button" variant="ghost" onClick={() => setPreferenceDraft(recommendationPreferences)} className="text-slate-300 hover:bg-white/5">Discard</Button><Button type="button" onClick={saveRecommendationPreferences} disabled={savingPreferences} className="bg-amber-500 text-black hover:bg-amber-400" data-testid="recommendation-preferences-save">{savingPreferences ? "Saving…" : "Save preferences"}</Button></div>
+          </div>
+        </div>}
+      </SectionBlock>}
 
       {/* Weekly leaderboard — always after the first section cluster */}
       <Leaderboard />
@@ -295,19 +376,21 @@ function getFeaturedHref(item) {
   return item.type === "series" ? `/series/${item.id}` : `/movie/${item.id}`;
 }
 
-function SectionBlock({ title, items, testid, forceKind, showRecommendationReason = false }) {
-  if (!items || items.length === 0) return null;
+function SectionBlock({ title, items, testid, forceKind, showRecommendationReason = false, alwaysRender = false, emptyMessage = "", headerAction = null, children }) {
+  if ((!items || items.length === 0) && !alwaysRender) return null;
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid={testid}>
-      <div className="flex items-end justify-between mb-8">
+      <div className="flex items-end justify-between gap-4 mb-8">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-amber-400/90">
             <Tv className="w-4 h-4" /> <span>Curated</span>
           </div>
           <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">{title}</h2>
         </div>
+        {headerAction}
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
+      {children}
+      {items?.length ? <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
         {items.map((it) => {
           const kind = forceKind || (it.type === "series" || it.type === "movie" ? it.type : "movie");
           return (
@@ -317,7 +400,7 @@ function SectionBlock({ title, items, testid, forceKind, showRecommendationReaso
             </div>
           );
         })}
-      </div>
+      </div> : <div className="border-y border-dashed border-white/10 py-8 text-center text-sm text-slate-500">{emptyMessage}</div>}
     </section>
   );
 }

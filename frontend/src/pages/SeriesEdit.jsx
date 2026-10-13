@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, ChevronDown, ChevronRight, GripVertical, LockKeyhole } from "lucide-react";
+import { Lock, Unlock, Plus, X, Save, ArrowLeft, Keyboard, ChevronDown, ChevronRight, GripVertical, LockKeyhole, Download } from "lucide-react";
 import { toast } from "sonner";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
 import PosterListField from "@/components/PosterListField";
@@ -107,6 +107,7 @@ export default function SeriesEdit() {
   const [dragIdx, setDragIdx] = useState(null);
   const [openSeason, setOpenSeason] = useState(null);
   const [openEpisode, setOpenEpisode] = useState(null);
+  const [importingTmdbSeasons, setImportingTmdbSeasons] = useState(false);
   const sectionRefs = useRef({});
   const savedFormRef = useRef(null);
 
@@ -215,6 +216,7 @@ export default function SeriesEdit() {
 
   const isFieldLocked = (n) => locked.includes(n);
   const canEditField = (n) => isMod || !isFieldLocked(n);
+  const canMarkFinalSeason = isMod;
 
   const toggleLock = async (fieldName) => {
     if (!isMod) return;
@@ -412,10 +414,13 @@ export default function SeriesEdit() {
   }));
   const remSeason = (idx) => setForm((f) => ({ ...f, seasons: f.seasons.filter((_, x) => x !== idx) }));
   const updSeason = (idx, k, v) => setForm((f) => ({ ...f, seasons: f.seasons.map((s, x) => x === idx ? { ...s, [k]: v } : s) }));
-  const setLastSeason = (seasonIndex, checked) => setForm((current) => ({
-    ...current,
-    seasons: current.seasons.map((season, index) => ({ ...season, is_last_season: checked && index === seasonIndex })),
-  }));
+  const setLastSeason = (seasonIndex, checked) => {
+    if (!canMarkFinalSeason) return;
+    setForm((current) => ({
+      ...current,
+      seasons: current.seasons.map((season, index) => ({ ...season, is_last_season: checked && index === seasonIndex })),
+    }));
+  };
   const addEpisode = (sIdx) => {
     const newEpisodeIndex = form.seasons[sIdx]?.episodes?.length || 0;
     setOpenEpisode(`${sIdx}:${newEpisodeIndex}`);
@@ -423,6 +428,92 @@ export default function SeriesEdit() {
       ...f,
       seasons: f.seasons.map((s, x) => x === sIdx ? { ...s, episodes: [...s.episodes, { episode_number: (s.episodes.length ? Math.max(...s.episodes.map((e) => e.episode_number || 0)) : 0) + 1, title: "", air_date: "", overview: "", still_url: "", stills: [], main_cast_actor_ids: [], guest_stars: [] }] } : s),
     }));
+  };
+  const importTmdbSeasons = async () => {
+    setImportingTmdbSeasons(true);
+    try {
+      const response = await api.post(`/series/${id}/tmdb-seasons/import`);
+      const importedSeasons = response.data.seasons || [];
+      let addedSeasonCount = 0;
+      let addedEpisodeCount = 0;
+      const existingBySeason = new Map((form.seasons || []).map((season) => [Number(season.season_number), season]));
+      for (const importedSeason of importedSeasons) {
+        const existingSeason = existingBySeason.get(Number(importedSeason.season_number));
+        if (!existingSeason) {
+          addedSeasonCount += 1;
+          addedEpisodeCount += (importedSeason.episodes || []).length;
+        } else {
+          const existingEpisodeNumbers = new Set((existingSeason.episodes || []).map((episode) => Number(episode.episode_number)));
+          addedEpisodeCount += (importedSeason.episodes || []).filter((episode) => !existingEpisodeNumbers.has(Number(episode.episode_number))).length;
+        }
+      }
+
+      setForm((current) => {
+        const seasons = [...(current.seasons || [])];
+        for (const importedSeason of importedSeasons) {
+          const seasonIndex = seasons.findIndex((season) => Number(season.season_number) === Number(importedSeason.season_number));
+          const importedEpisodes = importedSeason.episodes || [];
+          if (seasonIndex < 0) {
+            seasons.push({
+              season_number: importedSeason.season_number,
+              name: importedSeason.name || "",
+              air_date: importedSeason.air_date || "",
+              overview: "",
+              poster_url: "",
+              is_last_season: false,
+              episodes: importedEpisodes.map((episode) => ({
+                ...episode,
+                overview: "",
+                still_url: "",
+                stills: [],
+              })),
+            });
+            continue;
+          }
+
+          const season = seasons[seasonIndex];
+          const episodes = [...(season.episodes || [])];
+          for (const importedEpisode of importedEpisodes) {
+            const episodeIndex = episodes.findIndex((episode) => Number(episode.episode_number) === Number(importedEpisode.episode_number));
+            if (episodeIndex < 0) {
+              episodes.push({
+                ...importedEpisode,
+                overview: "",
+                still_url: "",
+                stills: [],
+              });
+              continue;
+            }
+            const episode = episodes[episodeIndex];
+            episodes[episodeIndex] = {
+              ...episode,
+              title: episode.title || importedEpisode.title || "",
+              air_date: episode.air_date || importedEpisode.air_date || "",
+              main_cast_actor_ids: episode.main_cast_actor_ids?.length ? episode.main_cast_actor_ids : importedEpisode.main_cast_actor_ids || [],
+              guest_stars: episode.guest_stars?.length ? episode.guest_stars : importedEpisode.guest_stars || [],
+            };
+          }
+          seasons[seasonIndex] = {
+            ...season,
+            name: season.name || importedSeason.name || "",
+            air_date: season.air_date || importedSeason.air_date || "",
+            episodes: episodes.sort((left, right) => Number(left.episode_number) - Number(right.episode_number)),
+          };
+        }
+        return { ...current, seasons: seasons.sort((left, right) => Number(left.season_number) - Number(right.season_number)) };
+      });
+      if (response.data.actors?.length) {
+        setActors((current) => {
+          const knownIds = new Set(current.map((actor) => actor.id));
+          return [...current, ...response.data.actors.filter((actor) => !knownIds.has(actor.id))];
+        });
+      }
+      toast.success(`Imported ${addedSeasonCount} seasons and ${addedEpisodeCount} new episodes from TMDB. Saving automatically.`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to import seasons from TMDB");
+    } finally {
+      setImportingTmdbSeasons(false);
+    }
   };
   const remEpisode = (sIdx, eIdx) => setForm((f) => ({
     ...f,
@@ -764,7 +855,13 @@ export default function SeriesEdit() {
           <section id="seasons" ref={(el) => (sectionRefs.current["seasons"] = el)} className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-xl font-bold text-white">Seasons &amp; Episodes</h2>
-              <LockIcon locked={isFieldLocked("seasons")} canToggle={isMod} onToggle={() => toggleLock("seasons")} />
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={importTmdbSeasons} disabled={!canEditField("seasons") || importingTmdbSeasons || saving} className="border-white/15 text-slate-200 hover:bg-white/5" data-testid="import-tmdb-seasons-btn">
+                  <Download className="mr-1.5 h-4 w-4" />
+                  {importingTmdbSeasons ? "Importing…" : "Import Seasons & Episodes"}
+                </Button>
+                <LockIcon locked={isFieldLocked("seasons")} canToggle={isMod} onToggle={() => toggleLock("seasons")} />
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -789,10 +886,12 @@ export default function SeriesEdit() {
                         </div>
                         <div><Label className="text-xs text-slate-400">Overview</Label><Textarea rows={2} value={sn.overview} onChange={(e) => updSeason(sIdx, "overview", e.target.value)} disabled={!canEditField("seasons")} className="mt-1 bg-[#0d0f12] border-white/10 text-white" /></div>
                         <div><Label className="text-xs text-slate-400 block mb-1">Poster</Label><ImageUpload value={sn.poster_url} onChange={(v) => updSeason(sIdx, "poster_url", v)} canDelete={canDelete} /></div>
-                        <label className="flex items-center gap-2 border-t border-white/10 pt-3 text-sm text-slate-300" data-testid={`last-season-toggle-${sIdx}`}>
-                          <input type="checkbox" className="accent-amber-400" checked={!!sn.is_last_season} onChange={(event) => setLastSeason(sIdx, event.target.checked)} disabled={!canEditField("seasons") || saving} />
-                          Mark as final season
-                        </label>
+                        {canMarkFinalSeason && (
+                          <label className="flex items-center gap-2 border-t border-white/10 pt-3 text-sm text-slate-300" data-testid={`last-season-toggle-${sIdx}`}>
+                            <input type="checkbox" className="accent-amber-400" checked={!!sn.is_last_season} onChange={(event) => setLastSeason(sIdx, event.target.checked)} disabled={!canEditField("seasons") || saving} />
+                            Mark as final season
+                          </label>
+                        )}
 
                         <div className="pt-2 border-t border-white/10">
                           <div className="flex items-center justify-between mb-2">
@@ -830,6 +929,43 @@ export default function SeriesEdit() {
                                 </div>
                                 <Textarea placeholder="Overview" rows={2} value={ep.overview} onChange={(e) => updEpisode(sIdx, eIdx, "overview", e.target.value)} disabled={!canEditField("seasons")} className="mt-2 bg-[#14181f] border-white/10 text-white text-sm" />
                                 <div className="mt-2"><Label className="text-xs text-slate-400 block mb-1">Still image</Label><ImageUpload value={ep.still_url} onChange={(v) => updEpisode(sIdx, eIdx, "still_url", v)} canDelete={canDelete} /></div>
+
+                                <div className="mt-3 pt-3 border-t border-white/10">
+                                  <div className="mb-2">
+                                    <Label className="text-xs text-slate-400 uppercase tracking-widest font-semibold">Main Cast in This Episode ({(ep.main_cast_actor_ids || []).length})</Label>
+                                  </div>
+                                  {(form.main_cast || []).length === 0 ? (
+                                    <div className="text-xs text-slate-500 italic">Add main cast members to the series before assigning them to episodes.</div>
+                                  ) : (
+                                    <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                                      {(form.main_cast || []).map((member) => {
+                                        const actorId = String(member.actor_id);
+                                        const actor = actors.find((item) => item.id === actorId);
+                                        const included = (ep.main_cast_actor_ids || []).includes(actorId);
+                                        const episodeCastEditable = canEditField("seasons") && (!episodeCastLocked || isMod || perms.includes("content.edit_locked"));
+                                        return (
+                                          <label key={actorId} className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${included ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-white/10 bg-[#14181f] text-slate-300"}`}>
+                                            <input
+                                              type="checkbox"
+                                              checked={included}
+                                              disabled={!episodeCastEditable}
+                                              onChange={() => updEpisode(
+                                                sIdx,
+                                                eIdx,
+                                                "main_cast_actor_ids",
+                                                included
+                                                  ? (ep.main_cast_actor_ids || []).filter((id) => id !== actorId)
+                                                  : [...(ep.main_cast_actor_ids || []), actorId],
+                                              )}
+                                              className="accent-amber-400"
+                                            />
+                                            <span className="truncate">{actor?.name || "Unknown actor"}{member.character_name ? ` as ${member.character_name}` : ""}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
 
                                 <div className="mt-3 pt-3 border-t border-white/10">
                                   <div className="flex items-center justify-between mb-2">
