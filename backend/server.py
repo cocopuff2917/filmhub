@@ -64,6 +64,26 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "").strip()
 APP_NAME = "cineverse"
 storage_key: Optional[str] = None
+_storage_config_sync_client = None
+
+EMERGENT_FALLBACK_SETTING_ID = "object-storage-migration"
+
+def emergent_fallback_default() -> bool:
+    return os.environ.get("EMERGENT_FALLBACK_ENABLED", "true").strip().lower() not in ("false", "0", "no")
+
+def emergent_fallback_enabled() -> bool:
+    global _storage_config_sync_client
+    try:
+        if _storage_config_sync_client is None:
+            _storage_config_sync_client = MongoClient(mongo_url, serverSelectionTimeoutMS=2000)
+        config = _storage_config_sync_client[os.environ["DB_NAME"]].site_config.find_one(
+            {"_id": EMERGENT_FALLBACK_SETTING_ID}, {"emergent_fallback_enabled": 1}
+        )
+        if config and isinstance(config.get("emergent_fallback_enabled"), bool):
+            return config["emergent_fallback_enabled"]
+    except Exception as e:
+        logger.warning("Could not load persisted object-storage fallback setting: %s", e)
+    return emergent_fallback_default()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -159,7 +179,7 @@ def _get_from_emergent(path: str):
     when STORAGE_PROVIDER=aws but a legacy object only exists in the Emergent
     bucket (zero-downtime migration). Disabled when
     EMERGENT_FALLBACK_ENABLED=false (set after full migration to S3)."""
-    if os.environ.get("EMERGENT_FALLBACK_ENABLED", "true").strip().lower() in ("false", "0", "no"):
+    if not emergent_fallback_enabled():
         return None
     key = init_storage()
     if not key:
