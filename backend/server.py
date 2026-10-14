@@ -157,7 +157,10 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
 def _get_from_emergent(path: str):
     """Fallback reader that pulls from legacy Emergent Object Storage. Used
     when STORAGE_PROVIDER=aws but a legacy object only exists in the Emergent
-    bucket (zero-downtime migration)."""
+    bucket (zero-downtime migration). Disabled when
+    EMERGENT_FALLBACK_ENABLED=false (set after full migration to S3)."""
+    if os.environ.get("EMERGENT_FALLBACK_ENABLED", "true").strip().lower() in ("false", "0", "no"):
+        return None
     key = init_storage()
     if not key:
         return None
