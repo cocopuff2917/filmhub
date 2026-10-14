@@ -479,6 +479,40 @@ function LockedNotice({ label }) {
   );
 }
 
+function ImageUrlInput({ disabled, testId, onAdd }) {
+  const [url, setUrl] = useState("");
+
+  const addUrl = async () => {
+    const value = url.trim();
+    if (!value || disabled) return;
+    await onAdd(value);
+    setUrl("");
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+        onKeyDown={(event) => event.key === "Enter" && (event.preventDefault(), addUrl())}
+        placeholder="Paste an image URL"
+        disabled={disabled}
+        className="bg-[#14181f] border-white/10 text-white"
+        data-testid={`${testId}-url-input`}
+      />
+      <Button
+        type="button"
+        disabled={!url.trim() || disabled}
+        onClick={addUrl}
+        className="bg-amber-500 hover:bg-amber-600 text-black font-semibold flex-shrink-0"
+        data-testid={`${testId}-add-url-btn`}
+      >
+        <Plus className="w-4 h-4 mr-1" /> Add URL
+      </Button>
+    </div>
+  );
+}
+
 // Gallery editor (no primary concept, 16:9 tiles)
 function GalleryListEditor({ items, saving, locked, canDelete, canSetHeadshot = false, headshotUrl, onAppend, onRemove, onSetHeadshot }) {
   const [uploading, setUploading] = useState(false);

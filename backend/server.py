@@ -154,10 +154,35 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def _get_from_emergent(path: str):
+    """Fallback reader that pulls from legacy Emergent Object Storage. Used
+    when STORAGE_PROVIDER=aws but a legacy object only exists in the Emergent
+    bucket (zero-downtime migration)."""
+    key = init_storage()
+    if not key:
+        return None
+    try:
+        resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+        if resp.status_code == 404:
+            init_storage(force=True)
+            resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": storage_key}, timeout=60)
+        if resp.status_code == 200:
+            return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+    except Exception as e:
+        logger.warning(f"Emergent fallback read failed for {path}: {e}")
+    return None
+
 def get_object(path: str):
     if STORAGE_PROVIDER == "aws":
-        response = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=path)
-        return response["Body"].read(), response.get("ContentType", "application/octet-stream")
+        try:
+            response = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=path)
+            return response["Body"].read(), response.get("ContentType", "application/octet-stream")
+        except Exception as s3_err:
+            # Fallback: try the legacy Emergent bucket while migration is in progress.
+            fallback = _get_from_emergent(path)
+            if fallback is not None:
+                return fallback
+            raise s3_err
     if STORAGE_PROVIDER == "supabase":
         resp = requests.get(
             _supabase_object_url(path),
@@ -9064,6 +9089,9 @@ def download_file(path: str, image_format: Optional[str] = Query(default=None, a
     # Fast path: serve pre-generated thumbnail from disk cache
     if image_format in ("jpeg", "thumbnail"):
         cached = _thumb_cache_read(path, image_format)
+        if cached is None:
+            alternate_format = "jpeg" if image_format == "thumbnail" else "thumbnail"
+            cached = _thumb_cache_read(path, alternate_format)
         if cached is not None:
             cached_bytes, cached_ct = cached
             return FastAPIResponse(

@@ -134,3 +134,24 @@ def test_thumbnail_is_resized_webp_and_long_cached(monkeypatch):
     with server.Image.open(BytesIO(response.body)) as thumbnail:
         assert thumbnail.format == "WEBP"
         assert thumbnail.size == (640, 960)
+
+
+def test_thumbnail_uses_cached_jpeg_when_source_is_missing(monkeypatch):
+    cached_bytes = b"cached jpeg image"
+
+    def read_cache(path, image_format):
+        if image_format == "jpeg":
+            return cached_bytes, "image/jpeg"
+        return None
+
+    def fail_if_storage_is_called(path):
+        raise AssertionError("missing source should be served from the alternate cache")
+
+    monkeypatch.setattr(server, "_thumb_cache_read", read_cache)
+    monkeypatch.setattr(server, "get_object", fail_if_storage_is_called)
+
+    response = server.download_file("missing-poster.png", "thumbnail")
+
+    assert response.status_code == 200
+    assert response.media_type == "image/jpeg"
+    assert response.body == cached_bytes
