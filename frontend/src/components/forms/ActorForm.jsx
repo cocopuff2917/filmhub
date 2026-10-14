@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
+import { GalleryUpload } from "@/components/ImageUpload";
 import { useAuth } from "@/context/AuthContext";
 
 export default function ActorForm({ actor, onSaved, onCancel }) {
@@ -39,6 +39,12 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
     }
     // eslint-disable-next-line
   }, [actor]);
+
+  const updateGallery = (gallery) => setForm((current) => ({
+    ...current,
+    gallery,
+    photo_url: gallery.includes(current.photo_url) ? current.photo_url : gallery[0] || "",
+  }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -92,16 +98,16 @@ export default function ActorForm({ actor, onSaved, onCancel }) {
         <Textarea rows={4} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} className="mt-1.5 bg-[#0d0f12] border-white/10 text-white" data-testid="actor-bio-input" />
       </div>
       {!actor?.id && (
-        <>
-          <div>
-            <Label className="text-slate-300 block mb-2">Headshot</Label>
-            <ImageUpload value={form.photo_url} onChange={(v) => setForm({ ...form, photo_url: v })} testid="actor-photo-upload" />
-          </div>
-          <div>
-            <Label className="text-slate-300 block mb-2">Gallery ({(form.gallery || []).length} images)</Label>
-            <GalleryUpload value={form.gallery} onChange={(v) => setForm({ ...form, gallery: v })} testid="actor-gallery-upload" />
-          </div>
-        </>
+        <div>
+          <Label className="text-slate-300 block mb-2">Gallery ({(form.gallery || []).length} images)</Label>
+          <GalleryUpload
+            value={form.gallery}
+            onChange={updateGallery}
+            primaryUrl={form.photo_url}
+            onSetPrimary={(url) => setForm((current) => ({ ...current, photo_url: url }))}
+            testid="actor-gallery-upload"
+          />
+        </div>
       )}
       <div className="flex gap-2 pt-4 border-t border-white/10">
         <Button type="submit" disabled={!actor?.id && !isAdmin && !catalogCreationEnabled} className="bg-amber-500 hover:bg-amber-600 text-black font-semibold" data-testid="actor-submit-btn">

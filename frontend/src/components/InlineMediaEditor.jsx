@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import ImageUpload from "@/components/ImageUpload";
 import { Camera, Film, Plus, Trash2, Star, StarOff, Upload, Youtube, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { parseYouTubeId } from "@/components/VideosSection";
@@ -37,7 +36,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
   const [contentEditsFrozen, setContentEditsFrozen] = useState(false);
   const [checkingFreeze, setCheckingFreeze] = useState(false);
   const editingPaused = isCatalogEntity && contentEditsFrozen && !canBypassCatalogFreeze;
-  const [tab, setTab] = useState(isActor ? "photo" : "poster");
+  const [tab, setTab] = useState(isActor ? "gallery" : "poster");
 
   const [photoUrl, setPhotoUrl] = useState(entity.photo_url || "");
   const [posterUrls, setPosterUrls] = useState(entity.poster_urls || (entity.poster_url ? [entity.poster_url] : []));
@@ -114,16 +113,6 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
     }
   };
 
-  const updateActorPhoto = async (url) => {
-    const previousPhoto = photoUrl;
-    setPhotoUrl(url);
-    try {
-      await savePatch({ photo_url: url }, "Actor photo updated");
-    } catch {
-      setPhotoUrl(previousPhoto);
-    }
-  };
-
   const saveTrailer = async () => { await savePatch({ trailer_url: trailerUrl }, "Trailer updated"); };
 
   const addVideo = async () => {
@@ -149,7 +138,6 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
 
   const isFieldLocked = (field) => locked.has(field) && !canEditLockedFields;
   const posterLocked = isFieldLocked("poster_url") || isFieldLocked("poster_urls");
-  const photoLocked = isFieldLocked("photo_url");
   const backdropLocked = isFieldLocked("backdrop_url") || isFieldLocked("backdrop_urls");
   const galleryLocked = isFieldLocked("gallery");
   const trailerLocked = isFieldLocked("trailer_url");
@@ -192,7 +180,7 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="bg-[#0d0f12] border border-white/10">
               {isActor ? (
-                <TabsTrigger value="photo" data-testid="media-tab-photo">Headshot</TabsTrigger>
+                null
               ) : (
                 <>
                   <TabsTrigger value="poster" data-testid="media-tab-poster">Posters</TabsTrigger>
@@ -203,27 +191,6 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
               {!isActor && <TabsTrigger value="trailer" data-testid="media-tab-trailer">Trailer</TabsTrigger>}
               {!isActor && <TabsTrigger value="videos" data-testid="media-tab-videos">Videos</TabsTrigger>}
             </TabsList>
-
-            {isActor && (
-              <TabsContent value="photo" className="mt-4 space-y-3">
-                {photoLocked ? <LockedNotice label="Headshot" /> : (
-                  <>
-                    <ImageUpload
-                      value={photoUrl}
-                      onChange={updateActorPhoto}
-                      testid="actor-media-photo-upload"
-                    />
-                    <ImageUrlInput
-                      disabled={saving}
-                      testId="actor-media-photo"
-                      onAdd={async (url) => {
-                        await savePatch({ photo_url: url }, "Actor photo updated");
-                      }}
-                    />
-                  </>
-                )}
-              </TabsContent>
-            )}
 
             {/* POSTERS */}
             {!isActor && <TabsContent value="poster" className="mt-4 space-y-3">
@@ -298,6 +265,8 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                 saving={saving}
                 locked={galleryLocked}
                 canDelete={canDeleteGallery}
+                canSetHeadshot={isActor && canMod}
+                headshotUrl={photoUrl}
                 onAppend={async (url) => {
                   const next = [...gallery, url];
                   await savePatch({ gallery: next }, "Gallery image added");
@@ -307,6 +276,19 @@ export default function InlineMediaEditor({ kind, entity, onUpdated, trigger }) 
                   const next = gallery.filter((_, i) => i !== idx);
                   await savePatch({ gallery: next }, "Gallery image removed");
                   setGallery(next);
+                }}
+                onSetHeadshot={async (idx) => {
+                  setSaving(true);
+                  try {
+                    const response = await api.post(`${base}/${entity.id}/gallery/${idx}/headshot`);
+                    setPhotoUrl(response.data.photo_url || "");
+                    onUpdated?.(response.data);
+                    toast.success("Actor headshot updated");
+                  } catch (error) {
+                    toast.error(error.response?.data?.detail || "Failed to update actor headshot");
+                  } finally {
+                    setSaving(false);
+                  }
                 }}
               />
             </TabsContent>
@@ -485,67 +467,7 @@ function ImageListEditor({ items, aspect, primaryUrl, saving, locked, canDelete,
           <input type="file" accept="image/*" disabled={locked || uploading || saving} onChange={handleFile} className="hidden" data-testid={`${testId}-upload-input`} />
         </label>
       </div>
-      <ImageUrlInput
-        disabled={locked || uploading || saving}
-        testId={testId}
-        onAdd={onAppend}
-      />
     </div>
-  );
-}
-
-function ImageUrlInput({ disabled, testId, onAdd }) {
-  const [url, setUrl] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    const value = url.trim();
-    let parsed;
-    try {
-      parsed = new URL(value);
-    } catch {
-      toast.error("Enter a valid image URL");
-      return;
-    }
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      toast.error("Image URL must start with http:// or https://");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await onAdd(parsed.href);
-      setUrl("");
-    } catch {
-      // The save callback reports its own error.
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
-      <Input
-        type="url"
-        value={url}
-        onChange={(event) => setUrl(event.target.value)}
-        placeholder="Paste an image URL"
-        aria-label={`Image URL for ${testId}`}
-        maxLength={2048}
-        disabled={disabled || submitting}
-        className="bg-[#14181f] border-white/10 text-white"
-        data-testid={`${testId}-url-input`}
-      />
-      <Button
-        type="submit"
-        disabled={!url.trim() || disabled || submitting}
-        className="bg-amber-500 hover:bg-amber-600 text-black font-semibold flex-shrink-0"
-        data-testid={`${testId}-add-url-btn`}
-      >
-        <Plus className="w-4 h-4 mr-1" /> Use URL
-      </Button>
-    </form>
   );
 }
 
@@ -558,7 +480,7 @@ function LockedNotice({ label }) {
 }
 
 // Gallery editor (no primary concept, 16:9 tiles)
-function GalleryListEditor({ items, saving, locked, canDelete, onAppend, onRemove }) {
+function GalleryListEditor({ items, saving, locked, canDelete, canSetHeadshot = false, headshotUrl, onAppend, onRemove, onSetHeadshot }) {
   const [uploading, setUploading] = useState(false);
 
   const handleFile = async (e) => {
@@ -579,7 +501,7 @@ function GalleryListEditor({ items, saving, locked, canDelete, onAppend, onRemov
   return (
     <div className="rounded-lg border border-white/10 bg-[#0d0f12] p-4 space-y-4">
       {locked && <LockedNotice label="Gallery" />}
-      {!canDelete && items.length > 0 && (
+      {!canDelete && !canSetHeadshot && items.length > 0 && (
         <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs text-sky-300">
           You can upload additional gallery images. Gallery removal depends on your assigned permissions.
         </div>
@@ -598,13 +520,29 @@ function GalleryListEditor({ items, saving, locked, canDelete, onAppend, onRemov
                 style={{ aspectRatio: "16/9" }}
                 fallback={<div className="flex w-full items-center justify-center text-xs text-slate-500" style={{ aspectRatio: "16/9" }}>Preview unavailable</div>}
               />
-              {canDelete && !locked && (
+              {url === headshotUrl && (
+                <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500 text-black text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider" data-testid={`gallery-headshot-${idx}`}>
+                  <Star className="w-3 h-3" /> Headshot
+                </div>
+              )}
+              {(canDelete || canSetHeadshot) && !locked && (
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  {canSetHeadshot && url !== headshotUrl && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => onSetHeadshot?.(idx)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-black text-xs font-semibold disabled:opacity-50"
+                      data-testid={`gallery-set-headshot-${idx}`}
+                    >
+                      <Star className="w-3 h-3" /> Set as headshot
+                    </button>
+                  )}
                   <button
                     type="button"
-                    disabled={saving}
-                    onClick={() => onRemove(idx)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold disabled:opacity-50"
+                    disabled={saving || !canDelete}
+                    onClick={() => onRemove?.(idx)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold disabled:opacity-50 ${canDelete ? "" : "hidden"}`}
                     data-testid={`gallery-remove-${idx}`}
                   >
                     <Trash2 className="w-3 h-3" /> Delete

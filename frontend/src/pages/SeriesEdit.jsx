@@ -432,8 +432,21 @@ export default function SeriesEdit() {
   const importTmdbSeasons = async () => {
     setImportingTmdbSeasons(true);
     try {
-      const response = await api.post(`/series/${id}/tmdb-seasons/import`);
-      const importedSeasons = response.data.seasons || [];
+      const { data: job } = await api.post(`/series/${id}/tmdb-seasons/import`);
+      const startedAt = Date.now();
+      let importResult;
+      while (!importResult) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const { data: status } = await api.get(`/series/${id}/tmdb-seasons/import/${job.job_id}`);
+        if (status.status === "completed") {
+          importResult = status.result || {};
+        } else if (status.status === "failed") {
+          throw new Error(status.error || "Failed to import seasons from TMDB");
+        } else if (Date.now() - startedAt > 15 * 60 * 1000) {
+          throw new Error("The import is still processing. Check back before starting another import.");
+        }
+      }
+      const importedSeasons = importResult.seasons || [];
       let addedSeasonCount = 0;
       let addedEpisodeCount = 0;
       const existingBySeason = new Map((form.seasons || []).map((season) => [Number(season.season_number), season]));
@@ -502,15 +515,15 @@ export default function SeriesEdit() {
         }
         return { ...current, seasons: seasons.sort((left, right) => Number(left.season_number) - Number(right.season_number)) };
       });
-      if (response.data.actors?.length) {
+      if (importResult.actors?.length) {
         setActors((current) => {
           const knownIds = new Set(current.map((actor) => actor.id));
-          return [...current, ...response.data.actors.filter((actor) => !knownIds.has(actor.id))];
+          return [...current, ...importResult.actors.filter((actor) => !knownIds.has(actor.id))];
         });
       }
       toast.success(`Imported ${addedSeasonCount} seasons and ${addedEpisodeCount} new episodes from TMDB. Saving automatically.`);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to import seasons from TMDB");
+      toast.error(error.response?.data?.detail || error.message || "Failed to import seasons from TMDB");
     } finally {
       setImportingTmdbSeasons(false);
     }

@@ -1,13 +1,10 @@
-"""Tests for Series Cast enrichment: episode_count per cast member, recurring guest-star promotion
-(threshold=5), and collection_ids parity with movies.
+"""Tests for Series Cast enrichment: episode_count per cast member, guest-star separation,
+and collection_ids parity with movies.
 
 Spec being tested:
 - GET /api/series/{id} returns collection_ids (list, may be empty).
 - Each main_cast entry has `episode_count` (int). For original main_cast = total series episode_count.
-- Guest stars appearing in >=5 distinct episodes AND not already in main_cast are promoted into
-  main_cast with recurring=True, episode_count=count, appended after original main_cast and sorted
-  by episode_count desc.
-- Guest stars with <5 appearances are NOT promoted.
+- Guest stars are never promoted into main_cast, regardless of episode appearance count.
 - An actor who is both in main_cast and a guest_star in some episodes is not duplicated; their
   original episode_count (total episodes) wins.
 """
@@ -187,8 +184,8 @@ def test_main_cast_is_assigned_to_episodes_not_seasons(admin_session, created_id
     assert cast_credit["episode_appearance_count"] == 2
 
 
-# Feature: guest star with >=5 episode appearances is promoted to main_cast as recurring
-def test_recurring_guest_promoted_at_threshold_6_episodes(admin_session, created_ids):
+# Feature: guest star with >=5 episode appearances remains separate from main_cast
+def test_recurring_guest_not_promoted_at_threshold_6_episodes(admin_session, created_ids):
     lead = _make_actor(admin_session, created_ids, "LeadC")
     guest = _make_actor(admin_session, created_ids, "GuestC")
     # 6 episodes, each with guest
@@ -205,17 +202,12 @@ def test_recurring_guest_promoted_at_threshold_6_episodes(admin_session, created
 
     data = admin_session.get(f"{API}/series/{sid}", timeout=15).json()
     assert data["episode_count"] == 6
-    assert len(data["main_cast"]) == 2, f"expected 2, got {data['main_cast']}"
-    # original first
+    assert len(data["main_cast"]) == 1, f"guest should remain separate; got {data['main_cast']}"
     assert data["main_cast"][0]["actor"]["id"] == lead
     assert data["main_cast"][0]["episode_count"] == 6
     assert not data["main_cast"][0].get("recurring")
-    # recurring appended
-    rec = data["main_cast"][1]
-    assert rec["actor"]["id"] == guest
-    assert rec["episode_count"] == 6
-    assert rec["recurring"] is True
-    assert rec.get("character_name") == "Buddy"
+    assert guest not in [member["actor"]["id"] for member in data["main_cast"]]
+    assert all(ep["guest_stars"][0]["actor"]["id"] == guest for ep in data["seasons"][0]["episodes"])
 
 
 # Feature: guest star with <5 episode appearances is NOT promoted
@@ -241,7 +233,7 @@ def test_guest_below_threshold_not_promoted(admin_session, created_ids):
     assert data["main_cast"][0]["episode_count"] == 4
 
 
-# Feature: an actor in main_cast + also guest_star should NOT be duplicated; original wins
+# Feature: episode guest-star classification takes precedence over series main_cast
 def test_actor_in_main_and_guest_not_duplicated(admin_session, created_ids):
     lead = _make_actor(admin_session, created_ids, "LeadE")
     # lead is also a guest star in episodes
@@ -259,14 +251,17 @@ def test_actor_in_main_and_guest_not_duplicated(admin_session, created_ids):
     data = admin_session.get(f"{API}/series/{sid}", timeout=15).json()
     mc = data["main_cast"]
     ids = [c["actor"]["id"] for c in mc]
-    assert ids.count(lead) == 1, f"actor duplicated: {ids}"
-    assert len(mc) == 1
-    assert mc[0]["episode_count"] == 6  # total episodes wins over guest count (also 6, same here)
-    assert not mc[0].get("recurring")
+    assert lead not in ids, f"guest actor should not appear in main cast: {ids}"
+    assert all(
+        guest["actor"]["id"] == lead
+        for episode in data["seasons"][0]["episodes"]
+        for guest in episode["guest_stars"]
+    )
+    assert all(lead not in episode["main_cast_actor_ids"] for episode in data["seasons"][0]["episodes"])
 
 
-# Feature: ordering — originals first in input order, recurring sorted by episode_count desc
-def test_ordering_originals_then_recurring_sorted_desc(admin_session, created_ids):
+# Feature: guest stars at and above the threshold never enter the main-cast order
+def test_ordering_contains_only_original_main_cast(admin_session, created_ids):
     lead1 = _make_actor(admin_session, created_ids, "O1")
     lead2 = _make_actor(admin_session, created_ids, "O2")
     gA = _make_actor(admin_session, created_ids, "GA")  # 5 eps
@@ -305,14 +300,11 @@ def test_ordering_originals_then_recurring_sorted_desc(admin_session, created_id
     data = admin_session.get(f"{API}/series/{sid}", timeout=15).json()
     mc = data["main_cast"]
     ids = [c["actor"]["id"] for c in mc]
-    # Expected: lead1, lead2, gB(7), gC(6), gA(5). gLow(3) excluded.
-    assert ids == [lead1, lead2, gB, gC, gA], f"ordering wrong: {ids}"
+    # Main-cast order preserves only the explicitly configured members.
+    assert ids == [lead1, lead2], f"unexpected guest in main cast: {ids}"
     assert mc[0]["episode_count"] == 10 and not mc[0].get("recurring")
     assert mc[1]["episode_count"] == 10 and not mc[1].get("recurring")
-    assert mc[2]["episode_count"] == 7 and mc[2]["recurring"] is True
-    assert mc[3]["episode_count"] == 6 and mc[3]["recurring"] is True
-    assert mc[4]["episode_count"] == 5 and mc[4]["recurring"] is True
-    assert gLow not in ids
+    assert not {gA, gB, gC, gLow}.intersection(ids)
 
 
 # Regression: collection_ids still works on create series + GET returns it
@@ -474,6 +466,7 @@ def test_episode_guest_stars_can_be_edited(admin_session, created_ids):
     response = admin_session.post(f"{API}/series", json={
         "title": f"TEST_EpisodeGuestStars_{uuid.uuid4().hex}",
         "imdb_id": f"tt{uuid.uuid4().int % 10**7:07d}",
+        "main_cast": [{"actor_id": actor_id, "character_name": "Previously Main"}],
         "seasons": [{"season_number": 1, "episodes": [
             {"episode_number": 1, "name": "Pilot", "guest_stars": []},
             {"episode_number": 2, "name": "Finale", "guest_stars": []},
@@ -493,6 +486,8 @@ def test_episode_guest_stars_can_be_edited(admin_session, created_ids):
     assert episodes[0]["guest_stars"][0]["actor"]["id"] == actor_id
     assert episodes[0]["guest_stars"][0]["character_name"] == "Mystery Guest"
     assert episodes[1]["guest_stars"] == []
+    assert all(member["actor"]["id"] != actor_id for member in updated.json()["main_cast"])
+    assert actor_id not in episodes[0]["main_cast_actor_ids"]
 
     edited = admin_session.patch(
         f"{API}/series/{series_id}/seasons/1/episodes/1/guest-stars",

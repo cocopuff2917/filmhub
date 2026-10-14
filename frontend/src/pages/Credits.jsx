@@ -62,8 +62,13 @@ export default function Credits({ kind }) {
   if (!entity) return <main className="mx-auto max-w-6xl px-4 py-20 text-slate-400">Loading credits…</main>;
 
   const backPath = `/${isSeries ? "series" : "movie"}/${id}`;
-  const mainCast = isSeries ? entity.main_cast || [] : entity.cast || [];
   const guests = isSeries ? guestCredits(entity) : [];
+  const mainCast = isSeries
+    ? (entity.main_cast || []).filter((credit) => {
+      const actorId = credit?.actor?.id || credit?.actor_id;
+      return actorId && !credit.recurring && credit.kind !== "guest";
+    })
+    : entity.cast || [];
   const crew = isSeries ? entity.creators || [] : entity.crew || [];
 
   return (
@@ -86,7 +91,9 @@ export default function Credits({ kind }) {
                 <CreditPerson
                   key={`${credit.actor?.id || credit.actor_id}-${index}`}
                   actor={credit.actor}
-                  subtitle={credit.character_name || "—"}
+                  subtitle={credit.recurring
+                    ? `${credit.character_name || "—"} · Recurring guest · ${credit.episode_count} episodes`
+                    : credit.character_name || "—"}
                   testid={`credits-cast-${credit.actor?.id || index}`}
                 />
               ))}

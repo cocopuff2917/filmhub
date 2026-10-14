@@ -60,6 +60,23 @@ class TestActorsLiveSearch:
         assert r.status_code == 200
         assert isinstance(r.json(), list)
 
+    def test_admin_credit_status_marks_uncredited_actor(self, admin_session, created_actors):
+        actor = created_actors[0]
+        response = admin_session.get(
+            f"{API}/actors",
+            params={"q": actor["name"], "include_credit_status": "true"},
+        )
+        assert response.status_code == 200, response.text
+        listed_actor = next(row for row in response.json() if row["id"] == actor["id"])
+        assert listed_actor["has_acting_credits"] is False
+        assert listed_actor["is_empty_duplicate"] is False
+
+    def test_empty_duplicate_delete_rejects_actor_without_duplicate(self, admin_session, created_actors):
+        actor_id = created_actors[0]["id"]
+        response = admin_session.delete(f"{API}/actors/{actor_id}/empty-duplicate")
+        assert response.status_code == 409, response.text
+        assert admin_session.get(f"{API}/actors/{actor_id}").status_code == 200
+
     def test_search_nonexistent_returns_empty(self, admin_session):
         r = admin_session.get(f"{API}/actors", params={"q": f"ZZZ_NOPE_{uuid.uuid4().hex}", "limit": 15})
         assert r.status_code == 200

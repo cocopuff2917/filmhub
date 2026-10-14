@@ -13,7 +13,8 @@ class FakeCollection:
         self.documents = {doc["_id"]: deepcopy(doc) for doc in documents}
 
     async def find_one(self, query, projection):
-        doc = self.documents.get(query["_id"])
+        id_query = next((part for part in query.get("$and", []) if "_id" in part), query)
+        doc = self.documents.get(id_query["_id"])
         if not doc or doc.get("deleted") is True or doc.get("deleted_at"):
             return None
         return deepcopy(doc)
@@ -69,6 +70,25 @@ def test_cleanup_leaves_changed_image_reference_untouched(monkeypatch):
 
     assert result == {"removed": 0, "conflicted": 1}
     assert users.documents[user_id]["avatar_url"] == "new-avatar.jpg"
+
+
+def test_cleanup_removes_broken_actor_gallery_image_and_updates_headshot(monkeypatch):
+    actor_id = ObjectId()
+    actors = FakeCollection([{
+        "_id": actor_id,
+        "photo_url": "broken-gallery.jpg",
+        "gallery": ["broken-gallery.jpg", "healthy-gallery.jpg"],
+    }])
+    monkeypatch.setattr(server, "db", SimpleNamespace(actors=actors))
+    payload = server.BrokenImageCleanupRequest(items=[
+        {"id": str(actor_id), "kind": "actors", "field": "gallery", "url": "broken-gallery.jpg"},
+    ])
+
+    result = asyncio.run(server.apply_image_cleanup(payload, admin={"role": "admin"}))
+
+    assert result == {"removed": 1, "conflicted": 0}
+    assert actors.documents[actor_id]["gallery"] == ["healthy-gallery.jpg"]
+    assert actors.documents[actor_id]["photo_url"] == "healthy-gallery.jpg"
 
 
 def test_automatic_cleanup_cron_is_disabled(monkeypatch):

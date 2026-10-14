@@ -6,8 +6,19 @@ import { Button } from "@/components/ui/button";
 
 function getCollectionCast(titles, limit = 10) {
   const groups = titles
-    .filter((title) => (title.main_cast || []).length > 0)
-    .map((title) => ({ title, members: title.main_cast || [] }));
+    .map((title) => {
+      const guestActorIds = new Set(
+        (title.seasons || []).flatMap((season) => (season.episodes || []).flatMap((episode) => (
+          (episode.guest_stars || []).map((guest) => String(guest.actor_id || guest.actor?.id || ""))
+        ))).filter(Boolean)
+      );
+      const members = (title.main_cast || []).filter((member) => {
+        const actorId = member?.actor?.id || member?.actor_id;
+        return actorId && !member.recurring && member.kind !== "guest" && !guestActorIds.has(String(actorId));
+      });
+      return { title, members };
+    })
+    .filter(({ members }) => members.length > 0);
   const cast = [];
   const byActorId = new Map();
   let depth = 0;

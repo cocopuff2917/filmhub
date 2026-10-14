@@ -69,6 +69,7 @@ export default function ActorDetail() {
   if (!actor) return <div className="max-w-7xl mx-auto px-4 py-20 text-slate-500">Loading...</div>;
 
   const photo = actor.photo_url ? fileUrl(actor.photo_url) : null;
+  const galleryImages = [...new Set((actor.gallery || []).filter(Boolean))];
   const isDeceased = !!actor.death_date;
   const age = computeAge(actor.birth_date, actor.death_date);
   const totalCredits = (actor.movies?.length || 0) + (actor.series?.length || 0) + (actor.crew_credits?.length || 0);
@@ -172,6 +173,11 @@ export default function ActorDetail() {
                   <InlineMediaEditor
                     kind="actor"
                     entity={actor}
+                    trigger={canModerate ? (
+                      <Button variant="outline" className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200" data-testid="edit-actor-gallery-btn">
+                        <ImageIcon className="w-4 h-4 mr-2" /> Edit gallery
+                      </Button>
+                    ) : undefined}
                     onUpdated={(patch) => setActor((current) => ({ ...current, ...patch }))}
                   />
                 )}
@@ -299,14 +305,17 @@ export default function ActorDetail() {
       </section>
 
       {/* Gallery */}
-      {actor.gallery && actor.gallery.length > 0 && (
+      {galleryImages.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14" data-testid="actor-gallery-section">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold"><ImageIcon className="w-4 h-4" /> Photos</div>
           <h2 className="mt-2 font-heading text-3xl sm:text-4xl font-bold text-white">Gallery</h2>
           <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {actor.gallery.map((img, i) => (
-              <div key={i} className="rounded-xl overflow-hidden aspect-square bg-[#1e2430] border border-white/5">
-                <img src={fileUrl(img)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+            {galleryImages.map((img, i) => (
+              <div key={img} className="relative rounded-xl overflow-hidden aspect-square bg-[#1e2430] border border-white/5" data-testid={`actor-gallery-item-${i}`}>
+                <img src={fileUrl(img)} alt={img === actor.photo_url ? `${actor.name} headshot` : ""} className="w-full h-full object-contain" loading="lazy" decoding="async" />
+                {img === actor.photo_url && (
+                  <span className="absolute left-2 top-2 rounded bg-amber-500 px-2 py-1 text-[10px] font-bold uppercase text-black">Headshot</span>
+                )}
               </div>
             ))}
           </div>

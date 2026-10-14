@@ -9,6 +9,10 @@ import os
 import json
 import uuid
 import logging
+import asyncio
+import html
+import hashlib
+import boto3
 import bcrypt
 import jwt
 import requests
@@ -18,23 +22,27 @@ import re
 import calendar
 import ipaddress
 import httpx
-from difflib import SequenceMatcher
 from collections import Counter
 from io import BytesIO
 from html import escape
 from html.parser import HTMLParser
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Annotated
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Query, Header, BackgroundTasks
 from fastapi.responses import Response as FastAPIResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, MongoClient
 from pymongo.errors import DuplicateKeyError
 from PIL import Image, ImageOps
-from pillow_avif import AvifImagePlugin
+# AVIF support is optional — the mere import registers the codec with Pillow.
+# Guarded so a missing wheel on the deploy platform never crashes backend boot.
+try:
+    from pillow_avif import AvifImagePlugin  # noqa: F401
+except Exception as _avif_err:  # pragma: no cover
+    logging.getLogger(__name__).warning("pillow_avif unavailable: %s. AVIF decoding disabled.", _avif_err)
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, BeforeValidator
 from bson import ObjectId
 
@@ -48,6 +56,9 @@ STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https
 STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 STORAGE_PROVIDER = os.environ.get("STORAGE_PROVIDER", "emergent").strip().lower()
+S3_BUCKET = os.environ.get("S3_BUCKET", "").strip()
+S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+_s3_client = None
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "").strip()
@@ -62,6 +73,15 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 # ----------- Object Storage -----------
+def _get_s3_client():
+    global _s3_client
+    if not S3_BUCKET:
+        raise HTTPException(status_code=500, detail="AWS S3 storage is not configured")
+    if _s3_client is None:
+        _s3_client = boto3.client("s3", region_name=S3_REGION)
+    return _s3_client
+
+
 def _supabase_object_url(path: str) -> str:
     if not SUPABASE_URL or not SUPABASE_STORAGE_BUCKET or not SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(status_code=500, detail="Supabase Storage is not configured")
@@ -95,6 +115,14 @@ def init_storage(force: bool = False):
         return None
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
+    if STORAGE_PROVIDER == "aws":
+        _get_s3_client().put_object(
+            Bucket=S3_BUCKET,
+            Key=path,
+            Body=data,
+            ContentType=content_type,
+        )
+        return {"path": path, "size": len(data)}
     if STORAGE_PROVIDER == "supabase":
         resp = requests.post(
             _supabase_object_url(path),
@@ -127,6 +155,9 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     return resp.json()
 
 def get_object(path: str):
+    if STORAGE_PROVIDER == "aws":
+        response = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=path)
+        return response["Body"].read(), response.get("ContentType", "application/octet-stream")
     if STORAGE_PROVIDER == "supabase":
         resp = requests.get(
             _supabase_object_url(path),
@@ -150,6 +181,7 @@ def get_object(path: str):
 EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "CineVerse")
+_notification_email_tasks = set()
 
 _SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
 _CRED_ASK = (
@@ -732,6 +764,7 @@ class ThreadCreate(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     body: str = Field(min_length=1, max_length=5000)
     category: str = "support"  # support | report | general
+    report_reason: Optional[str] = Field(default=None, max_length=40)
     entity_type: Optional[str] = None  # movie | series | actor
     entity_id: Optional[str] = None
     entity_title: Optional[str] = None
@@ -1123,9 +1156,20 @@ async def enrich_series(doc, deep: bool = True):
     """Enrich a series doc with actor data on main_cast and, if deep, on episode guest_stars."""
     doc_to_dict(doc)
     seasons = doc.get("seasons", []) or []
+    guest_actor_ids = {
+        guest.get("actor_id")
+        for season in seasons
+        for episode in season.get("episodes", []) or []
+        for guest in episode.get("guest_stars", []) or []
+        if guest.get("actor_id")
+    }
+    main_cast = [
+        member for member in doc.get("main_cast", []) or []
+        if member.get("actor_id") not in guest_actor_ids
+    ]
     # gather all actor ids used
     actor_ids = set()
-    for c in doc.get("main_cast", []) or []:
+    for c in main_cast:
         if c.get("actor_id"):
             actor_ids.add(c["actor_id"])
     if deep:
@@ -1146,7 +1190,7 @@ async def enrich_series(doc, deep: bool = True):
             aid = str(a["_id"])
             actors_map[aid] = {"id": aid, "name": a.get("name"), "photo_url": a.get("photo_url", "")}
     enriched_main = []
-    for c in doc.get("main_cast", []) or []:
+    for c in main_cast:
         actor = actors_map.get(c.get("actor_id"))
         if actor:
             enriched_main.append({key: value for key, value in c.items() if key not in {"season_numbers", "start_season"}} | {"actor": actor})
@@ -1171,7 +1215,11 @@ async def enrich_series(doc, deep: bool = True):
             if requested_actor_ids is None:
                 requested_actor_ids = []
                 ep["main_cast_actor_ids"] = requested_actor_ids
-            selected_actor_ids = set(requested_actor_ids)
+            selected_actor_ids = set(requested_actor_ids) - guest_actor_ids
+            ep["main_cast_actor_ids"] = [
+                actor_id for actor_id in requested_actor_ids
+                if actor_id not in guest_actor_ids
+            ]
             ep["main_cast_members"] = [
                 member for member in enriched_main
                 if member.get("actor_id") in selected_actor_ids
@@ -1184,26 +1232,9 @@ async def enrich_series(doc, deep: bool = True):
     for member in enriched_main:
         member["episode_appearance_count"] = main_cast_episode_counts.get(member.get("actor_id"), 0)
 
-    # Count how many episodes each guest-star appeared in across the whole series.
-    gs_counts: dict = {}
-    gs_character: dict = {}
-    for season in seasons:
-        for ep in season.get("episodes", []) or []:
-            for gs in ep.get("guest_stars", []) or []:
-                aid = gs.get("actor_id")
-                if not aid:
-                    continue
-                gs_counts[aid] = gs_counts.get(aid, 0) + 1
-                if aid not in gs_character and gs.get("character_name"):
-                    gs_character[aid] = gs.get("character_name")
-
     # Main cast appear across the whole series by convention; attach kind.
-    main_actor_ids = set()
     for c in enriched_main:
         c["kind"] = "main"
-        main_actor_ids.add(c.get("actor_id"))
-
-    # Count guest-star appearances for analytics only — guests are NOT shown in Series Cast.
     doc["main_cast"] = enriched_main
     # rating aggregation (series-scoped reviews)
     agg = await db.reviews.aggregate([
@@ -3698,6 +3729,30 @@ async def _create_notification(*, user_id: str, ntype: str, title: str, body: st
         doc["from_user_avatar"] = from_user.get("avatar_url", "")
         doc["from_user_role"] = from_user.get("effective_role", from_user.get("role", "user"))
     await db.notifications.insert_one(doc)
+    task = asyncio.create_task(_send_notification_email(user_id))
+    _notification_email_tasks.add(task)
+    task.add_done_callback(_notification_email_tasks.discard)
+
+
+async def _send_notification_email(user_id: str):
+    try:
+        user = await db.users.find_one({"_id": ObjectId(user_id)}, {"email": 1, "name": 1})
+        if not user or not user.get("email"):
+            return
+        safe_name = escape(user.get("name") or "there")
+        inbox_url = escape(f"{_frontend_url()}/inbox", quote=True)
+        html = (
+            f"<p>Hi {safe_name},</p>"
+            f"<p>You have a new notification in your {escape(EMAIL_FROM_NAME)} inbox.</p>"
+            f'<p><a href="{inbox_url}">Open your inbox</a></p>'
+        )
+        await send_email(
+            to=user["email"],
+            subject=f"New notification in {EMAIL_FROM_NAME}",
+            html=html,
+        )
+    except Exception:
+        logger.exception("Failed to send inbox notification email")
 
 @api_router.post("/threads")
 async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_user)):
@@ -3709,6 +3764,7 @@ async def create_thread(payload: ThreadCreate, user: dict = Depends(get_current_
         "title": payload.title.strip(),
         "body": payload.body.strip(),
         "category": payload.category,
+        "report_reason": payload.report_reason,
         "status": "open",
         "entity_type": payload.entity_type,
         "entity_id": payload.entity_id,
@@ -4405,7 +4461,11 @@ async def _backfill_tmdb_actor_details(bot: dict, limit: int = 25, force: bool =
         if not actor.get("place_of_birth") and birth_place:
             field_updates["place_of_birth"] = birth_place
         if not actor.get("photo_url") and profile_url:
-            field_updates["photo_url"] = profile_url
+            try:
+                field_updates["photo_url"] = await _store_actor_image_url(profile_url)
+            except Exception as error:
+                errors += 1
+                logger.warning("Cineverse BOT could not store actor photo for %s: %s", tmdb_id, type(error).__name__)
 
         update = {**field_updates, "_tmdb_person_details_checked_at": now_iso}
         query = {"_id": actor["_id"]}
@@ -4559,9 +4619,109 @@ def _is_external_image_url(value: Optional[str]) -> bool:
     return isinstance(value, str) and value.lower().startswith(("http://", "https://", "//", "data:"))
 
 
+_ACTOR_IMAGE_SOURCE_DOMAINS = (
+    "image.tmdb.org",
+    "googleusercontent.com",
+    "gstatic.com",
+    "media-amazon.com",
+    "wikimedia.org",
+    "unsplash.com",
+)
+_ACTOR_IMAGE_MAX_BYTES = 12 * 1024 * 1024
+_ACTOR_IMAGE_FORMATS = {
+    "JPEG": ("jpg", "image/jpeg"),
+    "PNG": ("png", "image/png"),
+    "WEBP": ("webp", "image/webp"),
+    "AVIF": ("avif", "image/avif"),
+    "GIF": ("gif", "image/gif"),
+    "BMP": ("bmp", "image/bmp"),
+    "TIFF": ("tif", "image/tiff"),
+}
+
+
+def _is_allowed_actor_image_host(host: str) -> bool:
+    host = host.lower().rstrip(".")
+    return any(host == domain or host.endswith(f".{domain}") for domain in _ACTOR_IMAGE_SOURCE_DOMAINS)
+
+
+async def _store_actor_image_url(value: Optional[str]) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if value.startswith("/api/files/"):
+        return value[len("/api/files/"):]
+
+    parsed = urlparse(value)
+    if not parsed.scheme and not parsed.netloc:
+        return value
+    if parsed.scheme != "https" or not parsed.hostname or not _is_allowed_actor_image_host(parsed.hostname):
+        raise HTTPException(
+            status_code=400,
+            detail="Use an HTTPS image from TMDB, Google, or a supported image host, or upload the image file.",
+        )
+
+    image_url = value
+    image_bytes = None
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as http:
+        for _ in range(4):
+            parsed = urlparse(image_url)
+            if parsed.scheme != "https" or not parsed.hostname or not _is_allowed_actor_image_host(parsed.hostname):
+                raise HTTPException(status_code=400, detail="Image redirects to an unsupported host")
+            try:
+                async with http.stream("GET", image_url, headers={"Accept": "image/*"}) as response:
+                    if 300 <= response.status_code < 400:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise HTTPException(status_code=422, detail="Image source returned an invalid redirect")
+                        image_url = urljoin(image_url, location)
+                        continue
+                    response.raise_for_status()
+                    try:
+                        content_length = int(response.headers.get("content-length", "0"))
+                    except ValueError:
+                        content_length = 0
+                    if content_length > _ACTOR_IMAGE_MAX_BYTES:
+                        raise HTTPException(status_code=413, detail="Actor image must be 12 MB or smaller")
+                    chunks = []
+                    total_bytes = 0
+                    async for chunk in response.aiter_bytes():
+                        total_bytes += len(chunk)
+                        if total_bytes > _ACTOR_IMAGE_MAX_BYTES:
+                            raise HTTPException(status_code=413, detail="Actor image must be 12 MB or smaller")
+                        chunks.append(chunk)
+                    image_bytes = b"".join(chunks)
+                    break
+            except HTTPException:
+                raise
+            except httpx.HTTPError as error:
+                logger.warning("Actor image download failed: %s", type(error).__name__)
+                raise HTTPException(status_code=422, detail="Could not download image from that source")
+        else:
+            raise HTTPException(status_code=422, detail="Image source redirected too many times")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            if image.width * image.height > 40_000_000:
+                raise HTTPException(status_code=413, detail="Actor image dimensions are too large")
+            image_format = image.format
+            image.verify()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=422, detail="The selected file is not a supported image")
+
+    file_format = _ACTOR_IMAGE_FORMATS.get(image_format)
+    if not file_format:
+        raise HTTPException(status_code=422, detail="The selected image format is not supported")
+    extension, content_type = file_format
+    path = f"{APP_NAME}/uploads/admin/{uuid.uuid4()}.{extension}"
+    result = put_object(path, image_bytes, content_type)
+    return result.get("path") or path
+
+
 IMAGE_CLEANUP_FIELDS = {
     "users": ("avatar_url",),
-    "actors": ("photo_url",),
+    "actors": ("photo_url", "gallery"),
     "movies": ("poster_url", "poster_urls"),
     "series": ("poster_url", "poster_urls"),
 }
@@ -4593,7 +4753,7 @@ async def get_image_cleanup_references(admin: dict = Depends(get_current_admin))
         async for doc in collection.find(query, projection):
             for field in fields:
                 value = doc.get(field)
-                values = value if field.endswith("_urls") and isinstance(value, list) else [value]
+                values = value if isinstance(value, list) else [value]
                 for image_url in values:
                     if isinstance(image_url, str) and image_url.strip():
                         references.append({
@@ -4639,7 +4799,7 @@ async def apply_image_cleanup(payload: BrokenImageCleanupRequest, admin: dict = 
         changed_count = 0
         for field, broken_urls in group["values"].items():
             current = doc.get(field)
-            if field.endswith("_urls") and isinstance(current, list):
+            if isinstance(current, list):
                 remaining = [url for url in current if url not in broken_urls]
                 matched = len(current) - len(remaining)
                 if not matched:
@@ -4647,8 +4807,10 @@ async def apply_image_cleanup(payload: BrokenImageCleanupRequest, admin: dict = 
                     continue
                 updates[field] = remaining
                 expected[field] = current
-                primary_field = field.removesuffix("s")
-                if doc.get(primary_field) in broken_urls:
+                primary_field = field.removesuffix("s") if field.endswith("_urls") else (
+                    "photo_url" if kind == "actors" and field == "gallery" else None
+                )
+                if primary_field and doc.get(primary_field) in broken_urls:
                     updates[primary_field] = next((url for url in remaining if isinstance(url, str)), "")
                     expected[primary_field] = doc.get(primary_field)
                 changed_count += matched
@@ -4662,6 +4824,8 @@ async def apply_image_cleanup(payload: BrokenImageCleanupRequest, admin: dict = 
         if updates.get("poster_url") == "":
             remaining_posters = updates.get("poster_urls", doc.get("poster_urls") or [])
             updates["poster_url"] = next((url for url in remaining_posters if isinstance(url, str)), "")
+        if updates.get("photo_url") == "" and "gallery" in updates:
+            updates["photo_url"] = next((url for url in updates["gallery"] if isinstance(url, str)), "")
 
         if updates:
             result = await collection.update_one(expected, {"$set": updates})
@@ -4759,6 +4923,8 @@ async def restore_broken_images(payload: BrokenImageRepairRequest, admin: dict =
                 continue
             try:
                 replacement = await _tmdb_replacement_image(kind, doc)
+                if replacement:
+                    replacement = await _store_actor_image_url(replacement)
             except Exception as error:
                 logger.warning("Broken actor image repair failed for %s: %s", object_id, type(error).__name__)
                 replacement = None
@@ -4845,7 +5011,7 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
     if not doc:
         raise HTTPException(status_code=404, detail="Image owner not found")
     current_value = doc.get(image_field) or ""
-    if _is_external_image_url(current_value):
+    if _is_external_image_url(current_value) and kind != "actor":
         return {"url": current_value, "recovered": False}
 
     if kind == "actor":
@@ -4866,6 +5032,9 @@ async def recover_tmdb_image(payload: TMDBImageFallbackRequest):
 
     if not image_url:
         return {"url": "", "recovered": False}
+
+    if kind == "actor":
+        image_url = await _store_actor_image_url(image_url)
 
     update = {
         image_field: image_url,
@@ -5606,7 +5775,64 @@ async def import_from_tmdb(payload: TMDBImportRequest, mod: dict = Depends(get_c
     return await create_series(SeriesCreate(**data), mod)
 
 @api_router.post("/series/{series_id}/tmdb-seasons/import")
-async def import_series_seasons_from_tmdb(series_id: str, user: dict = Depends(get_current_moderator)):
+async def import_series_seasons_from_tmdb(
+    series_id: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_moderator),
+):
+    if not ObjectId.is_valid(series_id):
+        raise HTTPException(status_code=404, detail="Series not found")
+    job_id = uuid.uuid4().hex
+    await db.tmdb_import_jobs.insert_one({
+        "_id": job_id,
+        "series_id": series_id,
+        "user_id": user.get("id"),
+        "status": "queued",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    background_tasks.add_task(_run_tmdb_season_import_job, job_id, series_id, user)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@api_router.get("/series/{series_id}/tmdb-seasons/import/{job_id}")
+async def get_tmdb_season_import_status(
+    series_id: str,
+    job_id: str,
+    user: dict = Depends(get_current_moderator),
+):
+    job = await db.tmdb_import_jobs.find_one({"_id": job_id, "series_id": series_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    return {
+        "status": job.get("status"),
+        "result": job.get("result"),
+        "error": job.get("error"),
+    }
+
+
+async def _run_tmdb_season_import_job(job_id: str, series_id: str, user: dict):
+    await db.tmdb_import_jobs.update_one({"_id": job_id}, {"$set": {"status": "running"}})
+    try:
+        result = await _import_series_seasons_from_tmdb(series_id, user)
+    except HTTPException as error:
+        await db.tmdb_import_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"status": "failed", "error": error.detail}},
+        )
+    except Exception:
+        logger.exception("TMDB season import job failed: %s", job_id)
+        await db.tmdb_import_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"status": "failed", "error": "TMDB season import failed"}},
+        )
+    else:
+        await db.tmdb_import_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"status": "completed", "result": result}},
+        )
+
+
+async def _import_series_seasons_from_tmdb(series_id: str, user: dict):
     await _ensure_content_edits_allowed(user)
     if not await _tmdb_import_is_enabled():
         raise HTTPException(status_code=403, detail="TMDB imports are currently disabled by an administrator")
@@ -6403,7 +6629,17 @@ def _serialize_series_payload(data: dict) -> dict:
     return data
 
 def _sanitize_episode_main_cast(seasons: list, main_cast: list) -> list:
-    allowed_actor_ids = {member.get("actor_id") for member in main_cast or [] if member.get("actor_id")}
+    guest_actor_ids = {
+        guest.get("actor_id")
+        for season in seasons or []
+        for episode in (season if isinstance(season, dict) else season.model_dump()).get("episodes", []) or []
+        for guest in (episode if isinstance(episode, dict) else episode.model_dump()).get("guest_stars", []) or []
+        if guest.get("actor_id")
+    }
+    allowed_actor_ids = {
+        member.get("actor_id") for member in main_cast or []
+        if member.get("actor_id") and member.get("actor_id") not in guest_actor_ids
+    }
 
     sanitized = []
     for season in seasons or []:
@@ -6412,18 +6648,28 @@ def _sanitize_episode_main_cast(seasons: list, main_cast: list) -> list:
         for episode in season.get("episodes", []) or []:
             episode = episode if isinstance(episode, dict) else episode.model_dump()
             requested = episode.get("main_cast_actor_ids")
-            if requested is None:
-                selected = []
-            else:
-                selected = []
-                for actor_id in requested:
-                    if actor_id in allowed_actor_ids and actor_id not in selected:
-                        selected.append(actor_id)
+            selected = []
+            for actor_id in requested or []:
+                if actor_id in allowed_actor_ids and actor_id not in selected:
+                    selected.append(actor_id)
             episode["main_cast_actor_ids"] = selected
             episodes.append(episode)
         season["episodes"] = episodes
         sanitized.append(season)
     return sanitized
+
+def _exclude_episode_guests_from_main_cast(main_cast: list, seasons: list) -> list:
+    guest_actor_ids = {
+        guest.get("actor_id")
+        for season in seasons or []
+        for episode in (season if isinstance(season, dict) else season.model_dump()).get("episodes", []) or []
+        for guest in (episode if isinstance(episode, dict) else episode.model_dump()).get("guest_stars", []) or []
+        if guest.get("actor_id")
+    }
+    return [
+        member for member in main_cast or []
+        if member.get("actor_id") not in guest_actor_ids
+    ]
 
 @api_router.post("/series")
 async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_user)):
@@ -6459,6 +6705,9 @@ async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_
                 tmdb_added_cast = len(doc["main_cast"])
         except Exception as error:
             logger.warning("Cineverse BOT could not add series cast: %s", type(error).__name__)
+    doc["main_cast"] = _exclude_episode_guests_from_main_cast(
+        doc.get("main_cast") or [], doc.get("seasons") or []
+    )
     doc["seasons"] = _sanitize_episode_main_cast(doc.get("seasons") or [], doc.get("main_cast") or [])
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user["id"]
@@ -6677,7 +6926,10 @@ async def update_episode_main_cast(
     if not episode_found:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    sanitized_seasons = _sanitize_episode_main_cast(seasons, old_doc.get("main_cast") or [])
+    sanitized_main_cast = _exclude_episode_guests_from_main_cast(
+        old_doc.get("main_cast") or [], seasons
+    )
+    sanitized_seasons = _sanitize_episode_main_cast(seasons, sanitized_main_cast)
     updated_episode = next(
         episode
         for season in sanitized_seasons
@@ -6694,13 +6946,23 @@ async def update_episode_main_cast(
         if int(episode.get("episode_number") or 0) == episode_number
     )
     selected_ids = updated_episode.get("main_cast_actor_ids", []) or []
-    if previous_ids != selected_ids:
-        await db.series.update_one({"_id": series_object_id}, {"$set": {"seasons": sanitized_seasons}})
+    main_cast_changed = sanitized_main_cast != (old_doc.get("main_cast") or [])
+    if previous_ids != selected_ids or main_cast_changed:
+        await db.series.update_one(
+            {"_id": series_object_id},
+            {"$set": {"main_cast": sanitized_main_cast, "seasons": sanitized_seasons}},
+        )
         changes = [{
             "field": f"season_{season_number}_episode_{episode_number}_main_cast",
             "before": ", ".join(previous_ids) or "—",
             "after": ", ".join(selected_ids) or "—",
         }]
+        if main_cast_changed:
+            changes.append({
+                "field": "main_cast",
+                "before": f"{len(old_doc.get('main_cast') or [])} members",
+                "after": f"{len(sanitized_main_cast)} members",
+            })
         await log_edit(
             user,
             "series",
@@ -6758,8 +7020,12 @@ async def update_episode_guest_stars(
     if not episode_found:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    update_data = {"seasons": seasons}
-    _check_locks(old_doc, update_data, user)
+    sanitized_main_cast = _exclude_episode_guests_from_main_cast(
+        old_doc.get("main_cast") or [], seasons
+    )
+    seasons = _sanitize_episode_main_cast(seasons, sanitized_main_cast)
+    update_data = {"main_cast": sanitized_main_cast, "seasons": seasons}
+    _check_locks(old_doc, {"seasons": seasons}, user)
     updated_guests = next(
         episode.get("guest_stars", []) or []
         for season in seasons
@@ -6767,8 +7033,22 @@ async def update_episode_guest_stars(
         for episode in season.get("episodes", []) or []
         if int(episode.get("episode_number") or 0) == episode_number
     )
-    if previous_guests != updated_guests:
-        await db.series.update_one({"_id": series_object_id}, {"$set": {"seasons": seasons}})
+    main_cast_changed = sanitized_main_cast != (old_doc.get("main_cast") or [])
+    if previous_guests != updated_guests or seasons != (old_doc.get("seasons") or []) or main_cast_changed:
+        await db.series.update_one({"_id": series_object_id}, {"$set": update_data})
+        changes = []
+        if previous_guests != updated_guests:
+            changes.append({
+                "field": f"season_{season_number}_episode_{episode_number}_guest_stars",
+                "before": ", ".join(guest.get("actor_id", "") for guest in previous_guests) or "—",
+                "after": ", ".join(guest.get("actor_id", "") for guest in updated_guests) or "—",
+            })
+        if main_cast_changed:
+            changes.append({
+                "field": "main_cast",
+                "before": f"{len(old_doc.get('main_cast') or [])} members",
+                "after": f"{len(sanitized_main_cast)} members",
+            })
         await log_edit(
             user,
             "series",
@@ -6776,11 +7056,7 @@ async def update_episode_guest_stars(
             "update",
             old_doc.get("title", ""),
             f"Updated guest-star credits for Season {season_number}, Episode {episode_number}",
-            [{
-                "field": f"season_{season_number}_episode_{episode_number}_guest_stars",
-                "before": ", ".join(guest.get("actor_id", "") for guest in previous_guests) or "—",
-                "after": ", ".join(guest.get("actor_id", "") for guest in updated_guests) or "—",
-            }],
+            changes,
         )
     doc = await db.series.find_one({"_id": series_object_id})
     return await enrich_series(doc)
@@ -7035,11 +7311,14 @@ async def update_series(series_id: str, payload: SeriesUpdate, user: dict = Depe
                         list(locked_ids),
                         is_mod,
                     )
-    if "seasons" in update_data:
-        update_data["seasons"] = _sanitize_episode_main_cast(
-            update_data["seasons"],
+    if "seasons" in update_data or "main_cast" in update_data:
+        seasons = update_data.get("seasons", old_doc.get("seasons") or [])
+        main_cast = _exclude_episode_guests_from_main_cast(
             update_data.get("main_cast", old_doc.get("main_cast") or []),
+            seasons,
         )
+        update_data["main_cast"] = main_cast
+        update_data["seasons"] = _sanitize_episode_main_cast(seasons, main_cast)
     await db.series.update_one({"_id": ObjectId(series_id)}, {"$set": update_data})
     doc = await db.series.find_one({"_id": ObjectId(series_id)})
     enriched = await enrich_series(doc)
@@ -7253,10 +7532,27 @@ async def search_suggest(q: str, limit: int = 6):
 
 
 # ----------- Actors -----------
+def _normalize_actor_gallery(actor: dict) -> dict:
+    gallery = []
+    for image in actor.get("gallery") or []:
+        if isinstance(image, str) and image and image not in gallery:
+            gallery.append(image)
+
+    photo_url = actor.get("photo_url") or ""
+    if photo_url and photo_url not in gallery:
+        gallery.insert(0, photo_url)
+    elif not photo_url and gallery:
+        photo_url = gallery[0]
+
+    return {**actor, "photo_url": photo_url, "gallery": gallery}
+
+
 @api_router.post("/actors")
 async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_user)):
     await _ensure_content_edits_allowed(user)
     doc = payload.model_dump()
+    doc["photo_url"] = await _store_actor_image_url(doc.get("photo_url"))
+    doc = _normalize_actor_gallery(doc)
     name = (doc.get("name") or "").strip()
     if name:
         existing = await db.actors.find_one(_alive({
@@ -7276,15 +7572,83 @@ async def create_actor(payload: ActorCreate, user: dict = Depends(get_current_us
     await log_edit(user, "actor", dd["id"], "create", dd["name"], f"Created actor \"{dd['name']}\"")
     return dd
 
+async def _actor_ids_with_acting_credits(actor_ids: set[str]) -> set[str]:
+    if not actor_ids:
+        return set()
+    actor_id_list = list(actor_ids)
+    credited_ids = set()
+    async for movie in db.movies.find(
+        _alive({"cast.actor_id": {"$in": actor_id_list}}),
+        {"cast.actor_id": 1},
+    ):
+        credited_ids.update(
+            credit.get("actor_id")
+            for credit in movie.get("cast", []) or []
+            if credit.get("actor_id") in actor_ids
+        )
+    series_query = {"$or": [
+        {"main_cast.actor_id": {"$in": actor_id_list}},
+        {"seasons.episodes.main_cast_actor_ids": {"$in": actor_id_list}},
+        {"seasons.episodes.guest_stars.actor_id": {"$in": actor_id_list}},
+    ]}
+    async for series in db.series.find(
+        _alive(series_query),
+        {
+            "main_cast.actor_id": 1,
+            "seasons.episodes.main_cast_actor_ids": 1,
+            "seasons.episodes.guest_stars.actor_id": 1,
+        },
+    ):
+        credited_ids.update(
+            member.get("actor_id")
+            for member in series.get("main_cast", []) or []
+            if member.get("actor_id") in actor_ids
+        )
+        for season in series.get("seasons", []) or []:
+            for episode in season.get("episodes", []) or []:
+                credited_ids.update(
+                    actor_id for actor_id in episode.get("main_cast_actor_ids", []) or []
+                    if actor_id in actor_ids
+                )
+                credited_ids.update(
+                    guest.get("actor_id")
+                    for guest in episode.get("guest_stars", []) or []
+                    if guest.get("actor_id") in actor_ids
+                )
+    return credited_ids
+
+
 @api_router.get("/actors")
-async def list_actors(q: Optional[str] = None, limit: Optional[int] = None):
+async def list_actors(
+    q: Optional[str] = None,
+    limit: Optional[int] = None,
+    include_credit_status: bool = False,
+    viewer: Optional[dict] = Depends(get_optional_user),
+):
     filter_query = {}
     if q:
         filter_query["name"] = {"$regex": q, "$options": "i"}
     cursor = db.actors.find(_alive(filter_query))
     if limit:
         cursor = cursor.limit(limit)
-    return [doc_to_dict(d) async for d in cursor]
+    actors = [doc_to_dict(d) async for d in cursor]
+    if include_credit_status:
+        _require_perm(viewer, "admin.actors.access", "You don't have permission to inspect actor credits.")
+        actor_ids = {actor["id"] for actor in actors}
+        credited_ids = await _actor_ids_with_acting_credits(actor_ids)
+        name_counts = {}
+        for actor in actors:
+            normalized_name = (actor.get("name") or "").strip().casefold()
+            if normalized_name:
+                name_counts[normalized_name] = name_counts.get(normalized_name, 0) + 1
+        for actor in actors:
+            has_acting_credits = actor["id"] in credited_ids
+            normalized_name = (actor.get("name") or "").strip().casefold()
+            actor["has_acting_credits"] = has_acting_credits
+            actor["is_empty_duplicate"] = (
+                not has_acting_credits and name_counts.get(normalized_name, 0) > 1
+            )
+    return actors
 
 @api_router.get("/actors/{actor_id}")
 async def get_actor(actor_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
@@ -7296,7 +7660,7 @@ async def get_actor(actor_id: str, viewer: Optional[dict] = Depends(get_optional
         raise HTTPException(status_code=404, detail="Actor not found")
     if doc.get("deleted") and not (viewer and viewer.get("effective_role") in ("moderator", "admin")):
         raise HTTPException(status_code=404, detail="Actor not found")
-    actor = doc_to_dict(doc)
+    actor = _normalize_actor_gallery(doc_to_dict(doc))
     # find movies with this actor in cast
     movies_cursor = db.movies.find(_alive({"cast.actor_id": actor_id}))
     movies = []
@@ -7423,6 +7787,22 @@ async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends
     await _ensure_content_edits_allowed(user)
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     old_doc = await db.actors.find_one({"_id": ObjectId(actor_id)}) or {}
+    if "photo_url" in update_data:
+        update_data["photo_url"] = await _store_actor_image_url(update_data["photo_url"])
+    if "photo_url" in update_data or "gallery" in update_data:
+        photo_url = update_data.get("photo_url", old_doc.get("photo_url", ""))
+        gallery = update_data.get("gallery", old_doc.get("gallery", []))
+        if "gallery" in update_data and "photo_url" not in update_data and photo_url and photo_url not in gallery:
+            if photo_url in (old_doc.get("gallery") or []):
+                photo_url = gallery[0] if gallery else ""
+            else:
+                gallery = [photo_url, *gallery]
+        media = _normalize_actor_gallery({
+            "photo_url": photo_url,
+            "gallery": gallery,
+        })
+        update_data["photo_url"] = media["photo_url"]
+        update_data["gallery"] = media["gallery"]
     _enforce_image_delete_guard(
         old_doc,
         update_data,
@@ -7439,6 +7819,37 @@ async def update_actor(actor_id: str, payload: ActorUpdate, user: dict = Depends
     changed_names = ", ".join([c["field"] for c in changes]) or "no changes"
     await log_edit(user, "actor", actor_id, "update", dd["name"], f"Updated {changed_names}", changes)
     return dd
+
+
+@api_router.post("/actors/{actor_id}/gallery/{image_index}/headshot")
+async def set_actor_gallery_headshot(
+    actor_id: str,
+    image_index: int,
+    mod: dict = Depends(get_current_moderator),
+):
+    await _ensure_content_edits_allowed(mod)
+    if not ObjectId.is_valid(actor_id):
+        raise HTTPException(status_code=404, detail="Actor not found")
+    actor = await db.actors.find_one(_alive({"_id": ObjectId(actor_id)}))
+    if not actor:
+        raise HTTPException(status_code=404, detail="Actor not found")
+    gallery = actor.get("gallery") or []
+    if image_index < 0 or image_index >= len(gallery):
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+
+    photo_url = await _store_actor_image_url(gallery[image_index])
+    _check_locks(actor, {"photo_url": photo_url}, mod)
+    updated_gallery = list(gallery)
+    updated_gallery[image_index] = photo_url
+    await db.actors.update_one(
+        {"_id": ObjectId(actor_id)},
+        {"$set": {"photo_url": photo_url, "gallery": updated_gallery}},
+    )
+    doc = await db.actors.find_one({"_id": ObjectId(actor_id)})
+    result = doc_to_dict(doc)
+    changes = compute_field_changes(actor, {"photo_url": photo_url})
+    await log_edit(mod, "actor", actor_id, "update", result["name"], "Updated photo_url", changes)
+    return result
 
 @api_router.patch("/actors/{actor_id}/lock")
 async def lock_actor_fields(actor_id: str, payload: LockUpdate, mod: dict = Depends(get_current_user)):
@@ -7474,6 +7885,42 @@ async def delete_actor(actor_id: str, user: dict = Depends(get_current_user)):
         }},
     )
     await log_edit(user, "actor", actor_id, "delete", name, f"Deleted actor \"{name}\"")
+    return {"ok": True}
+
+
+@api_router.delete("/actors/{actor_id}/empty-duplicate")
+async def delete_empty_duplicate_actor(actor_id: str, user: dict = Depends(get_current_user)):
+    _require_perm(user, "content.delete", "You don't have permission to delete content.")
+    await _ensure_content_edits_allowed(user)
+    if not ObjectId.is_valid(actor_id):
+        raise HTTPException(status_code=404, detail="Actor not found")
+    actor_object_id = ObjectId(actor_id)
+    actor = await db.actors.find_one({"_id": actor_object_id})
+    if not actor:
+        raise HTTPException(status_code=404, detail="Actor not found")
+    if actor.get("deleted"):
+        return {"ok": True, "already_deleted": True}
+    if await _actor_ids_with_acting_credits({actor_id}):
+        raise HTTPException(status_code=409, detail="Actor pages with acting credits cannot be deleted with this action.")
+    name = (actor.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=409, detail="A duplicate actor page with the same name was not found.")
+    duplicate = await db.actors.find_one(_alive({
+        "_id": {"$ne": actor_object_id},
+        "name": {"$regex": f"^\\s*{re.escape(name)}\\s*$", "$options": "i"},
+    }))
+    if not duplicate:
+        raise HTTPException(status_code=409, detail="A duplicate actor page with the same name was not found.")
+    await db.actors.update_one(
+        {"_id": actor_object_id},
+        {"$set": {
+            "deleted": True,
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_by": user["id"],
+            "deleted_by_name": user.get("name"),
+        }},
+    )
+    await log_edit(user, "actor", actor_id, "delete", name, f"Deleted duplicate actor page without acting credits \"{name}\"")
     return {"ok": True}
 
 # ----------- Trash / Restore (Moderator) -----------
@@ -7975,6 +8422,143 @@ async def run_cleanup_now(_admin: dict = Depends(get_current_admin)):
     """Disk cleanup is disabled."""
     return {"ok": True, "disabled": True}
 
+# ----------- Admin: replicate image bytes from a source environment -----------
+class ReplicateImagesRequest(BaseModel):
+    source_url: str
+    confirm: str
+    paths: Optional[List[str]] = None
+    limit: int = 0
+    overwrite: bool = False
+
+def _collect_image_paths_from_db_sync() -> List[str]:
+    """Build a de-duplicated list of all stored image paths referenced in Mongo.
+    Uses a sync pymongo client because this runs in a worker thread."""
+    sync = MongoClient(mongo_url)
+    sdb = sync[os.environ['DB_NAME']]
+    paths = set()
+    def _add(v):
+        if not v or not isinstance(v, str):
+            return
+        if v.startswith("http"):
+            return
+        p = v.lstrip("/")
+        if p.startswith("api/files/"):
+            p = p[len("api/files/"):]
+        paths.add(p)
+    try:
+        for coll, fields in {
+            "movies": ["poster_url", "backdrop_url", "poster_urls", "backdrop_urls", "gallery"],
+            "series": ["poster_url", "backdrop_url", "poster_urls", "backdrop_urls", "gallery"],
+            "actors": ["photo_url"],
+            "users":  ["avatar_url"],
+        }.items():
+            for doc in sdb[coll].find({}, {f: 1 for f in fields}):
+                for f in fields:
+                    val = doc.get(f)
+                    if isinstance(val, list):
+                        for v in val:
+                            _add(v)
+                    else:
+                        _add(val)
+    finally:
+        sync.close()
+    return sorted(paths)
+
+async def _replicate_images_from_source(*, source_url: str, paths: Optional[List[str]], limit: int, overwrite: bool) -> dict:
+    source_url = source_url.rstrip("/")
+    if not paths:
+        paths = await asyncio.to_thread(_collect_image_paths_from_db_sync)
+    if limit and limit > 0:
+        paths = paths[:limit]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    report = {
+        "started_at": now_iso, "source": source_url, "total": len(paths),
+        "copied": 0, "already_present": 0, "source_404": 0, "errors": 0,
+        "error_samples": [],
+    }
+
+    def _one(path: str) -> str:
+        try:
+            if not overwrite:
+                try:
+                    head = requests.get(
+                        f"{STORAGE_URL}/objects/{path}",
+                        headers={"X-Storage-Key": init_storage()},
+                        timeout=15, stream=True,
+                    )
+                    if head.status_code == 200:
+                        head.close()
+                        return "already_present"
+                except Exception:
+                    pass
+            r = requests.get(f"{source_url}/api/files/{path}", timeout=60)
+            if r.status_code == 404:
+                return "source_404"
+            r.raise_for_status()
+            ct = r.headers.get("Content-Type", "application/octet-stream")
+            put_object(path, r.content, ct)
+            return "copied"
+        except Exception as e:
+            return f"error:{type(e).__name__}:{str(e)[:120]}"
+
+    for p in paths:
+        result = await asyncio.to_thread(_one, p)
+        if result == "copied":
+            report["copied"] += 1
+        elif result == "already_present":
+            report["already_present"] += 1
+        elif result == "source_404":
+            report["source_404"] += 1
+        else:
+            report["errors"] += 1
+            if len(report["error_samples"]) < 10:
+                report["error_samples"].append({"path": p, "error": result})
+
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        await db.cron_runs.insert_one({"job": "replicate_images", **report})
+    except Exception:
+        pass
+    return report
+
+@api_router.get("/admin/images/replicate/preview")
+async def admin_replicate_preview(_admin: dict = Depends(get_current_admin)):
+    """Admin: dry-run — returns the list of image paths referenced in the DB
+    that would be replicated by /admin/images/replicate."""
+    paths = await asyncio.to_thread(_collect_image_paths_from_db_sync)
+    return {"total": len(paths), "sample": paths[:20]}
+
+@api_router.post("/admin/images/replicate")
+async def admin_replicate_images(payload: ReplicateImagesRequest, _admin: dict = Depends(get_current_admin)):
+    """Admin one-shot: pulls every stored image from `source_url` and PUTs its
+    bytes into THIS environment's object storage. Used to seed a fresh prod
+    bucket from preview after a deploy that only migrated DB metadata.
+
+    Body:
+      {
+        "source_url": "https://filmhub-918.preview.emergentagent.com",
+        "confirm": "REPLICATE",
+        "paths": [...]   // optional, defaults to all image paths in DB
+        "limit": 0,      // 0 = all
+        "overwrite": false
+      }
+
+    Runs synchronously in a worker thread. For large catalogs expect several
+    minutes — bump client timeouts accordingly.
+    """
+    if payload.confirm != "REPLICATE":
+        raise HTTPException(status_code=400, detail='Set "confirm":"REPLICATE" to proceed')
+    if not payload.source_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="source_url must start with http:// or https://")
+    report = await _replicate_images_from_source(
+        source_url=payload.source_url,
+        paths=payload.paths,
+        limit=payload.limit,
+        overwrite=payload.overwrite,
+    )
+    return {"ok": True, **report}
+
+
 @api_router.post("/admin/backups/run")
 async def run_backup_now(_admin: dict = Depends(get_current_admin)):
     """Admin: trigger an immediate backup (does not wait for the hourly cron)."""
@@ -8445,8 +9029,48 @@ async def upload_file(file: UploadFile = File(...), _user: dict = Depends(get_cu
     backend_url = os.environ.get("FRONTEND_URL", "").replace("http://localhost:3000", "")
     return {"path": result["path"], "url": f"/api/files/{result['path']}"}
 
+THUMB_CACHE_DIR = Path("/app/cache/thumbs")
+try:
+    THUMB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+
+def _thumb_cache_path(path: str, image_format: str) -> Path:
+    key = hashlib.sha256(f"{path}|{image_format}".encode("utf-8")).hexdigest()
+    return THUMB_CACHE_DIR / f"{key[:2]}" / f"{key}.bin"
+
+def _thumb_cache_read(path: str, image_format: str):
+    p = _thumb_cache_path(path, image_format)
+    try:
+        if not p.exists():
+            return None
+        meta = p.with_suffix(".ct")
+        content_type = meta.read_text().strip() if meta.exists() else "application/octet-stream"
+        return p.read_bytes(), content_type
+    except Exception:
+        return None
+
+def _thumb_cache_write(path: str, image_format: str, data: bytes, content_type: str):
+    p = _thumb_cache_path(path, image_format)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+        p.with_suffix(".ct").write_text(content_type)
+    except Exception:
+        pass
+
 @api_router.get("/files/{path:path}")
 def download_file(path: str, image_format: Optional[str] = Query(default=None, alias="format")):
+    # Fast path: serve pre-generated thumbnail from disk cache
+    if image_format in ("jpeg", "thumbnail"):
+        cached = _thumb_cache_read(path, image_format)
+        if cached is not None:
+            cached_bytes, cached_ct = cached
+            return FastAPIResponse(
+                content=cached_bytes,
+                media_type=cached_ct,
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
     try:
         data, content_type = get_object(path)
     except Exception:
@@ -8470,8 +9094,10 @@ def download_file(path: str, image_format: Optional[str] = Query(default=None, a
                 else:
                     converted.save(output, format="JPEG", quality=88, optimize=True)
                     media_type = "image/jpeg"
+            payload = output.getvalue()
+            _thumb_cache_write(path, image_format, payload, media_type)
             return FastAPIResponse(
-                content=output.getvalue(),
+                content=payload,
                 media_type=media_type,
                 headers={"Cache-Control": "public, max-age=31536000, immutable"},
             )

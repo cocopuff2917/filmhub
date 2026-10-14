@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Upload, X } from "lucide-react";
+import { Star, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import ImageWithFallback from "@/components/ImageWithFallback";
 
@@ -59,7 +59,7 @@ export default function ImageUpload({ value, onChange, testid, shape = "square",
   );
 }
 
-export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
+export function GalleryUpload({ value, onChange, testid, canDelete = true, primaryUrl, onSetPrimary }) {
   const ref = useRef();
   const [busy, setBusy] = useState(false);
   const list = value || [];
@@ -94,9 +94,24 @@ export function GalleryUpload({ value, onChange, testid, canDelete = true }) {
               src={fileUrl(p)}
               fallbackSrc={fileUrl(p, "jpeg")}
               alt=""
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
               fallback={<div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] text-slate-500">Preview unavailable</div>}
             />
+            {p === primaryUrl && (
+              <span className="absolute left-1 top-1 inline-flex items-center gap-1 rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase text-black" data-testid={`gallery-headshot-${i}`}>
+                <Star className="h-2.5 w-2.5" /> Headshot
+              </span>
+            )}
+            {onSetPrimary && p !== primaryUrl && (
+              <button
+                type="button"
+                onClick={() => onSetPrimary(p)}
+                className="absolute inset-x-1 bottom-1 hidden items-center justify-center gap-1 rounded bg-amber-500 px-1 py-1 text-[9px] font-semibold text-black group-hover:flex"
+                data-testid={`gallery-set-headshot-${i}`}
+              >
+                <Star className="h-2.5 w-2.5" /> Set headshot
+              </button>
+            )}
             {canDelete && (
               <button type="button" onClick={() => remove(i)} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition" data-testid={testid ? `${testid}-remove-${i}` : undefined}>
                 <X className="w-3 h-3 text-white" />

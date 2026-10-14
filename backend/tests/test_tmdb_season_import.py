@@ -35,6 +35,31 @@ class FakeActorCollection:
         return FakeActorCursor([actor for actor in self.actors if actor["_id"] in requested_ids])
 
 
+class FakeImportJobsCollection:
+    def __init__(self):
+        self.jobs = {}
+
+    async def insert_one(self, job):
+        self.jobs[job["_id"]] = job
+
+    async def find_one(self, query):
+        job = self.jobs.get(query["_id"])
+        if job and job.get("series_id") == query["series_id"]:
+            return job
+        return None
+
+    async def update_one(self, query, update):
+        self.jobs[query["_id"]].update(update["$set"])
+
+
+class FakeBackgroundTasks:
+    def __init__(self):
+        self.task = None
+
+    def add_task(self, function, *args):
+        self.task = (function, args)
+
+
 def test_tmdb_season_import_returns_episode_cast_without_descriptions_or_images(monkeypatch):
     series_id = ObjectId()
     main_actor_id = ObjectId()
@@ -84,7 +109,7 @@ def test_tmdb_season_import_returns_episode_cast_without_descriptions_or_images(
 
     monkeypatch.setattr(server, "_tmdb_request", fake_tmdb_request)
 
-    result = asyncio.run(server.import_series_seasons_from_tmdb(
+    result = asyncio.run(server._import_series_seasons_from_tmdb(
         str(series_id),
         user={"id": "editor", "role": "user"},
     ))
@@ -102,6 +127,35 @@ def test_tmdb_season_import_returns_episode_cast_without_descriptions_or_images(
         }],
     }]
     assert result["actors"] == [{"id": "guest-actor-id", "name": "Guest Person"}]
+
+
+def test_tmdb_season_import_runs_as_background_job(monkeypatch):
+    series_id = str(ObjectId())
+    import_jobs = FakeImportJobsCollection()
+    monkeypatch.setattr(server, "db", SimpleNamespace(tmdb_import_jobs=import_jobs))
+
+    async def fake_import(series_id, user):
+        return {"seasons": [{"season_number": 1, "episodes": []}], "actors": []}
+
+    monkeypatch.setattr(server, "_import_series_seasons_from_tmdb", fake_import)
+    background_tasks = FakeBackgroundTasks()
+    user = {"id": "moderator", "role": "moderator"}
+
+    started = asyncio.run(server.import_series_seasons_from_tmdb(series_id, background_tasks, user))
+
+    assert started["status"] == "queued"
+    assert import_jobs.jobs[started["job_id"]]["status"] == "queued"
+    assert background_tasks.task[0] is server._run_tmdb_season_import_job
+
+    task, arguments = background_tasks.task
+    asyncio.run(task(*arguments))
+    status = asyncio.run(server.get_tmdb_season_import_status(series_id, started["job_id"], user))
+
+    assert status == {
+        "status": "completed",
+        "result": {"seasons": [{"season_number": 1, "episodes": []}], "actors": []},
+        "error": None,
+    }
 
 
 def test_only_mods_and_admins_can_delete_seasons_or_episodes():

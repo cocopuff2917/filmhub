@@ -121,7 +121,7 @@ export default function Admin() {
             {canManageCrewJobs && <TabsTrigger className="admin-tab-trigger" value="crew-jobs" data-testid="tab-crew-jobs">Crew Jobs</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="cineverse-bot" data-testid="tab-cineverse-bot"><Bot className="mr-2 h-4 w-4" /> Cineverse BOT</TabsTrigger>}
-            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="image-cleanup" data-testid="tab-image-cleanup">Images</TabsTrigger>}
+            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="image-cleanup" data-testid="tab-image-cleanup">Broken-image monitor</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="guidelines" data-testid="tab-guidelines">Guidelines</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="username-cooldown" data-testid="tab-username-cooldown">Username Cooldown</TabsTrigger>}
             {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
@@ -250,7 +250,12 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
   const canManageTMDB = [user?.role, user?.effective_role].includes("admin");
   const canBypassCatalogFreeze = canManageTMDB || (user?.permissions || []).includes("content.bypass_edit_freeze");
 
-  const load = async () => { const r = await api.get(endpoint); setItems(r.data); };
+  const load = async () => {
+    const r = await api.get(endpoint, {
+      params: kind === "actor" ? { include_credit_status: true } : undefined,
+    });
+    setItems(r.data);
+  };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [kind]);
   useEffect(() => {
     if (!canUseTMDB) {
@@ -291,6 +296,17 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
     if (!window.confirm(`Delete this ${label.toLowerCase()}?`)) return;
     try { await api.delete(`${endpoint}/${id}`); toast.success("Deleted"); load(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed to delete"); }
+  };
+
+  const deleteEmptyDuplicate = async (actor) => {
+    if (!window.confirm(`Delete duplicate actor page "${actor.name}"? It has no acting credits, and another page with the same name will remain.`)) return;
+    try {
+      await api.delete(`/actors/${actor.id}/empty-duplicate`);
+      toast.success("Duplicate actor page deleted");
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to delete duplicate actor page");
+    }
   };
 
   const onSaved = () => { setMode("list"); setEditing(null); load(); };
@@ -469,7 +485,22 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
                 {it.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
               </div>
               <Button size="sm" variant="outline" onClick={() => { setEditing(it); setMode("form"); }} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-${kind}-${it.id}`}><Edit className="w-4 h-4" /></Button>
-              {canDeleteContent && <Button size="sm" variant="ghost" onClick={() => del(it.id)} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-${kind}-${it.id}`}><Trash2 className="w-4 h-4" /></Button>}
+              {canDeleteContent && kind === "actor" && it.is_empty_duplicate ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => deleteEmptyDuplicate(it)}
+                  disabled={contentEditsFrozen && !canBypassCatalogFreeze}
+                  title="Delete same-name duplicate with no acting credits"
+                  aria-label={`Delete duplicate actor ${it.name}`}
+                  className="border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                  data-testid={`delete-empty-duplicate-actor-${it.id}`}
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />Delete duplicate
+                </Button>
+              ) : canDeleteContent ? (
+                <Button size="sm" variant="ghost" onClick={() => del(it.id)} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-${kind}-${it.id}`}><Trash2 className="w-4 h-4" /></Button>
+              ) : null}
             </div>
           ))}
           {items.length === 0 && <div className="text-slate-500 text-sm col-span-2">No {label.toLowerCase()}s yet.</div>}

@@ -23,6 +23,11 @@ an IAM role or AWS_PROFILE). Set AWS_REGION or pass --region for the destination
 Supabase migration requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. The
 destination bucket must already exist.
 
+To use S3 for uploads in the Python backend, configure STORAGE_PROVIDER=aws,
+S3_BUCKET, and AWS_REGION. Give the backend an IAM role (recommended) or
+credentials through boto3's standard credential chain. Migrate existing objects
+to the same bucket with the AWS S3 command above before switching the provider.
+
 The Mongo connection must point to the production database so its `files`
 collection provides the complete list of object paths used by production data.
 """

@@ -144,6 +144,7 @@ export default function SeriesDetail() {
   const [reviewContainsSpoilers, setReviewContainsSpoilers] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [reportMode, setReportMode] = useState("problem");
   const [lockOpen, setLockOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
   const [inWatchlist, setInWatchlist] = useState(false);
@@ -250,6 +251,19 @@ export default function SeriesDetail() {
   const backdrop = series.backdrop_url ? fileUrl(series.backdrop_url) : (series.poster_url ? fileUrl(series.poster_url) : null);
   const backdropField = series.backdrop_url ? "backdrop_url" : "poster_url";
   const poster = series.poster_url ? fileUrl(series.poster_url) : null;
+  const guestActorIds = new Set();
+  for (const season of series.seasons || []) {
+    for (const episode of season.episodes || []) {
+      for (const guest of episode.guest_stars || []) {
+        const actorId = guest.actor_id || guest.actor?.id;
+        if (actorId) guestActorIds.add(String(actorId));
+      }
+    }
+  }
+  const regularCast = (series.main_cast || []).filter((member) => {
+    const actorId = member?.actor?.id || member?.actor_id;
+    return actorId && !guestActorIds.has(String(actorId)) && !member.recurring && member.kind !== "guest";
+  });
   const score100 = series.avg_rating != null ? series.avg_rating * 10 : 0;
   const sortedSeasons = [...(series.seasons || [])].sort((a, b) => (a.season_number || 0) - (b.season_number || 0));
   const markedLastSeason = sortedSeasons.find((season) => season.is_last_season);
@@ -392,7 +406,7 @@ export default function SeriesDetail() {
                     onUpdated={(patch) => setSeries((s) => ({ ...s, ...patch }))}
                   />
                 )}
-                {user && <Button size="sm" variant="outline" onClick={() => setReportOpen(true)} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-series-btn"><Flag className="w-4 h-4 mr-2" /> Report</Button>}
+                {user && <Button size="sm" variant="outline" onClick={() => { setReportMode("problem"); setReportOpen(true); }} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="report-series-btn"><Flag className="w-4 h-4 mr-2" /> Report</Button>}
                 {canModerate && (
                   <Button size="sm" variant="outline" onClick={() => setLockOpen(true)} className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"><Lock className="w-4 h-4 mr-2" /> Locks{series.locked_fields?.length ? ` (${series.locked_fields.length})` : ""}</Button>
                 )}
@@ -426,13 +440,17 @@ export default function SeriesDetail() {
           <section data-testid="cast-section">
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="font-heading text-2xl font-bold">Series Cast</h2>
-              <Link to={`/series/${id}/credits`} className="text-sm text-amber-400 hover:text-amber-300 inline-flex items-center" data-testid="series-full-credits-link">Full Cast &amp; Crew <ChevronRight className="w-4 h-4" /></Link>
+              <div className="flex items-center gap-3">
+                {user && <Button size="sm" variant="outline" onClick={() => { setReportMode("main_cast_correction"); setReportOpen(true); }} className="border-white/20 text-slate-300 hover:bg-white/10 hover:text-white" data-testid="suggest-main-cast-correction"><MessageSquare className="mr-2 h-4 w-4" />Suggest correction</Button>}
+                <Link to={`/series/${id}/credits`} className="text-sm text-amber-400 hover:text-amber-300 inline-flex items-center" data-testid="series-full-credits-link">Full Cast &amp; Crew <ChevronRight className="w-4 h-4" /></Link>
+              </div>
             </div>
-            {(!series.main_cast || series.main_cast.length === 0) ? (
+            {regularCast.length === 0 ? (
               <div className="mt-4 rounded-xl border border-dashed border-white/10 bg-[#14181f]/50 py-10 text-center text-slate-500 text-sm">No cast added yet.</div>
             ) : (
-              <div className="mt-4 flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 snap-x">
-                {series.main_cast.filter((c) => c && c.actor && c.actor.id).map((c, idx) => (
+              <>
+              {regularCast.length > 0 && <div className="mt-4 flex gap-4 overflow-x-auto pb-4 -mx-1 px-1 snap-x">
+                {regularCast.map((c, idx) => (
                   <Link to={`/actor/${c.actor.id}`} key={idx} className="group block flex-shrink-0 w-[140px] rounded-xl overflow-hidden bg-[#14181f] border border-white/5 snap-start hover:border-amber-500/30 transition" data-testid={`series-cast-${c.actor.id}`}>
                     <div className="aspect-[3/4] bg-[#1e2430] overflow-hidden">
                       <ImageWithFallback
@@ -450,7 +468,8 @@ export default function SeriesDetail() {
                     </div>
                   </Link>
                 ))}
-              </div>
+              </div>}
+              </>
             )}
           </section>
 
@@ -689,13 +708,13 @@ export default function SeriesDetail() {
             <Button onClick={() => ["moderator", "admin"].includes(user.effective_role || user.role) ? navigate(`/series/${id}/edit`) : setEditOpen(true)} variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid="sidebar-edit-btn"><Edit className="w-4 h-4 mr-2" /> Edit Page</Button>
           )}
           {user && (
-            <button onClick={() => setReportOpen(true)} className="w-full text-left text-sm text-slate-400 hover:text-rose-300 flex items-center gap-1.5"><Flag className="w-3.5 h-3.5" /> Report an Issue</button>
+            <button onClick={() => { setReportMode("problem"); setReportOpen(true); }} className="w-full text-left text-sm text-slate-400 hover:text-rose-300 flex items-center gap-1.5"><Flag className="w-3.5 h-3.5" /> Report an Issue</button>
           )}
         </aside>
       </div>
 
       <EntityEditDialog open={editOpen} onOpenChange={setEditOpen} entityType="series" entity={series} onSaved={() => { load(); setHistoryKey((k) => k + 1); }} />
-      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} entityType="series" entityId={id} entityTitle={series.title} />
+      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} entityType="series" entityId={id} entityTitle={series.title} reportMode={reportMode} />
       <LockFieldsDialog open={lockOpen} onOpenChange={setLockOpen} entityType="series" entity={series} onSaved={(d) => { setSeries(d); setHistoryKey((k) => k + 1); }} />
     </div>
   );

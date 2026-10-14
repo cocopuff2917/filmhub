@@ -16,6 +16,11 @@ const kindLabels = {
   series: "TV series poster",
 };
 
+const fieldLabels = {
+  photo_url: "Headshot",
+  gallery: "Gallery photo",
+};
+
 function imageSource(value) {
   if (/^(https?:|data:|blob:|\/\/)/i.test(value)) {
     return value.startsWith("//") ? `${window.location.protocol}${value}` : value;
@@ -159,19 +164,21 @@ export default function ImageCleanupTab() {
     }
   };
 
+  const restorableItems = brokenItems.filter((item) => item.field !== "gallery");
+
   const restoreBrokenImages = async () => {
-    if (!brokenItems.length) return;
+    if (!restorableItems.length) return;
     if (!window.confirm("Clear broken actor photos and movie posters? Broken TV-series posters may be restored from TMDB, and broken user profile pictures will be cleared. Continue?")) return;
 
     setRestoring(true);
     const totals = { restored: 0, cleared: 0, unavailable: 0, conflicted: 0 };
     try {
-      for (let start = 0; start < brokenItems.length; start += MAX_RESTORE_BATCH) {
-        const items = brokenItems.slice(start, start + MAX_RESTORE_BATCH);
+      for (let start = 0; start < restorableItems.length; start += MAX_RESTORE_BATCH) {
+        const items = restorableItems.slice(start, start + MAX_RESTORE_BATCH);
         const response = await api.post("/admin/images/cleanup/restore", { items });
         for (const key of Object.keys(totals)) totals[key] += response.data[key] || 0;
       }
-      setBrokenItems([]);
+      setBrokenItems((previous) => previous.filter((item) => item.field === "gallery"));
       setScanResult((previous) => ({ ...previous, ...totals }));
       const repairedCount = totals.restored + totals.cleared;
       toast.success(`Restored ${repairedCount} image reference${repairedCount === 1 ? "" : "s"}`);
@@ -194,10 +201,10 @@ export default function ImageCleanupTab() {
       <header className="border-b border-white/10 pb-5">
         <div className="flex items-center gap-3">
           <ImageOff className="h-5 w-5 text-amber-300" aria-hidden="true" />
-          <h2 className="text-lg font-semibold text-white">Image cleanup</h2>
+          <h2 className="text-lg font-semibold text-white">Broken-image monitor</h2>
         </div>
         <p className="mt-2 text-sm text-slate-400">
-          Check profile pictures, actor photos, movie posters, and TV series posters. Broken TV-series posters may be restored from TMDB; broken actor photos, movie posters, and profile pictures are cleared.
+          Scan profile pictures, actor headshots and gallery photos, movie posters, and TV series posters. Broken TV-series posters may be restored from TMDB; broken actor photos, movie posters, and profile pictures are cleared.
         </p>
       </header>
 
@@ -230,7 +237,7 @@ export default function ImageCleanupTab() {
           {scanning ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
           {scanning ? `Checking ${progress.checked.toLocaleString()} of ${progress.total.toLocaleString()}` : "Scan images"}
         </Button>
-        {brokenItems.length > 0 && (
+        {restorableItems.length > 0 && (
           <Button
             type="button"
             onClick={restoreBrokenImages}
@@ -239,7 +246,7 @@ export default function ImageCleanupTab() {
             data-testid="admin-image-restore-button"
           >
             {restoring ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            {restoring ? "Restoring…" : `Restore ${brokenItems.length} broken`}
+            {restoring ? "Restoring…" : `Restore ${restorableItems.length} broken`}
           </Button>
         )}
         {brokenItems.length > 0 && (
@@ -275,7 +282,7 @@ export default function ImageCleanupTab() {
                 {sample.map((item, index) => (
                   <li key={`${item.kind}-${item.id}-${item.field}-${index}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                     <span className="text-slate-200">{item.label}</span>
-                    <span className="text-xs text-slate-400">{kindLabels[item.kind] || item.kind}</span>
+                    <span className="text-xs text-slate-400">{fieldLabels[item.field] || kindLabels[item.kind] || item.kind}</span>
                   </li>
                 ))}
               </ul>
