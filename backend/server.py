@@ -8583,6 +8583,109 @@ async def admin_replicate_images(payload: ReplicateImagesRequest, _admin: dict =
     )
     return {"ok": True, **report}
 
+# ----------- Admin: migrate Emergent → S3 (direct, no HTTP source) -----------
+_migration_state = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "total": 0,
+    "copied": 0,
+    "skipped_in_s3": 0,
+    "missing_in_emergent": 0,
+    "errors": 0,
+    "last_path": "",
+    "error_samples": [],
+}
+
+class MigrateToS3Request(BaseModel):
+    confirm: str
+    limit: int = 0
+    overwrite: bool = False
+
+def _s3_has_key(path: str) -> bool:
+    try:
+        _get_s3_client().head_object(Bucket=S3_BUCKET, Key=path)
+        return True
+    except Exception:
+        return False
+
+async def _migrate_emergent_to_s3(limit: int, overwrite: bool):
+    _migration_state.update({
+        "running": True,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "copied": 0, "skipped_in_s3": 0, "missing_in_emergent": 0, "errors": 0,
+        "last_path": "",
+        "error_samples": [],
+    })
+    paths = await asyncio.to_thread(_collect_image_paths_from_db_sync)
+    if limit and limit > 0:
+        paths = paths[:limit]
+    _migration_state["total"] = len(paths)
+
+    def _one(path: str) -> str:
+        try:
+            if not overwrite and _s3_has_key(path):
+                return "skipped"
+            fetched = _get_from_emergent(path)
+            if fetched is None:
+                return "missing"
+            data, content_type = fetched
+            # Direct S3 write (bypasses put_object dispatch so we don't recurse into fallbacks).
+            _get_s3_client().put_object(
+                Bucket=S3_BUCKET, Key=path, Body=data,
+                ContentType=content_type or "application/octet-stream",
+            )
+            return "copied"
+        except Exception as e:
+            return f"error:{type(e).__name__}:{str(e)[:140]}"
+
+    for p in paths:
+        result = await asyncio.to_thread(_one, p)
+        _migration_state["last_path"] = p
+        if result == "copied":
+            _migration_state["copied"] += 1
+        elif result == "skipped":
+            _migration_state["skipped_in_s3"] += 1
+        elif result == "missing":
+            _migration_state["missing_in_emergent"] += 1
+        else:
+            _migration_state["errors"] += 1
+            if len(_migration_state["error_samples"]) < 10:
+                _migration_state["error_samples"].append({"path": p, "error": result})
+
+    _migration_state["running"] = False
+    _migration_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        await db.cron_runs.insert_one({"job": "migrate_emergent_to_s3", **_migration_state})
+    except Exception:
+        pass
+
+@api_router.post("/admin/images/migrate-to-s3")
+async def admin_migrate_emergent_to_s3(payload: MigrateToS3Request, _admin: dict = Depends(get_current_admin)):
+    """Admin one-shot: reads every image path referenced in Mongo straight
+    from the legacy Emergent object store and writes it into the S3 bucket.
+    Requires STORAGE_PROVIDER=aws plus AWS credentials configured.
+    Body: {"confirm": "MIGRATE", "limit": 0, "overwrite": false}
+    Runs in the background. Poll GET /admin/images/migrate-to-s3/status.
+    """
+    if payload.confirm != "MIGRATE":
+        raise HTTPException(status_code=400, detail='Set "confirm":"MIGRATE" to proceed')
+    if STORAGE_PROVIDER != "aws":
+        raise HTTPException(status_code=400, detail="STORAGE_PROVIDER must be 'aws'")
+    if not S3_BUCKET:
+        raise HTTPException(status_code=400, detail="S3_BUCKET not configured")
+    if _migration_state.get("running"):
+        return {"ok": True, "already_running": True, **_migration_state}
+    asyncio.create_task(_migrate_emergent_to_s3(payload.limit, payload.overwrite))
+    return {"ok": True, "queued": True, "poll_url": "/api/admin/images/migrate-to-s3/status"}
+
+@api_router.get("/admin/images/migrate-to-s3/status")
+async def admin_migrate_status(_admin: dict = Depends(get_current_admin)):
+    """Admin: current migration progress."""
+    return _migration_state
+
+
 
 @api_router.post("/admin/backups/run")
 async def run_backup_now(_admin: dict = Depends(get_current_admin)):
