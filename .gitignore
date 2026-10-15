@@ -61,3 +61,7 @@ frontend/node_modules/.cache/default-development/0.pack
 
 client/dist/
 *.log
+*.env
+credentials.json
+*.key
+.credentials

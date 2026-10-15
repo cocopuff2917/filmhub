@@ -190,6 +190,12 @@ def test_suspended_user_profile_404_for_self(sus_session_and_ids):
     assert r.status_code == 404, f"expected 404 for self, got {r.status_code}: {r.text}"
 
 
+def test_suspended_user_cannot_delete_account(sus_session_and_ids):
+    sus, _, _ = sus_session_and_ids
+    r = sus.delete(f"{API}/auth/me", json={"current_password": SUS_PW}, timeout=15)
+    assert r.status_code == 403, f"expected 403, got {r.status_code}: {r.text}"
+
+
 def test_suspended_user_profile_404_unauthed(sus_session_and_ids):
     _, sus_id, _ = sus_session_and_ids
     r = requests.get(f"{API}/users/{sus_id}", timeout=15)

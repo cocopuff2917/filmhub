@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import ImageUpload, { GalleryUpload } from "@/components/ImageUpload";
@@ -31,12 +31,14 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
     budget: "", revenue: "", awards_wins: "", awards_nominations: "",
   };
   const [form, setForm] = useState(empty);
+  const [selectedCast, setSelectedCast] = useState(new Set());
 
   useEffect(() => {
     api.get("/actors").then((r) => setActors(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
+    setSelectedCast(new Set());
     if (movie) {
       setForm({
         title: movie.title || "",
@@ -109,7 +111,20 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
 
   const addCast = () => setForm({ ...form, cast: [...form.cast, { actor_id: "", character_name: "" }] });
   const updCast = (i, k, v) => { const n = [...form.cast]; n[i] = { ...n[i], [k]: v }; setForm({ ...form, cast: n }); };
-  const remCast = (i) => setForm({ ...form, cast: form.cast.filter((_, x) => x !== i) });
+  const remCast = (i) => {
+    setForm((current) => ({ ...current, cast: current.cast.filter((_, index) => index !== i) }));
+    setSelectedCast(new Set());
+  };
+  const toggleCastSelection = (index, checked) => setSelectedCast((current) => {
+    const next = new Set(current);
+    if (checked) next.add(index);
+    else next.delete(index);
+    return next;
+  });
+  const removeSelectedCast = () => {
+    setForm((current) => ({ ...current, cast: current.cast.filter((_, index) => !selectedCast.has(index)) }));
+    setSelectedCast(new Set());
+  };
 
   const addCrew = () => setForm({ ...form, crew: [...form.crew, { name: "", role: "Director" }] });
   const updCrew = (i, k, v) => { const n = [...form.crew]; n[i] = { ...n[i], [k]: v }; setForm({ ...form, crew: n }); };
@@ -248,13 +263,21 @@ export default function MovieForm({ movie, onSaved, onCancel }) {
       <div className="pt-2">
         <div className="flex items-center justify-between mb-2">
           <Label className="text-slate-300">Cast</Label>
-          <Button type="button" variant="outline" onClick={addCast} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-8" data-testid="add-cast-btn">
-            <Plus className="w-4 h-4 mr-1" /> Add cast
-          </Button>
+          <div className="flex items-center gap-2">
+            {isModerator && selectedCast.size > 0 && (
+              <Button type="button" variant="outline" onClick={removeSelectedCast} className="border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200 h-8" data-testid="remove-selected-cast-btn">
+                <Trash2 className="w-4 h-4 mr-1" /> Remove selected ({selectedCast.size})
+              </Button>
+            )}
+            <Button type="button" variant="outline" onClick={addCast} className="border-white/20 text-white hover:bg-white/10 hover:text-white h-8" data-testid="add-cast-btn">
+              <Plus className="w-4 h-4 mr-1" /> Add cast
+            </Button>
+          </div>
         </div>
         <div className="space-y-2">
           {form.cast.map((c, i) => (
             <div key={i} className="flex items-center gap-2">
+              {isModerator && <input type="checkbox" checked={selectedCast.has(i)} onChange={(event) => toggleCastSelection(i, event.target.checked)} aria-label={`Select ${c.character_name || "cast member"} for removal`} className="accent-amber-400" data-testid={`cast-select-${i}`} />}
               <Select value={c.actor_id} onValueChange={(v) => updCast(i, "actor_id", v)}>
                 <SelectTrigger className="flex-1 bg-[#0d0f12] border-white/10 text-white" data-testid={`cast-actor-${i}`}>
                   <SelectValue placeholder="Select actor" />

@@ -28,6 +28,19 @@ function imageSource(value) {
   return fileUrl(value);
 }
 
+function isAwsBackedReference(value) {
+  if (!value || typeof value !== "string") return false;
+  let path = value;
+  if (/^https?:\/\//i.test(path)) {
+    try { path = new URL(path).pathname; } catch { return false; }
+  }
+  const marker = "/api/files/";
+  if (path.includes(marker)) path = path.slice(path.indexOf(marker) + marker.length);
+  else path = path.replace(/^\/+/, "");
+  try { path = decodeURIComponent(path); } catch { return false; }
+  return path.startsWith("cineverse/") && !path.split("/").includes("..");
+}
+
 function probeImage(value) {
   return new Promise((resolve) => {
     const image = new window.Image();
@@ -48,6 +61,7 @@ export default function ImageCleanupTab() {
   const [scanning, setScanning] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [restoringFromAws, setRestoringFromAws] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ checked: 0, total: 0 });
@@ -165,6 +179,27 @@ export default function ImageCleanupTab() {
   };
 
   const restorableItems = brokenItems.filter((item) => item.field !== "gallery");
+  const awsRestoreItems = brokenItems.filter((item) => isAwsBackedReference(item.url));
+
+  const restoreThumbnailsFromAws = async () => {
+    if (!awsRestoreItems.length) return;
+    setRestoringFromAws(true);
+    const totals = { rebuilt: 0, missing_in_s3: 0, invalid_image: 0, conflicted: 0, skipped: 0 };
+    try {
+      for (let start = 0; start < awsRestoreItems.length; start += MAX_RESTORE_BATCH) {
+        const items = awsRestoreItems.slice(start, start + MAX_RESTORE_BATCH);
+        const response = await api.post("/admin/images/cleanup/restore-from-s3", { items });
+        for (const key of Object.keys(totals)) totals[key] += response.data[key] || 0;
+      }
+      await scanImages();
+      setScanResult((previous) => previous ? { ...previous, ...totals } : previous);
+      toast.success(`Rebuilt ${totals.rebuilt} thumbnail cache${totals.rebuilt === 1 ? "" : "s"} from AWS`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not restore thumbnails from AWS");
+    } finally {
+      setRestoringFromAws(false);
+    }
+  };
 
   const restoreBrokenImages = async () => {
     if (!restorableItems.length) return;
@@ -230,7 +265,7 @@ export default function ImageCleanupTab() {
         <Button
           type="button"
           onClick={scanImages}
-          disabled={scanning || applying || restoring}
+          disabled={scanning || applying || restoring || restoringFromAws}
           className="bg-amber-500 text-black hover:bg-amber-400"
           data-testid="admin-image-scan-button"
         >
@@ -241,7 +276,7 @@ export default function ImageCleanupTab() {
           <Button
             type="button"
             onClick={restoreBrokenImages}
-            disabled={scanning || applying || restoring}
+            disabled={scanning || applying || restoring || restoringFromAws}
             className="border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
             data-testid="admin-image-restore-button"
           >
@@ -249,11 +284,23 @@ export default function ImageCleanupTab() {
             {restoring ? "Restoring…" : `Restore ${restorableItems.length} broken`}
           </Button>
         )}
+        {awsRestoreItems.length > 0 && (
+          <Button
+            type="button"
+            onClick={restoreThumbnailsFromAws}
+            disabled={scanning || applying || restoring || restoringFromAws}
+            className="border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+            data-testid="admin-image-restore-from-aws-button"
+          >
+            {restoringFromAws ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            {restoringFromAws ? "Rebuilding from AWS…" : `Restore ${awsRestoreItems.length} from AWS`}
+          </Button>
+        )}
         {brokenItems.length > 0 && (
           <Button
             type="button"
             onClick={removeBrokenImages}
-            disabled={scanning || applying || restoring}
+            disabled={scanning || applying || restoring || restoringFromAws}
             variant="destructive"
             data-testid="admin-image-remove-button"
           >
@@ -273,6 +320,9 @@ export default function ImageCleanupTab() {
             {scanResult.restored != null && <div><dt className="text-xs text-slate-500">Posters restored</dt><dd className="mt-1 text-lg font-semibold text-emerald-300">{scanResult.restored.toLocaleString()}</dd></div>}
             {scanResult.cleared != null && <div><dt className="text-xs text-slate-500">Cleared to fallback</dt><dd className="mt-1 text-lg font-semibold text-emerald-300">{scanResult.cleared.toLocaleString()}</dd></div>}
             {scanResult.unavailable != null && <div><dt className="text-xs text-slate-500">No replacement found</dt><dd className="mt-1 text-lg font-semibold text-amber-300">{scanResult.unavailable.toLocaleString()}</dd></div>}
+            {scanResult.rebuilt != null && <div><dt className="text-xs text-slate-500">AWS thumbnails rebuilt</dt><dd className="mt-1 text-lg font-semibold text-sky-200">{scanResult.rebuilt.toLocaleString()}</dd></div>}
+            {scanResult.missing_in_s3 != null && <div><dt className="text-xs text-slate-500">Missing from S3</dt><dd className="mt-1 text-lg font-semibold text-amber-300">{scanResult.missing_in_s3.toLocaleString()}</dd></div>}
+            {scanResult.invalid_image != null && <div><dt className="text-xs text-slate-500">Unreadable S3 images</dt><dd className="mt-1 text-lg font-semibold text-rose-300">{scanResult.invalid_image.toLocaleString()}</dd></div>}
           </dl>
 
           {sample.length > 0 && (

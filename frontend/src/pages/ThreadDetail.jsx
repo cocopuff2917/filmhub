@@ -27,9 +27,13 @@ const roleTint = {
 
 const catLabel = { support: "Support", general: "General", report: "Reports", direct: "Direct" };
 
-const MaybeLink = ({ id, className, children, title }) => (
-  id ? <Link to={`/user/${id}`} className={className} title={title}>{children}</Link> : <span className={className} title={title}>{children}</span>
-);
+const MaybeLink = ({ id, className, children, title }) => {
+  const { user, initializing } = useAuth();
+  if (!id || initializing || user?.is_suspended) {
+    return <span className={className} title={title}>{children}</span>;
+  }
+  return <Link to={`/user/${id}`} className={className} title={title}>{children}</Link>;
+};
 
 export default function ThreadDetail() {
   const { id } = useParams();

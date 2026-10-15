@@ -93,7 +93,6 @@ export default function ActorDetail() {
     });
     return acc;
   }, {});
-
   return (
     <div className="bg-[#0a0d12] text-white">
       <section className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_20%),linear-gradient(120deg,#0a0d12_0%,#10151d_45%,#0a0d12_100%)]">

@@ -219,3 +219,41 @@ def test_tmdb_actor_id_does_not_backfill_missing_photo_from_tmdb(monkeypatch):
     assert actor_id is not None
     assert created["photo_url"] == ""
     assert created["tmdb_id"] == 123
+
+
+def test_tmdb_actor_id_reuses_same_name_actor_with_existing_tmdb_id(monkeypatch):
+    actor_id = ObjectId()
+    existing_actor = {"_id": actor_id, "name": " Existing Actor ", "tmdb_id": 999}
+
+    class ExistingActorCursor:
+        async def to_list(self, limit):
+            return [existing_actor][:limit]
+
+    class ExistingActorCollection:
+        def __init__(self):
+            self.insert_calls = 0
+
+        async def find_one(self, query):
+            return None
+
+        def find(self, query):
+            return ExistingActorCursor()
+
+        async def update_one(self, query, update):
+            raise AssertionError("An established TMDB ID must not be overwritten")
+
+        async def insert_one(self, doc):
+            self.insert_calls += 1
+            raise AssertionError("TMDB import must reuse the existing actor")
+
+    actors = ExistingActorCollection()
+    monkeypatch.setattr(server, "db", SimpleNamespace(actors=actors))
+
+    result = asyncio.run(server._tmdb_actor_id(
+        {"id": 123, "name": "Existing Actor"},
+        {"id": "bot"},
+    ))
+
+    assert result == str(actor_id)
+    assert actors.insert_calls == 0
+    assert existing_actor["tmdb_id"] == 999

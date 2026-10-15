@@ -63,10 +63,15 @@ export default function Credits({ kind }) {
 
   const backPath = `/${isSeries ? "series" : "movie"}/${id}`;
   const guests = isSeries ? guestCredits(entity) : [];
+  const guestActorIds = new Set(
+    (entity.seasons || []).flatMap((season) => (season.episodes || []).flatMap((episode) => (
+      (episode.guest_stars || []).map((guest) => String(guest.actor_id || guest.actor?.id || ""))
+    ))).filter(Boolean)
+  );
   const mainCast = isSeries
     ? (entity.main_cast || []).filter((credit) => {
       const actorId = credit?.actor?.id || credit?.actor_id;
-      return actorId && !credit.recurring && credit.kind !== "guest";
+      return actorId && !credit.recurring && credit.kind !== "guest" && !guestActorIds.has(String(actorId));
     })
     : entity.cast || [];
   const crew = isSeries ? entity.creators || [] : entity.crew || [];

@@ -37,17 +37,31 @@ const CreateCatalogEntry = lazy(() => import("@/pages/CreateCatalogEntry"));
 const SUSPENDED_ALLOW = [
   /^\/inbox$/,
   /^\/threads\/[^/]+$/,
-  /^\/user\/[^/]+$/,
   /^\/login$/,
   /^\/register$/,
   /^\/forgot-password$/,
   /^\/reset-password$/,
 ];
 
+const AUTH_REQUIRED = [
+  /^\/admin$/,
+  /^\/create\/(movie|series)$/,
+  /^\/inbox$/,
+  /^\/list\/[^/]+$/,
+  /^\/lists$/,
+  /^\/movie\/[^/]+\/edit$/,
+  /^\/series\/[^/]+\/edit$/,
+  /^\/settings$/,
+  /^\/user\/[^/]+$/,
+  /^\/watchlist$/,
+];
+
 function SuspendedGuard({ children }) {
   const { user, initializing } = useAuth();
   const location = useLocation();
-  if (initializing) return null;
+  if (initializing && AUTH_REQUIRED.some((pattern) => pattern.test(location.pathname))) {
+    return <main className="min-h-[60vh] grid place-items-center text-slate-500">Loading your account…</main>;
+  }
   if (user && user.is_suspended) {
     const path = location.pathname;
     const allowed = SUSPENDED_ALLOW.some((r) => r.test(path));

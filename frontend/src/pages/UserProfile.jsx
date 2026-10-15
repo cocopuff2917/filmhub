@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Ban, Shield, Star, Edit as EditIcon, User as UserIcon, Settings, History, Trash2 } from "lucide-react";
 import EditProfileDialog from "@/components/EditProfileDialog";
+import UserModerationActions from "@/components/UserModerationActions";
 import { toast } from "sonner";
 
 // ---------- helpers ----------
@@ -313,6 +314,7 @@ export default function UserProfile() {
                 <ScoreCircle score={profile.avg_movie_rating} label="Movie Score" />
                 <div className="w-px h-8 bg-white/15" />
                 <ScoreCircle score={profile.avg_series_rating} label="TV Score" />
+                {!isSelf && current && <UserModerationActions currentUser={current} targetUser={profile} onUpdated={load} />}
                 {isSelf && (
                   <div className="ml-auto flex items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white h-8" data-testid="edit-profile-btn">

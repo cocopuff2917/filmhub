@@ -136,6 +136,47 @@ def test_thumbnail_is_resized_webp_and_long_cached(monkeypatch):
         assert thumbnail.size == (640, 960)
 
 
+def test_restore_thumbnail_cache_from_s3(monkeypatch, tmp_path):
+    actor_id = ObjectId()
+    image_path = f"cineverse/uploads/{actor_id}.png"
+    image_url = f"/api/files/{image_path}"
+    source = BytesIO()
+    server.Image.new("RGB", (1200, 1800), "blue").save(source, format="PNG")
+    calls = {}
+
+    class FakeS3Client:
+        def get_object(self, **kwargs):
+            calls.update(kwargs)
+            return {"Body": SimpleNamespace(read=lambda: source.getvalue())}
+
+    monkeypatch.setattr(server, "db", SimpleNamespace(actors=FakeCollection([{
+        "_id": actor_id,
+        "photo_url": image_url,
+    }])))
+    monkeypatch.setattr(server, "STORAGE_PROVIDER", "aws")
+    monkeypatch.setattr(server, "S3_BUCKET", "cineverse-media")
+    monkeypatch.setattr(server, "_get_s3_client", lambda: FakeS3Client())
+    monkeypatch.setattr(server, "THUMB_CACHE_DIR", tmp_path)
+
+    result = asyncio.run(server.restore_thumbnails_from_s3(
+        server.BrokenImageCleanupRequest(items=[{
+            "id": str(actor_id),
+            "kind": "actors",
+            "field": "photo_url",
+            "url": image_url,
+        }]),
+        admin={"role": "admin"},
+    ))
+
+    assert result == {"rebuilt": 1, "missing_in_s3": 0, "invalid_image": 0, "conflicted": 0, "skipped": 0}
+    assert calls == {"Bucket": "cineverse-media", "Key": image_path}
+    thumbnail, thumbnail_type = server._thumb_cache_read(image_path, "thumbnail")
+    jpeg, jpeg_type = server._thumb_cache_read(image_path, "jpeg")
+    assert thumbnail_type == "image/webp"
+    assert jpeg_type == "image/jpeg"
+    assert thumbnail and jpeg
+
+
 def test_thumbnail_uses_cached_jpeg_when_source_is_missing(monkeypatch):
     cached_bytes = b"cached jpeg image"
 

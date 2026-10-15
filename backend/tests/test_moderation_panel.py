@@ -22,6 +22,15 @@ def admin_session():
     return s
 
 
+def test_admin_can_filter_user_list_to_admins(admin_session):
+    response = admin_session.get(f"{BASE_URL}/api/moderation/users", params={"role": "admin"}, timeout=15)
+    assert response.status_code == 200, response.text
+    admins = response.json()
+    assert admins
+    assert all(user.get("role") == "admin" for user in admins)
+    assert any(user.get("email") == ADMIN["identifier"] for user in admins)
+
+
 # ---- /api/moderation/stats ----
 class TestModerationStats:
     def test_stats_shape(self, admin_session):

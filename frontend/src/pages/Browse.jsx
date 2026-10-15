@@ -23,6 +23,8 @@ export default function Browse() {
   const [networks, setNetworks] = useState([]);
   const [loadedTabs, setLoadedTabs] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
   const [q, setQ] = useState(params.get("q") || "");
   const tabResultsRef = useRef(tabResultsCache);
   const tab = params.get("tab") || "movies";
@@ -93,11 +95,13 @@ export default function Browse() {
         else if (tab === "actors") setActors(cached);
         else setMovies(cached);
         setLoadedTabs((loaded) => ({ ...loaded, [tab]: true }));
+        setLoadError("");
         setLoading(false);
         return;
       }
 
       setLoading(true);
+      setLoadError("");
 
       try {
         const options = { params: filters, signal: controller.signal };
@@ -122,16 +126,14 @@ export default function Browse() {
         setLoadedTabs((loaded) => ({ ...loaded, [tab]: true }));
       } catch (error) {
         if (!controller.signal.aborted) {
-          if (tab === "series") setSeries([]);
-          else if (tab === "actors") setActors([]);
-          else setMovies([]);
+          setLoadError(error.response?.data?.detail || `Could not load ${tab === "actors" ? "actors" : tab === "series" ? "TV series" : "movies"}.`);
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     })();
     return () => controller.abort();
-  }, [params, tab]);
+  }, [params, tab, retryCount]);
 
   const setParam = (key, value) => {
     const p = new URLSearchParams(params);
@@ -285,21 +287,21 @@ export default function Browse() {
         </TabsList>
 
         <TabsContent value="movies" className="mt-6">
-          {loading ? <SkeletonGrid /> : movies.length === 0 ? <Empty text="No movies match your filters." /> : (
+          {loading ? <SkeletonGrid /> : loadError ? <LoadError message={loadError} onRetry={() => setRetryCount((count) => count + 1)} /> : movies.length === 0 ? <Empty text="No movies match your filters." /> : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
               {movies.map((m) => <MovieCard key={m.id} movie={m} />)}
             </div>
           )}
         </TabsContent>
         <TabsContent value="series" className="mt-6">
-          {loading ? <SkeletonGrid /> : series.length === 0 ? <Empty text="No TV series match your filters." /> : (
+          {loading ? <SkeletonGrid /> : loadError ? <LoadError message={loadError} onRetry={() => setRetryCount((count) => count + 1)} /> : series.length === 0 ? <Empty text="No TV series match your filters." /> : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
               {series.map((s) => <SeriesCard key={s.id} series={s} />)}
             </div>
           )}
         </TabsContent>
         <TabsContent value="actors" className="mt-6">
-          {loading ? <SkeletonGrid /> : actors.length === 0 ? <Empty text="No actors found." /> : (
+          {loading ? <SkeletonGrid /> : loadError ? <LoadError message={loadError} onRetry={() => setRetryCount((count) => count + 1)} /> : actors.length === 0 ? <Empty text="No actors found." /> : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6">
               {actors.map((a) => <ActorCard key={a.id} actor={a} />)}
             </div>
@@ -315,6 +317,17 @@ function Empty({ text }) {
   return (
     <div className="rounded-2xl border border-dashed border-white/10 bg-[#14181f]/60 py-20 text-center text-slate-400 shadow-[0_18px_40px_rgba(0,0,0,0.15)]">
       {text}
+    </div>
+  );
+}
+
+function LoadError({ message, onRetry }) {
+  return (
+    <div className="flex flex-col items-center gap-4 rounded-2xl border border-rose-500/20 bg-rose-500/5 py-12 text-center">
+      <p className="text-sm text-rose-200">{message}</p>
+      <Button type="button" variant="outline" onClick={onRetry} className="border-white/15 text-slate-200 hover:bg-white/10">
+        Retry
+      </Button>
     </div>
   );
 }

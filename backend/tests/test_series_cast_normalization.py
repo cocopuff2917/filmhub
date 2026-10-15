@@ -1,3 +1,5 @@
+from bson import ObjectId
+
 from backend.server import _exclude_episode_guests_from_main_cast, _sanitize_episode_main_cast
 
 
@@ -40,6 +42,19 @@ def test_episode_guest_is_removed_from_series_main_cast():
         {"actor_id": "lead", "character_name": "Lead Role"},
     ]
     seasons = [{"episodes": [{"guest_stars": [{"actor_id": "guest", "character_name": "Guest Role"}]}]}]
+
+    assert _exclude_episode_guests_from_main_cast(main_cast, seasons) == [
+        {"actor_id": "lead", "character_name": "Lead Role"},
+    ]
+
+
+def test_episode_guest_is_removed_when_actor_id_types_differ():
+    guest_id = ObjectId()
+    main_cast = [
+        {"actor_id": guest_id, "character_name": "Guest Role"},
+        {"actor_id": "lead", "character_name": "Lead Role"},
+    ]
+    seasons = [{"episodes": [{"guest_stars": [{"actor_id": str(guest_id)}]}]}]
 
     assert _exclude_episode_guests_from_main_cast(main_cast, seasons) == [
         {"actor_id": "lead", "character_name": "Lead Role"},

@@ -38,20 +38,22 @@ export default function Home() {
   const { user } = useAuth();
 
   useEffect(() => {
+    let active = true;
     (async () => {
       try {
         const r = await api.get("/homepage/config");
+        if (!active) return;
         setConfig(r.data);
-        // Fetch built-in section data in parallel
         const builtins = (r.data.sections || []).filter((s) => s.enabled && s.type === "built-in" && SOURCE_ENDPOINTS[s.source]);
-        const results = await Promise.all(
-          builtins.map((s) => api.get(SOURCE_ENDPOINTS[s.source].url).catch(() => ({ data: [] })))
-        );
-        const map = {};
-        builtins.forEach((s, i) => { map[s.id] = results[i].data || []; });
-        setSectionData(map);
+        await Promise.all(builtins.map(async (section) => {
+          const response = await api.get(SOURCE_ENDPOINTS[section.source].url).catch(() => ({ data: [] }));
+          if (active) {
+            setSectionData((current) => ({ ...current, [section.id]: response.data || [] }));
+          }
+        }));
       } catch (e) {}
     })();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {

@@ -46,7 +46,7 @@ const roleTint = {
   user: "bg-white/5 text-slate-300 border-white/10",
 };
 
-function EditRow({ e, canRevert, onRevert }) {
+function EditRow({ e, canRevert, onRevert, selected, onSelect, bulkReverting }) {
   const [expanded, setExpanded] = useState(false);
   const [reverting, setReverting] = useState(false);
   const hasChanges = e.changes && e.changes.length > 0;
@@ -85,16 +85,29 @@ function EditRow({ e, canRevert, onRevert }) {
             <span className={`text-xs uppercase tracking-widest ${actionColor[e.action] || "text-slate-400"}`}>{e.action}</span>
             <span className="text-xs text-slate-500" title={fullTs(e.created_at)}>{timeAgo(e.created_at)}</span>
             {showRevert && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRevert}
-                disabled={reverting}
-                className="ml-auto h-7 px-2 border-fuchsia-500/40 text-fuchsia-300 hover:bg-fuchsia-500/10 hover:text-fuchsia-200 text-xs"
-                data-testid={`revert-edit-${e.id}`}
-              >
-                <Undo2 className="w-3 h-3 mr-1" /> {reverting ? "Reverting…" : "Revert"}
-              </Button>
+              <div className="ml-auto flex items-center gap-2">
+                <label className="flex items-center" title="Select edit to undo">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={(event) => onSelect(e.id, event.target.checked)}
+                    disabled={bulkReverting || reverting}
+                    aria-label={`Select edit by ${e.user_name || "Someone"} to undo`}
+                    data-testid={`select-edit-${e.id}`}
+                    className="h-4 w-4 accent-fuchsia-500"
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRevert}
+                  disabled={reverting || bulkReverting}
+                  className="h-7 px-2 border-fuchsia-500/40 text-fuchsia-300 hover:bg-fuchsia-500/10 hover:text-fuchsia-200 text-xs"
+                  data-testid={`revert-edit-${e.id}`}
+                >
+                  <Undo2 className="w-3 h-3 mr-1" /> {reverting ? "Reverting…" : "Revert"}
+                </Button>
+              </div>
             )}
           </div>
           {e.summary && <div className="text-sm text-slate-400 mt-1">{e.summary}</div>}
@@ -142,6 +155,8 @@ export default function EditHistoryPanel({ entityType, entityId, limit = 25, onR
   const [edits, setEdits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
+  const [selectedEditIds, setSelectedEditIds] = useState(() => new Set());
+  const [bulkReverting, setBulkReverting] = useState(false);
 
   const canRevert = ["moderator", "admin"].includes(user?.effective_role || user?.role);
 
@@ -162,8 +177,39 @@ export default function EditHistoryPanel({ entityType, entityId, limit = 25, onR
   }, [entityType, entityId, limit]);
 
   const handleReverted = async () => {
+    setSelectedEditIds(new Set());
     await reload();
     onReverted?.();
+  };
+
+  const handleSelect = (editId, selected) => {
+    setSelectedEditIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(editId);
+      else next.delete(editId);
+      return next;
+    });
+  };
+
+  const handleBulkRevert = async () => {
+    const selectedEdits = edits.filter((edit) => selectedEditIds.has(edit.id) && edit.revertible);
+    if (selectedEdits.length === 0) return;
+    if (!window.confirm(`Undo ${selectedEdits.length} selected edits? They will be reverted newest first.`)) return;
+
+    setBulkReverting(true);
+    let revertedCount = 0;
+    try {
+      for (const edit of selectedEdits) {
+        await api.post(`/edits/${edit.id}/revert`);
+        revertedCount++;
+      }
+      toast.success(`${revertedCount} edits reverted`);
+    } catch (err) {
+      toast.error(`Reverted ${revertedCount} of ${selectedEdits.length} edits. ${err.response?.data?.detail || "Stopped after a failure."}`);
+    } finally {
+      setBulkReverting(false);
+      await handleReverted();
+    }
   };
 
   const visible = showAll ? edits : edits.slice(0, 5);
@@ -173,13 +219,26 @@ export default function EditHistoryPanel({ entityType, entityId, limit = 25, onR
       <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-amber-400 font-semibold">
         <History className="w-4 h-4" /> Change Log
       </div>
-      <div className="mt-2 flex items-baseline justify-between gap-4">
+      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="font-heading text-3xl font-bold text-white">Edit History</h2>
-        {edits.length > 5 && (
-          <Button variant="ghost" onClick={() => setShowAll((x) => !x)} className="text-amber-400 hover:text-amber-300 hover:bg-amber-500/10">
-            {showAll ? "Show less" : `Show all ${edits.length}`}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canRevert && selectedEditIds.size > 0 && (
+            <Button
+              variant="outline"
+              onClick={handleBulkRevert}
+              disabled={bulkReverting}
+              className="border-fuchsia-500/40 text-fuchsia-300 hover:bg-fuchsia-500/10 hover:text-fuchsia-200"
+              data-testid="revert-selected-edits"
+            >
+              <Undo2 className="w-4 h-4 mr-2" /> {bulkReverting ? "Undoing…" : `Undo selected (${selectedEditIds.size})`}
+            </Button>
+          )}
+          {edits.length > 5 && (
+            <Button variant="ghost" onClick={() => setShowAll((x) => !x)} className="text-amber-400 hover:text-amber-300 hover:bg-amber-500/10">
+              {showAll ? "Show less" : `Show all ${edits.length}`}
+            </Button>
+          )}
+        </div>
       </div>
       <div className="mt-6">
         {loading ? (
@@ -190,7 +249,17 @@ export default function EditHistoryPanel({ entityType, entityId, limit = 25, onR
           </div>
         ) : (
           <ol className="relative border-l border-white/10 ml-2 space-y-6">
-            {visible.map((e) => <EditRow key={e.id} e={e} canRevert={canRevert} onRevert={handleReverted} />)}
+            {visible.map((e) => (
+              <EditRow
+                key={e.id}
+                e={e}
+                canRevert={canRevert}
+                onRevert={handleReverted}
+                selected={selectedEditIds.has(e.id)}
+                onSelect={handleSelect}
+                bulkReverting={bulkReverting}
+              />
+            ))}
           </ol>
         )}
       </div>

@@ -24,6 +24,8 @@ import ContributorGuidelinesTab from "@/components/admin/ContributorGuidelinesTa
 import UsernameCooldownTab from "@/components/admin/UsernameCooldownTab";
 import CrewJobsTab from "@/components/admin/CrewJobsTab";
 import ImageCleanupTab from "@/components/admin/ImageCleanupTab";
+import ImageMigrationTab from "@/components/admin/ImageMigrationTab";
+import ActorDuplicatesTab from "@/components/admin/ActorDuplicatesTab";
 
 export default function Admin() {
   const { user, initializing } = useAuth();
@@ -34,13 +36,8 @@ export default function Admin() {
   const isModerator = ["moderator", "admin"].includes(currentRole);
   const perms = user?.permissions || [];
   const hasPermission = (permission) => isSiteAdmin || perms.includes(permission);
-  const canDeleteMovie = hasPermission("content.delete") || hasPermission("content.movie.delete");
-  const canDeleteSeries = hasPermission("content.delete") || hasPermission("content.series.delete");
-  const canDeleteActor = hasPermission("content.delete") || hasPermission("content.actor.delete");
   const canSuspendUsers = hasPermission("user.suspend");
   const canUnsuspendUsers = hasPermission("user.unsuspend");
-  const canAccessMovies = hasPermission("admin.movies.access");
-  const canAccessSeries = hasPermission("admin.series.access");
   const canAccessActors = hasPermission("admin.actors.access");
   const canAccessCollections = ["collections.create", "collections.update", "collections.delete"].some(hasPermission);
   const canAccessTrash = hasPermission("content.trash.view");
@@ -58,7 +55,7 @@ export default function Admin() {
     .flatMap((role) => role.assignable_role_ids || []))];
   const hasPanelAccess = isSiteAdmin || [
     canManageRoles, canManageCrewJobs, canAssignRoles, canAssignCustomRoles,
-    canAccessMovies, canAccessSeries, canAccessActors, canAccessCollections, canAccessTrash,
+    canAccessActors, canAccessCollections, canAccessTrash,
     canViewIpOverlap, canAccessIpBans, canSuspendUsers, canUnsuspendUsers, canViewIps,
     canMessageUsers, canModifyAccounts, hasPermission("moderation.dashboard.view"),
     hasPermission("moderation.reports.view"), hasPermission("moderation.edits.view"),
@@ -104,15 +101,13 @@ export default function Admin() {
       </section>
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <Tabs defaultValue={canAccessMovies ? "movies" : canAccessSeries ? "series" : canAccessActors ? "actors" : canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles ? "users" : canAccessTrash ? "trash" : canAccessCollections ? "collections" : hasPermission("moderation.dashboard.view") ? "dashboard" : hasPermission("moderation.reports.view") ? "reports" : hasPermission("moderation.edits.view") ? "edits" : canViewIpOverlap ? "ips" : canAccessIpBans ? "ipbans" : canManageCrewJobs ? "crew-jobs" : canManageRoles ? "roles" : "users"} className="mt-2">
+        <Tabs defaultValue={canAccessActors ? "actor-duplicates" : canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles ? "users" : canAccessTrash ? "trash" : canAccessCollections ? "collections" : hasPermission("moderation.dashboard.view") ? "dashboard" : hasPermission("moderation.reports.view") ? "reports" : hasPermission("moderation.edits.view") ? "edits" : canViewIpOverlap ? "ips" : canAccessIpBans ? "ipbans" : canManageCrewJobs ? "crew-jobs" : canManageRoles ? "roles" : "users"} className="mt-2">
           <TabsList className="admin-tab-list h-auto">
             {hasPermission("moderation.dashboard.view") && <TabsTrigger className="admin-tab-trigger" value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>}
             {hasPermission("moderation.reports.view") && <TabsTrigger className="admin-tab-trigger" value="reports" data-testid="tab-reports">Reports</TabsTrigger>}
             {(canSuspendUsers || canUnsuspendUsers) && <TabsTrigger className="admin-tab-trigger" value="suspensions" data-testid="tab-suspensions">Suspensions</TabsTrigger>}
             {hasPermission("moderation.edits.view") && <TabsTrigger className="admin-tab-trigger" value="edits" data-testid="tab-edits">Edit History</TabsTrigger>}
-            {canAccessMovies && <TabsTrigger className="admin-tab-trigger" value="movies" data-testid="tab-movies">Movies</TabsTrigger>}
-            {canAccessSeries && <TabsTrigger className="admin-tab-trigger" value="series" data-testid="tab-series">TV Series</TabsTrigger>}
-            {canAccessActors && <TabsTrigger className="admin-tab-trigger" value="actors" data-testid="tab-actors">Actors</TabsTrigger>}
+            {canAccessActors && <TabsTrigger className="admin-tab-trigger" value="actor-duplicates" data-testid="tab-actor-duplicates">Duplicate actors</TabsTrigger>}
             {(canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles) && <TabsTrigger className="admin-tab-trigger" value="users" data-testid="tab-users">Users</TabsTrigger>}
             {canViewIpOverlap && <TabsTrigger className="admin-tab-trigger" value="ips" data-testid="tab-ips">IP Overlap</TabsTrigger>}
             {canAccessIpBans && <TabsTrigger className="admin-tab-trigger" value="ipbans" data-testid="tab-ipbans">IP Bans</TabsTrigger>}
@@ -122,6 +117,7 @@ export default function Admin() {
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="homepage" data-testid="tab-homepage">Homepage</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="cineverse-bot" data-testid="tab-cineverse-bot"><Bot className="mr-2 h-4 w-4" /> Cineverse BOT</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="image-cleanup" data-testid="tab-image-cleanup">Broken-image monitor</TabsTrigger>}
+            {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="image-migration" data-testid="tab-image-migration">Image migration</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="guidelines" data-testid="tab-guidelines">Guidelines</TabsTrigger>}
             {isSiteAdmin && <TabsTrigger className="admin-tab-trigger" value="username-cooldown" data-testid="tab-username-cooldown">Username Cooldown</TabsTrigger>}
             {canManageRoles && <TabsTrigger className="admin-tab-trigger" value="roles" data-testid="tab-roles">Custom Roles</TabsTrigger>}
@@ -130,18 +126,17 @@ export default function Admin() {
           {hasPermission("moderation.reports.view") && <TabsContent value="reports" className="mt-6"><ReportsTab /></TabsContent>}
           {(canSuspendUsers || canUnsuspendUsers) && <TabsContent value="suspensions" className="mt-6"><SuspensionsTab canUnsuspend={canUnsuspendUsers} /></TabsContent>}
           {hasPermission("moderation.edits.view") && <TabsContent value="edits" className="mt-6"><EditHistoryTab /></TabsContent>}
-          {canAccessMovies && <TabsContent value="movies" className="mt-6"><EntityAdmin kind="movie" contentEditsFrozen={contentEditsFrozen} canDeleteContent={canDeleteMovie} /></TabsContent>}
-          {canAccessSeries && <TabsContent value="series" className="mt-6"><EntityAdmin kind="series" contentEditsFrozen={contentEditsFrozen} canDeleteContent={canDeleteSeries} /></TabsContent>}
-          {canAccessActors && <TabsContent value="actors" className="mt-6"><EntityAdmin kind="actor" contentEditsFrozen={contentEditsFrozen} canDeleteContent={canDeleteActor} /></TabsContent>}
-          {(canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles) && <TabsContent value="users" className="mt-6"><UsersTab currentRole={currentRole} permissions={perms} canAssignRoles={canAssignRoles} canAssignCustomRoles={canAssignCustomRoles} assignableRoleIds={assignableRoleIds} isSiteAdmin={isSiteAdmin} /></TabsContent>}
+          {canAccessActors && <TabsContent value="actor-duplicates" className="mt-6"><ActorDuplicatesTab canDelete={isSiteAdmin || perms.includes("content.delete")} contentEditsFrozen={contentEditsFrozen} canBypassCatalogFreeze={isSiteAdmin || hasPermission("content.bypass_edit_freeze")} /></TabsContent>}
+          {(canSuspendUsers || canUnsuspendUsers || canViewIps || canMessageUsers || canModifyAccounts || canAssignRoles || canAssignCustomRoles) && <TabsContent value="users" className="mt-6"><UsersTab currentRole={currentRole} currentUserId={user.id} permissions={perms} canAssignRoles={canAssignRoles} canAssignCustomRoles={canAssignCustomRoles} assignableRoleIds={assignableRoleIds} isSiteAdmin={isSiteAdmin} /></TabsContent>}
           {canViewIpOverlap && <TabsContent value="ips" className="mt-6"><IpOverlapTab /></TabsContent>}
           {canAccessIpBans && <TabsContent value="ipbans" className="mt-6"><IpBansTab permissions={perms} currentRole={currentRole} /></TabsContent>}
-          {canAccessTrash && <TabsContent value="trash" className="mt-6"><TrashTab currentRole={currentRole} canRestore={hasPermission("content.restore")} canPurge={isSiteAdmin || perms.includes("content.purge")} /></TabsContent>}
+          {canAccessTrash && <TabsContent value="trash" className="mt-6"><TrashTab currentRole={currentRole} canRestore={hasPermission("content.restore")} canPurge={isSiteAdmin || perms.includes("content.purge")} isSiteAdmin={isSiteAdmin} /></TabsContent>}
           {canAccessCollections && <TabsContent value="collections" className="mt-6"><CollectionsTab canCreate={hasPermission("collections.create")} canUpdate={hasPermission("collections.update")} canDelete={hasPermission("collections.delete")} /></TabsContent>}
           {canManageCrewJobs && <TabsContent value="crew-jobs" className="mt-6"><CrewJobsTab createOnly={!isModerator} /></TabsContent>}
           {isSiteAdmin && <TabsContent value="homepage" className="mt-6"><HomepageTab /></TabsContent>}
           {isSiteAdmin && <TabsContent value="cineverse-bot" className="mt-6"><CineverseBotTab /></TabsContent>}
           {isSiteAdmin && <TabsContent value="image-cleanup" className="mt-6"><ImageCleanupTab /></TabsContent>}
+          {isSiteAdmin && <TabsContent value="image-migration" className="mt-6"><ImageMigrationTab /></TabsContent>}
           {isSiteAdmin && <TabsContent value="guidelines" className="mt-6"><ContributorGuidelinesTab /></TabsContent>}
           {isSiteAdmin && <TabsContent value="username-cooldown" className="mt-6"><UsernameCooldownTab /></TabsContent>}
           {canManageRoles && <TabsContent value="roles" className="mt-6"><RolesTab /></TabsContent>}
@@ -231,6 +226,8 @@ function CineverseBotTab() {
 function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = false }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsError, setItemsError] = useState("");
   const [editing, setEditing] = useState(null);
   const [mode, setMode] = useState("list"); // list | form
   const [tmdbOpen, setTmdbOpen] = useState(false);
@@ -251,10 +248,16 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
   const canBypassCatalogFreeze = canManageTMDB || (user?.permissions || []).includes("content.bypass_edit_freeze");
 
   const load = async () => {
-    const r = await api.get(endpoint, {
-      params: kind === "actor" ? { include_credit_status: true } : undefined,
-    });
-    setItems(r.data);
+    setItemsLoading(true);
+    setItemsError("");
+    try {
+      const response = await api.get(endpoint);
+      setItems(response.data);
+    } catch (error) {
+      setItemsError(error.response?.data?.detail || `Could not load ${label.toLowerCase()}s`);
+    } finally {
+      setItemsLoading(false);
+    }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [kind]);
   useEffect(() => {
@@ -296,17 +299,6 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
     if (!window.confirm(`Delete this ${label.toLowerCase()}?`)) return;
     try { await api.delete(`${endpoint}/${id}`); toast.success("Deleted"); load(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed to delete"); }
-  };
-
-  const deleteEmptyDuplicate = async (actor) => {
-    if (!window.confirm(`Delete duplicate actor page "${actor.name}"? It has no acting credits, and another page with the same name will remain.`)) return;
-    try {
-      await api.delete(`/actors/${actor.id}/empty-duplicate`);
-      toast.success("Duplicate actor page deleted");
-      load();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to delete duplicate actor page");
-    }
   };
 
   const onSaved = () => { setMode("list"); setEditing(null); load(); };
@@ -386,7 +378,7 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
   return (
     <Card className="bg-[#14181f] border-white/10 text-white">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>All {label}s ({items.length})</CardTitle>
+        <CardTitle>All {label}s ({itemsLoading ? "…" : itemsError ? "unavailable" : items.length})</CardTitle>
         <div className="flex items-center gap-2">
           {canUseTMDB && (
             <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -432,6 +424,15 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
         </div>
       </CardHeader>
       <CardContent>
+        {itemsError && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-500/30 bg-rose-500/5 p-3" role="alert">
+            <p className="text-sm text-rose-200">{itemsError}</p>
+            <Button type="button" variant="outline" onClick={load} className="border-white/20 text-white hover:bg-white/10">
+              <RefreshCw className="mr-2 h-4 w-4" /> Retry
+            </Button>
+          </div>
+        )}
+        {itemsLoading && items.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Loading {label.toLowerCase()}s…</p>}
         {tmdbOpen && (kind === "movie" || kind === "series") && (
           <div className="mb-5 rounded-md border border-white/10 bg-[#0d0f12] p-4" data-testid={`tmdb-import-panel-${kind}`}>
             <form onSubmit={searchTMDB} className="flex gap-2">
@@ -469,7 +470,7 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
             {!tmdbSearching && tmdbQuery.trim() && tmdbResults.length === 0 && <div className="mt-4 text-sm text-slate-400">No matches found.</div>}
           </div>
         )}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {!itemsLoading && !itemsError && <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {items.map((it) => (
             <div key={it.id} className="flex items-center gap-3 rounded-lg bg-[#0d0f12] border border-white/10 p-3" data-testid={`admin-${kind}-row-${it.id}`}>
               <div className={`${kind === "actor" ? "w-14 h-14 rounded-full" : "w-14 h-20 rounded"} bg-[#1e2430] overflow-hidden flex-shrink-0`}>
@@ -485,26 +486,13 @@ function EntityAdmin({ kind, contentEditsFrozen = false, canDeleteContent = fals
                 {it.is_trending && <Badge className="mt-1 bg-amber-500/15 text-amber-300 border-amber-500/40">Trending</Badge>}
               </div>
               <Button size="sm" variant="outline" onClick={() => { setEditing(it); setMode("form"); }} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="border-white/20 text-white hover:bg-white/10 hover:text-white" data-testid={`edit-${kind}-${it.id}`}><Edit className="w-4 h-4" /></Button>
-              {canDeleteContent && kind === "actor" && it.is_empty_duplicate ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => deleteEmptyDuplicate(it)}
-                  disabled={contentEditsFrozen && !canBypassCatalogFreeze}
-                  title="Delete same-name duplicate with no acting credits"
-                  aria-label={`Delete duplicate actor ${it.name}`}
-                  className="border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200"
-                  data-testid={`delete-empty-duplicate-actor-${it.id}`}
-                >
-                  <Trash2 className="mr-1.5 h-4 w-4" />Delete duplicate
-                </Button>
-              ) : canDeleteContent ? (
+              {canDeleteContent ? (
                 <Button size="sm" variant="ghost" onClick={() => del(it.id)} disabled={contentEditsFrozen && !canBypassCatalogFreeze} className="text-slate-400 hover:text-red-400 hover:bg-red-500/10" data-testid={`delete-${kind}-${it.id}`}><Trash2 className="w-4 h-4" /></Button>
               ) : null}
             </div>
           ))}
           {items.length === 0 && <div className="text-slate-500 text-sm col-span-2">No {label.toLowerCase()}s yet.</div>}
-        </div>
+        </div>}
       </CardContent>
     </Card>
   );
@@ -566,10 +554,11 @@ function CustomRolesMultiPicker({ all, value, onToggle, onClear, testid }) {
 }
 
 
-function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAssignCustomRoles = false, assignableRoleIds = [], isSiteAdmin = false }) {
+function UsersTab({ currentRole, currentUserId, permissions = [], canAssignRoles = false, canAssignCustomRoles = false, assignableRoleIds = [], isSiteAdmin = false }) {
   const [users, setUsers] = useState([]);
   const [customRoles, setCustomRoles] = useState([]);
   const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
   const [suspendTarget, setSuspendTarget] = useState(null);
   const [profileTarget, setProfileTarget] = useState(null);
   const [duration, setDuration] = useState("7");       // preset dropdown value
@@ -580,7 +569,6 @@ function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAs
   const [ipData, setIpData] = useState({});
   const [ipLoading, setIpLoading] = useState({});
   const [ipOpen, setIpOpen] = useState({});
-  const [removingAvatars, setRemovingAvatars] = useState(false);
   const canSuspendUsers = isSiteAdmin || permissions.includes("user.suspend");
   const canUnsuspendUsers = isSiteAdmin || permissions.includes("user.unsuspend");
   const canViewUserIps = isSiteAdmin || permissions.includes("user.view_ips");
@@ -588,10 +576,11 @@ function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAs
   const canModifyAccounts = isSiteAdmin || permissions.includes("user.account.modify");
 
   const load = async () => {
-    const [u, r] = await Promise.all([api.get("/moderation/users"), api.get("/roles")]);
+    const params = roleFilter === "all" ? {} : { role: roleFilter };
+    const [u, r] = await Promise.all([api.get("/moderation/users", { params }), api.get("/roles")]);
     setUsers(u.data); setCustomRoles(r.data);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [roleFilter]);
 
   const filtered = users.filter((u) => {
     const q = query.trim().toLowerCase();
@@ -702,19 +691,6 @@ function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAs
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to update profile"); }
   };
-  const removeAllProfilePictures = async () => {
-    if (!window.confirm("Remove profile pictures from all user accounts and clear their avatar images from comments, edits, threads, messages, and notifications? This cannot be undone.")) return;
-    setRemovingAvatars(true);
-    try {
-      const response = await api.post("/admin/users/remove-profile-pictures");
-      setUsers((current) => current.map((entry) => ({ ...entry, avatar_url: "" })));
-      toast.success(`Removed profile pictures from ${response.data.users_updated || 0} user account(s)`);
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Could not remove user profile pictures");
-    } finally {
-      setRemovingAvatars(false);
-    }
-  };
   const toggleCustomRole = (uid, u, crid) => {
     const current = (u.custom_role_ids || []).filter((id) => isSiteAdmin || assignableRoleIds.includes(id));
     const next = current.includes(crid) ? current.filter((x) => x !== crid) : [...current, crid];
@@ -725,11 +701,18 @@ function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAs
   return (
     <Card className="bg-[#14181f] border-white/10 text-white">
       <CardHeader className="flex flex-wrap flex-row items-center justify-between gap-3">
-        <CardTitle className="flex items-center gap-2"><Users className="w-5 h-5" /> All Users ({users.length})</CardTitle>
+        <CardTitle className="flex items-center gap-2"><Users className="w-5 h-5" /> {roleFilter === "admin" ? "Admins" : roleFilter === "moderator" ? "Moderators" : "All Users"} ({users.length})</CardTitle>
         <div className="flex flex-wrap items-center gap-2">
-          {isSiteAdmin && <Button size="sm" variant="outline" onClick={removeAllProfilePictures} disabled={removingAvatars} className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" data-testid="remove-all-user-profile-pictures">
-            <Trash2 className="mr-2 h-4 w-4" />{removingAvatars ? "Removing…" : "Remove all profile pictures"}
-          </Button>}
+          {isSiteAdmin && (
+            <Select value={roleFilter} onValueChange={setRoleFilter}>
+              <SelectTrigger className="w-[140px] bg-[#0d0f12] border-white/10 text-white" data-testid="users-role-filter"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-[#14181f] text-white border-white/10">
+                <SelectItem value="all">All users</SelectItem>
+                <SelectItem value="admin">Admins</SelectItem>
+                <SelectItem value="moderator">Moderators</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <Input placeholder="Search..." value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-xs bg-[#0d0f12] border-white/10 text-white" data-testid="users-search-input" />
         </div>
       </CardHeader>
@@ -780,7 +763,7 @@ function UsersTab({ currentRole, permissions = [], canAssignRoles = false, canAs
                   <Network className="w-4 h-4 mr-1" /> IPs
                   {ipOpen[u.id] ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
                 </Button>}
-                {canAssignRoles && u.role !== "admin" && (
+                {canAssignRoles && (u.role !== "admin" || (isSiteAdmin && u.id !== currentUserId)) && (
                   <Select value={u.role} onValueChange={(v) => setRole(u.id, v)}>
                     <SelectTrigger className="w-[140px] h-9 bg-[#0d0f12] border-white/10 text-white text-xs" data-testid={`role-select-${u.id}`}><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#14181f] text-white border-white/10">
@@ -1219,10 +1202,11 @@ function RolesTab() {
   );
 }
 
-function TrashTab({ currentRole, canRestore = false, canPurge = false }) {
+function TrashTab({ currentRole, canRestore = false, canPurge = false, isSiteAdmin = false }) {
   const [trash, setTrash] = useState({ movies: [], series: [], actors: [] });
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [purgingAll, setPurgingAll] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -1259,6 +1243,23 @@ function TrashTab({ currentRole, canRestore = false, canPurge = false }) {
       toast.error(e.response?.data?.detail || "Delete failed");
     }
     setBusyId(null);
+  };
+
+  const purgeAll = async () => {
+    if (!window.confirm(`Permanently delete all ${totalCount} items in Trash? This also removes their related reviews and cannot be undone.`)) return;
+    if (window.prompt('Type "DELETE ALL" to confirm permanent deletion:') !== "DELETE ALL") return;
+    setPurgingAll(true);
+    try {
+      const response = await api.post("/moderation/trash/purge-all");
+      const { purged = 0, failed = 0 } = response.data;
+      if (failed) toast.warning(`Permanently deleted ${purged} item${purged === 1 ? "" : "s"}; ${failed} failed`);
+      else toast.success(`Permanently deleted all ${purged} trashed item${purged === 1 ? "" : "s"}`);
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not permanently delete Trash contents");
+    } finally {
+      setPurgingAll(false);
+    }
   };
 
   const totalCount =
@@ -1336,6 +1337,18 @@ function TrashTab({ currentRole, canRestore = false, canPurge = false }) {
             ? "Restore or permanently delete deleted content."
             : canRestore ? "Restore deleted content." : "View deleted content."}
         </div>
+        {isSiteAdmin && totalCount > 0 && (
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={purgeAll}
+            disabled={loading || purgingAll || busyId !== null}
+            data-testid="trash-purge-all"
+          >
+            <Trash className="h-4 w-4" />
+            {purgingAll ? "Deleting all…" : "Delete all permanently"}
+          </Button>
+        )}
       </CardHeader>
       <CardContent>
         {loading ? (

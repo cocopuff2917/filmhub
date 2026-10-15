@@ -26,7 +26,7 @@ from collections import Counter
 from io import BytesIO
 from html import escape
 from html.parser import HTMLParser
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Annotated
 
@@ -174,12 +174,12 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     resp.raise_for_status()
     return resp.json()
 
-def _get_from_emergent(path: str):
+def _get_from_emergent(path: str, ignore_fallback: bool = False):
     """Fallback reader that pulls from legacy Emergent Object Storage. Used
     when STORAGE_PROVIDER=aws but a legacy object only exists in the Emergent
     bucket (zero-downtime migration). Disabled when
     EMERGENT_FALLBACK_ENABLED=false (set after full migration to S3)."""
-    if not emergent_fallback_enabled():
+    if not ignore_fallback and not emergent_fallback_enabled():
         return None
     key = init_storage()
     if not key:
@@ -371,6 +371,21 @@ def can_delete_account_again(user: dict) -> bool:
         return False
     return datetime.now(timezone.utc) - deleted_time >= ACCOUNT_RECOVERY_WINDOW
 
+async def _close_suspension_appeal_threads(user_id: str, reason: str) -> None:
+    await db.threads.update_many(
+        {
+            "is_suspension_notice": True,
+            "target_user_id": str(user_id),
+            "status": {"$ne": "closed"},
+        },
+        {"$set": {
+            "status": "closed",
+            "closure_reason": reason,
+            "status_changed_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+
 async def get_current_user_allow_suspended(request: Request) -> dict:
     token = request.cookies.get("access_token")
     if not token:
@@ -401,6 +416,7 @@ async def get_current_user_allow_suspended(request: Request) -> dict:
                         is_suspended = True
                     else:
                         await db.users.update_one({"_id": user["_id"]}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
+                        await _close_suspension_appeal_threads(str(user["_id"]), "expired")
                         user.pop("suspended_until", None)
                         user.pop("suspension_reason", None)
                 except Exception:
@@ -1303,6 +1319,72 @@ async def enrich_series(doc, deep: bool = True):
             doc[listf] = [doc[primary]] if doc.get(primary) else []
     return doc
 
+
+async def _card_rating_map(entity_field: str, entity_ids: list[str]) -> dict:
+    if not entity_ids:
+        return {}
+    rows = await db.reviews.aggregate([
+        {"$match": {entity_field: {"$in": entity_ids}}},
+        {"$group": {
+            "_id": f"${entity_field}",
+            "avg": {"$avg": "$rating"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(len(entity_ids))
+    return {
+        row["_id"]: {
+            "avg_rating": round(row["avg"], 1),
+            "rating_count": row["count"],
+        }
+        for row in rows
+    }
+
+
+async def _movie_card_summaries(docs: list[dict]) -> list[dict]:
+    entity_ids = [str(doc["_id"]) for doc in docs]
+    ratings = await _card_rating_map("movie_id", entity_ids)
+    summaries = []
+    for doc in docs:
+        movie_id = str(doc["_id"])
+        rating = ratings.get(movie_id, {})
+        poster_urls = doc.get("poster_urls") or ([doc["poster_url"]] if doc.get("poster_url") else [])
+        summaries.append({
+            "id": movie_id,
+            "title": doc.get("title", ""),
+            "poster_url": doc.get("poster_url", ""),
+            "poster_urls": poster_urls,
+            "release_date": doc.get("release_date", ""),
+            "genres": doc.get("genres") or [],
+            "avg_rating": rating.get("avg_rating"),
+            "rating_count": rating.get("rating_count", 0),
+        })
+    return summaries
+
+
+async def _series_card_summaries(docs: list[dict], upcoming_by_id: Optional[dict] = None) -> list[dict]:
+    entity_ids = [str(doc["_id"]) for doc in docs]
+    ratings = await _card_rating_map("series_id", entity_ids)
+    upcoming_by_id = upcoming_by_id or {}
+    summaries = []
+    for doc in docs:
+        series_id = str(doc["_id"])
+        rating = ratings.get(series_id, {})
+        summary = {
+            "id": series_id,
+            "title": doc.get("title", ""),
+            "poster_url": doc.get("poster_url", ""),
+            "poster_urls": doc.get("poster_urls") or ([doc["poster_url"]] if doc.get("poster_url") else []),
+            "first_air_date": doc.get("first_air_date", ""),
+            "last_air_date": doc.get("last_air_date", ""),
+            "season_count": doc.get("season_count", len(doc.get("seasons") or [])),
+            "avg_rating": rating.get("avg_rating"),
+            "rating_count": rating.get("rating_count", 0),
+        }
+        if series_id in upcoming_by_id:
+            summary["next_episode"] = upcoming_by_id[series_id]
+        summaries.append(summary)
+    return summaries
+
 # ----------- Edit Log Helper -----------
 def _summarize_value(v):
     if v is None:
@@ -1867,7 +1949,7 @@ async def update_profile(payload: ProfileUpdate, user: dict = Depends(get_curren
 async def delete_account(
     payload: AccountDeleteRequest,
     response: Response,
-    user: dict = Depends(get_current_user_allow_suspended),
+    user: dict = Depends(get_current_user),
 ):
     stored_user = await db.users.find_one({"_id": ObjectId(user["id"])})
     if not stored_user or not verify_password(payload.current_password, stored_user.get("password_hash", "")):
@@ -2122,6 +2204,9 @@ async def get_user_profile(user_id: str, viewer: Optional[dict] = Depends(get_op
     viewer_is_mod = bool(viewer and viewer.get("effective_role") in ("moderator", "admin"))
     viewer_is_admin = bool(viewer and viewer.get("effective_role") == "admin")
     viewer_is_self = bool(viewer and viewer.get("id") == str(u["_id"]))
+
+    if active_sus and viewer_is_self:
+        raise HTTPException(status_code=404, detail="User not found")
 
     if u.get("deleted_at"):
         if not viewer_is_admin:
@@ -3231,15 +3316,19 @@ async def get_user_ips(user_id: str, mod: dict = Depends(get_current_user)):
     return {"user_id": user_id, "user_name": target.get("name"), "ips": result}
 
 @api_router.get("/moderation/users")
-async def list_all_users(mod: dict = Depends(get_current_user), limit: int = 200, q: Optional[str] = None):
+async def list_all_users(mod: dict = Depends(get_current_user), limit: int = 200, q: Optional[str] = None, role: Optional[str] = None):
     user_list_permissions = (
         "user.suspend", "user.unsuspend", "user.message", "user.view_ips",
         "user.account.modify", "user.assign_role", "user.assign_custom_role",
     )
     if mod.get("effective_role") not in ("moderator", "admin") and not any(_has_perm(mod, perm) for perm in user_list_permissions):
         raise HTTPException(status_code=403, detail="You don't have permission to view users.")
+    if role is not None and role not in ("user", "moderator", "admin"):
+        raise HTTPException(status_code=400, detail="Invalid role")
     users = []
     user_query = {}
+    if role:
+        user_query["role"] = role
     if q and q.strip():
         query = re.escape(q.strip())
         user_query["$or"] = [
@@ -4394,17 +4483,20 @@ async def _tmdb_actor_id(person: dict, user: dict) -> Optional[str]:
     if not name:
         return None
     tmdb_person_id = person.get("id")
-    existing = await db.actors.find_one(_alive({"tmdb_id": tmdb_person_id})) if tmdb_person_id else None
+    existing = await db.actors.find_one(_alive({"tmdb_id": tmdb_person_id})) if tmdb_person_id is not None else None
     if existing:
         return str(existing["_id"])
     named_matches = await db.actors.find(
-        _alive({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
-    ).to_list(2)
-    if not tmdb_person_id and named_matches:
-        return str(named_matches[0]["_id"])
-    if tmdb_person_id and len(named_matches) == 1 and not named_matches[0].get("tmdb_id"):
-        update = {"tmdb_id": tmdb_person_id}
-        await db.actors.update_one({"_id": named_matches[0]["_id"]}, {"$set": update})
+        _alive({"name": {"$regex": f"^\\s*{re.escape(name)}\\s*$", "$options": "i"}})
+    ).to_list(10)
+    if named_matches:
+        unlinked_match = next((actor for actor in named_matches if not actor.get("tmdb_id")), None)
+        if tmdb_person_id is not None and unlinked_match:
+            await db.actors.update_one(
+                {"_id": unlinked_match["_id"], "tmdb_id": unlinked_match.get("tmdb_id")},
+                {"$set": {"tmdb_id": tmdb_person_id}},
+            )
+            return str(unlinked_match["_id"])
         return str(named_matches[0]["_id"])
     actor = {
         "name": name,
@@ -4536,6 +4628,68 @@ async def _backfill_tmdb_actor_details(bot: dict, limit: int = 25, force: bool =
             unmatched += 1
 
     return {"checked": checked, "updated": updated, "unmatched": unmatched, "errors": errors}
+
+
+def _is_tmdb_actor_photo_url(value: Optional[str]) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme.lower() in ("http", "https") and parsed.hostname == "image.tmdb.org"
+
+
+async def _remove_tmdb_actor_photos(bot: dict, limit: int = 25) -> dict:
+    tmdb_photo_pattern = r"^https?://image\.tmdb\.org/"
+    cursor = db.actors.find(_alive({"$or": [
+        {"photo_url": {"$regex": tmdb_photo_pattern, "$options": "i"}},
+        {"gallery": {"$regex": tmdb_photo_pattern, "$options": "i"}},
+    ]})).sort("_id", 1).limit(limit)
+    checked = updated = removed_photos = removed_gallery_images = errors = 0
+    async for actor in cursor:
+        checked += 1
+        photo_url = actor.get("photo_url") or ""
+        gallery = [image for image in actor.get("gallery") or [] if isinstance(image, str) and image]
+        kept_gallery = [image for image in gallery if not _is_tmdb_actor_photo_url(image)]
+        photo_removed = _is_tmdb_actor_photo_url(photo_url)
+        gallery_removed = len(gallery) - len(kept_gallery)
+        if not photo_removed and not gallery_removed:
+            continue
+        updated_photo = next(iter(kept_gallery), "") if photo_removed or not photo_url else photo_url
+        query = {"_id": actor["_id"], "photo_url": actor.get("photo_url")}
+        if "gallery" in actor:
+            query["gallery"] = actor.get("gallery")
+        try:
+            result = await db.actors.update_one(
+                query,
+                {"$set": {
+                    "photo_url": updated_photo,
+                    "gallery": kept_gallery,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+            if not result.modified_count:
+                continue
+            updated += 1
+            removed_photos += int(photo_removed)
+            removed_gallery_images += gallery_removed
+            await log_edit(
+                bot,
+                "actor",
+                str(actor["_id"]),
+                "update",
+                actor.get("name") or "",
+                "Cineverse BOT removed TMDB-hosted actor photos",
+                compute_field_changes(actor, {"photo_url": updated_photo, "gallery": kept_gallery}),
+            )
+        except Exception as error:
+            errors += 1
+            logger.warning("Cineverse BOT could not remove TMDB actor photos for %s: %s", actor.get("_id"), type(error).__name__)
+    return {
+        "checked": checked,
+        "updated": updated,
+        "removed_photos": removed_photos,
+        "removed_gallery_images": removed_gallery_images,
+        "errors": errors,
+    }
 
 async def _watchmode_request(path: str, params: Optional[dict] = None):
     api_key = (os.environ.get("WATCHMODE_API_KEY") or "").strip()
@@ -4788,6 +4942,94 @@ class BrokenImageCleanupRequest(BaseModel):
 
 class BrokenImageRepairRequest(BaseModel):
     items: List[BrokenImageCandidate] = Field(default_factory=list, max_length=300)
+
+
+def _s3_key_from_image_reference(value: str) -> Optional[str]:
+    value = (value or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc:
+        marker = "/api/files/"
+        if marker not in parsed.path:
+            return None
+        value = parsed.path.split(marker, 1)[1]
+    elif value.startswith("/api/files/"):
+        value = value[len("/api/files/"):]
+    elif value.startswith("api/files/"):
+        value = value[len("api/files/"):]
+    value = unquote(value).lstrip("/")
+    if not value.startswith(f"{APP_NAME}/") or ".." in value.split("/"):
+        return None
+    return value
+
+
+@api_router.post("/admin/images/cleanup/restore-from-s3")
+async def restore_thumbnails_from_s3(payload: BrokenImageCleanupRequest, admin: dict = Depends(get_current_admin)):
+    if STORAGE_PROVIDER != "aws" or not S3_BUCKET:
+        raise HTTPException(status_code=400, detail="AWS S3 storage is not configured")
+
+    rebuilt = missing_in_s3 = invalid_image = conflicted = skipped = 0
+    for item in payload.items:
+        if item.kind not in IMAGE_CLEANUP_FIELDS or item.field not in IMAGE_CLEANUP_FIELDS[item.kind]:
+            raise HTTPException(status_code=400, detail="Unsupported image reference")
+        try:
+            object_id = ObjectId(item.id)
+        except Exception:
+            conflicted += 1
+            continue
+
+        collection = getattr(db, item.kind)
+        query = {"_id": object_id, item.field: item.url}
+        if item.kind == "users":
+            query["deleted_at"] = {"$exists": False}
+        else:
+            query = _alive(query)
+        doc = await collection.find_one(query, {item.field: 1})
+        if not doc:
+            conflicted += 1
+            continue
+        current_value = doc.get(item.field)
+        if isinstance(current_value, list):
+            is_current = item.url in current_value
+        else:
+            is_current = current_value == item.url
+        if not is_current:
+            conflicted += 1
+            continue
+
+        path = _s3_key_from_image_reference(item.url)
+        if not path:
+            skipped += 1
+            continue
+        try:
+            response = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=path)
+            source_bytes = response["Body"].read()
+            with Image.open(BytesIO(source_bytes)) as source:
+                source.verify()
+            thumbnail, thumbnail_type = _image_variant(source_bytes, "thumbnail")
+            jpeg, jpeg_type = _image_variant(source_bytes, "jpeg")
+        except Exception as error:
+            error_response = getattr(error, "response", {}) or {}
+            status = error_response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            code = error_response.get("Error", {}).get("Code")
+            if status == 404 or code in ("404", "NoSuchKey", "NotFound"):
+                missing_in_s3 += 1
+            else:
+                invalid_image += 1
+            continue
+
+        _thumb_cache_write(path, "thumbnail", thumbnail, thumbnail_type)
+        _thumb_cache_write(path, "jpeg", jpeg, jpeg_type)
+        rebuilt += 1
+
+    return {
+        "rebuilt": rebuilt,
+        "missing_in_s3": missing_in_s3,
+        "invalid_image": invalid_image,
+        "conflicted": conflicted,
+        "skipped": skipped,
+    }
 
 
 @api_router.get("/admin/images/cleanup/references")
@@ -6055,9 +6297,6 @@ async def create_movie(payload: MovieCreate, user: dict = Depends(get_current_us
     await _ensure_content_edits_allowed(user)
     doc = payload.model_dump()
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
-    can_edit_imdb_id = is_mod or _has_perm(user, "content.edit_imdb_id")
-    if doc.get("imdb_id") and not can_edit_imdb_id:
-        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a movie's IMDb ID")
     if is_mod and not doc.get("imdb_id"):
         raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a movie")
     await _assert_unique_imdb_id(doc["imdb_id"])
@@ -6175,15 +6414,18 @@ async def update_movie_keyword(keyword: str, payload: KeywordCategoryUpdate, use
 
 @api_router.get("/movies/trending")
 async def trending_movies(limit: int = 12):
-    cursor = db.movies.find(_alive({"is_trending": True})).limit(limit)
+    projection = {"title": 1, "poster_url": 1, "poster_urls": 1, "release_date": 1, "genres": 1}
     docs = []
-    async for d in cursor:
-        docs.append(await enrich_movie(d))
+    async for d in db.movies.find(_alive({"is_trending": True}), projection).limit(limit):
+        docs.append(d)
+    fallback = False
     if not docs:
         # fallback: top rated
-        all_cursor = db.movies.find(_alive()).limit(30)
-        async for d in all_cursor:
-            docs.append(await enrich_movie(d))
+        async for d in db.movies.find(_alive(), projection).limit(30):
+            docs.append(d)
+        fallback = True
+    docs = await _movie_card_summaries(docs)
+    if fallback:
         docs.sort(key=lambda x: (x.get("avg_rating") or 0), reverse=True)
         docs = docs[:limit]
     return docs
@@ -6191,20 +6433,16 @@ async def trending_movies(limit: int = 12):
 @api_router.get("/movies/recent")
 async def recent_movies(limit: int = 12):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cursor = db.movies.find(_alive({"release_date": {"$lte": today}})).sort("created_at", -1).limit(limit)
-    docs = []
-    async for d in cursor:
-        docs.append(await enrich_movie(d))
-    return docs
+    projection = {"title": 1, "poster_url": 1, "poster_urls": 1, "release_date": 1, "genres": 1}
+    docs = [d async for d in db.movies.find(_alive({"release_date": {"$lte": today}}), projection).sort("created_at", -1).limit(limit)]
+    return await _movie_card_summaries(docs)
 
 @api_router.get("/movies/upcoming")
 async def upcoming_movies(limit: int = 12):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cursor = db.movies.find(_alive({"release_date": {"$gt": today}})).sort("release_date", 1).limit(limit)
-    docs = []
-    async for d in cursor:
-        docs.append(await enrich_movie(d))
-    return docs
+    projection = {"title": 1, "poster_url": 1, "poster_urls": 1, "release_date": 1, "genres": 1}
+    docs = [d async for d in db.movies.find(_alive({"release_date": {"$gt": today}}), projection).sort("release_date", 1).limit(limit)]
+    return await _movie_card_summaries(docs)
 
 @api_router.get("/movies/{movie_id}")
 async def get_movie(movie_id: str, viewer: Optional[dict] = Depends(get_optional_user)):
@@ -6725,9 +6963,6 @@ async def create_series(payload: SeriesCreate, user: dict = Depends(get_current_
     doc = _serialize_series_payload(payload.model_dump())
     doc["purchase_options"] = _normalize_purchase_options(doc.get("purchase_options", []))
     is_mod = user.get("role") in ("moderator", "admin") or user.get("effective_role") in ("moderator", "admin")
-    can_edit_imdb_id = is_mod or _has_perm(user, "content.edit_imdb_id")
-    if doc.get("imdb_id") and not can_edit_imdb_id:
-        raise HTTPException(status_code=403, detail="Only administrators and moderators can add a TV series' IMDb ID")
     if is_mod and not doc.get("imdb_id"):
         raise HTTPException(status_code=422, detail="An IMDb ID is required when adding a TV series")
     await _assert_unique_imdb_id(doc["imdb_id"])
@@ -6861,27 +7096,42 @@ async def update_series_network(network: str, payload: NetworkCategoryUpdate, us
 
 @api_router.get("/series/trending")
 async def trending_series(limit: int = 12):
+    projection = {"title": 1, "poster_url": 1, "poster_urls": 1, "first_air_date": 1, "last_air_date": 1, "season_count": 1, "seasons.season_number": 1}
     docs = []
-    async for d in db.series.find(_alive({"is_trending": True})).limit(limit):
-        docs.append(await enrich_series(d, deep=False))
+    async for d in db.series.find(_alive({"is_trending": True}), projection).limit(limit):
+        docs.append(d)
     if not docs:
-        async for d in db.series.find(_alive()).sort("created_at", -1).limit(limit):
-            docs.append(await enrich_series(d, deep=False))
-    return docs
+        async for d in db.series.find(_alive(), projection).sort("created_at", -1).limit(limit):
+            docs.append(d)
+    return await _series_card_summaries(docs)
 
 @api_router.get("/series/recent")
 async def recent_series(limit: int = 12):
-    docs = []
-    async for d in db.series.find(_alive()).sort("created_at", -1).limit(limit):
-        docs.append(await enrich_series(d, deep=False))
-    return docs
+    projection = {"title": 1, "poster_url": 1, "poster_urls": 1, "first_air_date": 1, "last_air_date": 1, "season_count": 1, "seasons.season_number": 1}
+    docs = [d async for d in db.series.find(_alive(), projection).sort("created_at", -1).limit(limit)]
+    return await _series_card_summaries(docs)
 
 @api_router.get("/series/upcoming-episodes")
 async def upcoming_episodes(limit: int = 12):
     """Return series that have at least one future-dated episode, with the next upcoming episode preview."""
     today = datetime.now(timezone.utc).date().isoformat()
-    results = []
-    async for d in db.series.find(_alive()):
+    candidates = []
+    query = _alive({"seasons.episodes.air_date": {"$gte": today}})
+    projection = {
+        "title": 1,
+        "poster_url": 1,
+        "poster_urls": 1,
+        "first_air_date": 1,
+        "last_air_date": 1,
+        "season_count": 1,
+        "seasons.season_number": 1,
+        "seasons.episodes.episode_number": 1,
+        "seasons.episodes.name": 1,
+        "seasons.episodes.air_date": 1,
+        "seasons.episodes.still_url": 1,
+        "seasons.episodes.synopsis": 1,
+    }
+    async for d in db.series.find(query, projection):
         next_ep = None
         for sn in (d.get("seasons") or []):
             for ep in (sn.get("episodes") or []):
@@ -6899,11 +7149,11 @@ async def upcoming_episodes(limit: int = 12):
                 if next_ep is None or candidate["air_date"] < next_ep["air_date"]:
                     next_ep = candidate
         if next_ep:
-            enriched = await enrich_series(d, deep=False)
-            enriched["next_episode"] = next_ep
-            results.append(enriched)
-    results.sort(key=lambda x: x["next_episode"]["air_date"])
-    return results[:limit]
+            candidates.append((next_ep["air_date"], d, next_ep))
+    candidates.sort(key=lambda item: item[0])
+    selected = candidates[:limit]
+    upcoming_by_id = {str(doc["_id"]): episode for _, doc, episode in selected}
+    return await _series_card_summaries([doc for _, doc, _ in selected], upcoming_by_id)
 
 @api_router.get("/series/top-rated")
 async def top_rated_series(limit: int = 12):
@@ -7666,6 +7916,22 @@ async def _actor_ids_with_acting_credits(actor_ids: set[str]) -> set[str]:
     return credited_ids
 
 
+async def _actor_ids_with_catalog_credits(actor_ids: set[str]) -> set[str]:
+    credited_ids = await _actor_ids_with_acting_credits(actor_ids)
+    if not actor_ids:
+        return credited_ids
+    async for movie in db.movies.find(
+        _alive({"crew.actor_id": {"$in": list(actor_ids)}}),
+        {"crew.actor_id": 1},
+    ):
+        credited_ids.update(
+            member.get("actor_id")
+            for member in movie.get("crew", []) or []
+            if member.get("actor_id") in actor_ids
+        )
+    return credited_ids
+
+
 @api_router.get("/actors")
 async def list_actors(
     q: Optional[str] = None,
@@ -7683,7 +7949,7 @@ async def list_actors(
     if include_credit_status:
         _require_perm(viewer, "admin.actors.access", "You don't have permission to inspect actor credits.")
         actor_ids = {actor["id"] for actor in actors}
-        credited_ids = await _actor_ids_with_acting_credits(actor_ids)
+        credited_ids = await _actor_ids_with_catalog_credits(actor_ids)
         name_counts = {}
         for actor in actors:
             normalized_name = (actor.get("name") or "").strip().casefold()
@@ -7948,8 +8214,8 @@ async def delete_empty_duplicate_actor(actor_id: str, user: dict = Depends(get_c
         raise HTTPException(status_code=404, detail="Actor not found")
     if actor.get("deleted"):
         return {"ok": True, "already_deleted": True}
-    if await _actor_ids_with_acting_credits({actor_id}):
-        raise HTTPException(status_code=409, detail="Actor pages with acting credits cannot be deleted with this action.")
+    if await _actor_ids_with_catalog_credits({actor_id}):
+        raise HTTPException(status_code=409, detail="Actor pages with catalog credits cannot be deleted with this action.")
     name = (actor.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=409, detail="A duplicate actor page with the same name was not found.")
@@ -7970,6 +8236,53 @@ async def delete_empty_duplicate_actor(actor_id: str, user: dict = Depends(get_c
     )
     await log_edit(user, "actor", actor_id, "delete", name, f"Deleted duplicate actor page without acting credits \"{name}\"")
     return {"ok": True}
+
+
+@api_router.post("/admin/actors/delete-empty-duplicates")
+async def delete_empty_duplicate_actors(user: dict = Depends(get_current_user)):
+    """Soft-delete redundant same-name actor pages that have no acting credits."""
+    _require_perm(user, "admin.actors.access", "You don't have permission to inspect actors.")
+    _require_perm(user, "content.delete", "You don't have permission to delete content.")
+    await _ensure_content_edits_allowed(user)
+    actors = [
+        actor async for actor in db.actors.find(_alive({}), {"name": 1})
+        if (actor.get("name") or "").strip()
+    ]
+    groups = {}
+    for actor in actors:
+        normalized_name = actor["name"].strip().casefold()
+        groups.setdefault(normalized_name, []).append(actor)
+    duplicate_groups = [group for group in groups.values() if len(group) > 1]
+    candidate_ids = {str(actor["_id"]) for group in duplicate_groups for actor in group}
+    credited_ids = await _actor_ids_with_catalog_credits(candidate_ids)
+
+    duplicates = []
+    for group in duplicate_groups:
+        credited = [actor for actor in group if str(actor["_id"]) in credited_ids]
+        uncredited = [actor for actor in group if str(actor["_id"]) not in credited_ids]
+        if credited:
+            duplicates.extend(uncredited)
+        else:
+            duplicates.extend(sorted(uncredited, key=lambda actor: actor["_id"])[1:])
+
+    deleted = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for actor in duplicates:
+        actor_id = str(actor["_id"])
+        result = await db.actors.update_one(
+            {"_id": actor["_id"], "deleted": {"$ne": True}},
+            {"$set": {
+                "deleted": True,
+                "deleted_at": now,
+                "deleted_by": user["id"],
+                "deleted_by_name": user.get("name"),
+            }},
+        )
+        if result.modified_count:
+            deleted += 1
+            name = actor["name"].strip()
+            await log_edit(user, "actor", actor_id, "delete", name, f"Deleted uncredited duplicate actor page \"{name}\"")
+    return {"ok": True, "duplicate_groups": len(duplicate_groups), "deleted": deleted}
 
 # ----------- Trash / Restore (Moderator) -----------
 def _serialize_deleted(kind: str, d: dict) -> dict:
@@ -8016,6 +8329,20 @@ async def restore_entity(kind: str, entity_id: str, mod: dict = Depends(get_curr
     label = doc.get("title") or doc.get("name") or ""
     await log_edit(mod, kind, entity_id, "restore", label, f"Restored {kind} \"{label}\"")
     return {"ok": True}
+
+@api_router.post("/moderation/trash/purge-all")
+async def purge_all_trash(admin: dict = Depends(get_current_admin)):
+    purged = {"movie": 0, "series": 0, "actor": 0}
+    failed = 0
+    for kind, collection in (("movie", db.movies), ("series", db.series), ("actor", db.actors)):
+        async for doc in collection.find({"deleted": True}, {"_id": 1}):
+            try:
+                await purge_entity(kind, str(doc["_id"]), admin)
+                purged[kind] += 1
+            except Exception as error:
+                failed += 1
+                logger.warning("Bulk trash purge failed for %s/%s: %s", kind, doc.get("_id"), type(error).__name__)
+    return {"purged": sum(purged.values()), "by_kind": purged, "failed": failed}
 
 @api_router.delete("/moderation/{kind}/{entity_id}/purge")
 async def purge_entity(kind: str, entity_id: str, admin: dict = Depends(get_current_user)):
@@ -8650,7 +8977,7 @@ async def _migrate_emergent_to_s3(limit: int, overwrite: bool):
         try:
             if not overwrite and _s3_has_key(path):
                 return "skipped"
-            fetched = _get_from_emergent(path)
+            fetched = _get_from_emergent(path, ignore_fallback=True)
             if fetched is None:
                 return "missing"
             data, content_type = fetched
@@ -8706,7 +9033,29 @@ async def admin_migrate_emergent_to_s3(payload: MigrateToS3Request, _admin: dict
 @api_router.get("/admin/images/migrate-to-s3/status")
 async def admin_migrate_status(_admin: dict = Depends(get_current_admin)):
     """Admin: current migration progress."""
-    return _migration_state
+    return {
+        **_migration_state,
+        "storage_provider": STORAGE_PROVIDER,
+        "s3_bucket": S3_BUCKET,
+        "fallback_enabled": await asyncio.to_thread(emergent_fallback_enabled),
+        "legacy_source_available": bool(EMERGENT_KEY),
+    }
+
+class EmergentFallbackRequest(BaseModel):
+    enabled: bool
+
+@api_router.put("/admin/images/migrate-to-s3/fallback")
+async def admin_set_emergent_fallback(payload: EmergentFallbackRequest, _admin: dict = Depends(get_current_admin)):
+    """Admin: persist whether image reads may fall back to legacy storage."""
+    await db.site_config.update_one(
+        {"_id": EMERGENT_FALLBACK_SETTING_ID},
+        {"$set": {
+            "emergent_fallback_enabled": payload.enabled,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"enabled": payload.enabled}
 
 
 
@@ -9210,6 +9559,25 @@ def _thumb_cache_write(path: str, image_format: str, data: bytes, content_type: 
     except Exception:
         pass
 
+
+def _image_variant(data: bytes, image_format: str) -> tuple[bytes, str]:
+    with Image.open(BytesIO(data)) as source:
+        image = ImageOps.exif_transpose(source)
+        if image_format == "thumbnail":
+            image.thumbnail((640, 960), Image.Resampling.LANCZOS)
+        if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+            rgba = image.convert("RGBA")
+            converted = Image.new("RGB", rgba.size, "white")
+            converted.paste(rgba, mask=rgba.getchannel("A"))
+        else:
+            converted = image.convert("RGB")
+        output = BytesIO()
+        if image_format == "thumbnail":
+            converted.save(output, format="WEBP", quality=78, method=4)
+            return output.getvalue(), "image/webp"
+        converted.save(output, format="JPEG", quality=88, optimize=True)
+        return output.getvalue(), "image/jpeg"
+
 @api_router.get("/files/{path:path}")
 def download_file(path: str, image_format: Optional[str] = Query(default=None, alias="format")):
     # Fast path: serve pre-generated thumbnail from disk cache
@@ -9231,24 +9599,7 @@ def download_file(path: str, image_format: Optional[str] = Query(default=None, a
         raise HTTPException(status_code=404, detail="File not found")
     if image_format in ("jpeg", "thumbnail"):
         try:
-            with Image.open(BytesIO(data)) as source:
-                image = ImageOps.exif_transpose(source)
-                if image_format == "thumbnail":
-                    image.thumbnail((640, 960), Image.Resampling.LANCZOS)
-                if image.mode in ("RGBA", "LA") or "transparency" in image.info:
-                    rgba = image.convert("RGBA")
-                    converted = Image.new("RGB", rgba.size, "white")
-                    converted.paste(rgba, mask=rgba.getchannel("A"))
-                else:
-                    converted = image.convert("RGB")
-                output = BytesIO()
-                if image_format == "thumbnail":
-                    converted.save(output, format="WEBP", quality=78, method=4)
-                    media_type = "image/webp"
-                else:
-                    converted.save(output, format="JPEG", quality=88, optimize=True)
-                    media_type = "image/jpeg"
-            payload = output.getvalue()
+            payload, media_type = _image_variant(data, image_format)
             _thumb_cache_write(path, image_format, payload, media_type)
             return FastAPIResponse(
                 content=payload,
